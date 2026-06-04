@@ -16,3 +16,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "ollama: optional local Ollama e2e demo",
+]

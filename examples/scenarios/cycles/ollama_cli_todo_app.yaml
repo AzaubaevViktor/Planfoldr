@@ -1,0 +1,135 @@
+id: ollama_cli_todo_app
+goal: Generate and verify a Python CLI todo-list project.
+entrypoint: setup_repo
+
+budgets:
+  max_iterations: 8
+  max_tool_calls: 8
+  max_model_calls: 3
+  max_cpu_time: 30
+
+tasks:
+  - id: setup_repo
+    type: command
+    task: Create a generated git repository.
+    executor:
+      kind: command
+      command: git init {{ inputs.repository_path }}
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: generate_project
+    type: model
+    task: Generate the CLI todo project files.
+    executor:
+      kind: model
+      model:
+        provider: ollama
+        name: llama3.1
+      prompt:
+        id: ollama_generate_cli_todo
+        file: ../../prompts/ollama_generate_cli_todo.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+        - files
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+        files:
+          type: array
+  - id: create_files
+    type: tool
+    task: Materialize generated files.
+    executor:
+      kind: tool
+      tool: write_files
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: run_tests
+    type: verify
+    task: Run generated project tests.
+    executor:
+      kind: command
+      command: python3 -m pytest
+      cwd: "{{ inputs.repository_path }}"
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: repair_project
+    type: model
+    task: Repair generated files after a failing test run.
+    executor:
+      kind: model
+      model:
+        provider: ollama
+        name: llama3.1
+      prompt:
+        id: ollama_repair_cli_todo
+        file: ../../prompts/ollama_repair_cli_todo.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+        - files
+  - id: apply_repair
+    type: tool
+    task: Apply repaired files.
+    executor:
+      kind: tool
+      tool: write_files
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+
+links:
+  setup_repo:
+    success: generate_project
+    failure: fail
+    need_permission: fail
+  generate_project:
+    success: create_files
+    failure: fail
+    retry_exceeded: fail
+    budget_exceeded: fail
+  create_files:
+    success: run_tests
+    failure: fail
+    need_permission: fail
+  run_tests:
+    success: success
+    failure: repair_project
+    budget_exceeded: fail
+    need_permission: fail
+  repair_project:
+    success: apply_repair
+    failure: fail
+    retry_exceeded: fail
+    budget_exceeded: fail
+  apply_repair:
+    success: run_tests
+    failure: fail
+    need_permission: fail
+
+nested_cycles: []

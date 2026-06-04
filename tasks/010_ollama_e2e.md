@@ -55,3 +55,12 @@ This is the MVP demo. It may be slower and less deterministic than stub tests, b
 ## Done
 
 A developer with Ollama installed can run the demo scenario and inspect the generated HTML report.
+
+## Implementation Notes
+
+- Ollama demo scenario lives in `examples/scenarios/ollama_cli_todo_app.yaml`.
+- Demo prompts live in `examples/prompts/ollama_generate_cli_todo.md` and `examples/prompts/ollama_repair_cli_todo.md`.
+- The cycle sets up a separate git repository, asks Ollama for files, materializes them through `write_files`, runs tests and enters a bounded repair loop on failure.
+- `ExecutorRegistry` can materialize the latest model output containing `files` through the constrained `write_files` tool.
+- Optional test coverage lives in `tests/test_ollama_e2e.py` and is skipped unless `PLANFOLDR_RUN_OLLAMA_E2E=1`; it also skips when Ollama is unavailable.
+- Local run command: `PLANFOLDR_RUN_OLLAMA_E2E=1 python -m pytest tests/test_ollama_e2e.py`.

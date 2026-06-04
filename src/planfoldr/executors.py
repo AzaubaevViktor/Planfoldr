@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import urllib.error
@@ -155,6 +156,7 @@ class ExecutorRegistry:
     task_inputs: Mapping[str, Dict[str, Any]] = field(default_factory=dict)
     prompt_variables: Mapping[str, Any] = field(default_factory=dict)
     invalid_output_retries: int = 0
+    task_outputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __call__(self, task: Task) -> TaskResult:
         before = self.budget_tracker.snapshot()
@@ -173,14 +175,15 @@ class ExecutorRegistry:
             result = need_permission_result(task.id, exc.report)
 
         result = self._validate_non_model_output(task, result)
+        self.task_outputs[task.id] = result.output
         after = self.budget_tracker.snapshot()
         return _with_budget_snapshots(result, before, after)
 
     def _execute_command(self, task: Task) -> TaskResult:
-        command = task.executor.command or ""
+        command = _render_text(task.executor.command or "", self.prompt_variables)
         self.permission_engine.check_command(command)
         self.budget_tracker.consume_tool_call()
-        cwd = self.permission_engine.check_read_path(task.executor.cwd or ".")
+        cwd = self.permission_engine.check_read_path(_render_text(task.executor.cwd or ".", self.prompt_variables))
         completed = subprocess.run(
             shlex.split(command),
             cwd=str(cwd),
@@ -283,11 +286,11 @@ class ExecutorRegistry:
         )
 
     def _write_files(self, task: Task) -> TaskResult:
-        payload = self.task_inputs.get(task.id, {})
+        payload = self.task_inputs.get(task.id) or self._latest_output_with_files()
         files = payload.get("files", [])
         written: List[str] = []
         for item in files:
-            target = self.permission_engine.check_write_path(item["path"])
+            target = self.permission_engine.check_write_path(_render_text(item["path"], self.prompt_variables))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(item.get("content", "")), encoding="utf-8")
             written.append(str(target))
@@ -299,6 +302,12 @@ class ExecutorRegistry:
             metadata={"executor": "tool", "tool": "write_files"},
         )
 
+    def _latest_output_with_files(self) -> Dict[str, Any]:
+        for output in reversed(list(self.task_outputs.values())):
+            if "files" in output:
+                return output
+        return {}
+
     def _render_prompt(self, task: Task) -> PromptMetadata:
         prompt_ref = task.executor.prompt
         if prompt_ref is None:
@@ -308,7 +317,7 @@ class ExecutorRegistry:
             loaded = self.prompts[prompt_ref.id]
             rendered = loaded.content
             prompt_id = prompt_ref.id
-        rendered = Template(rendered).safe_substitute({key: str(value) for key, value in self.prompt_variables.items()})
+        rendered = _render_text(rendered, self.prompt_variables)
         digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         return PromptMetadata(
             prompt_id=prompt_id,
@@ -369,3 +378,25 @@ def _verifier_evidence(task: Task, status: str, proof: str) -> Optional[Dict[str
     if task.type != "verify":
         return None
     return VerifierEvidence(status=status, proof=proof).to_dict()
+
+
+def _render_text(template: str, variables: Mapping[str, Any]) -> str:
+    rendered = Template(template).safe_substitute({key: str(value) for key, value in variables.items()})
+
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        return str(_lookup_variable(variables, key))
+
+    return re.sub(r"\{\{\s*([^}]+?)\s*\}\}", replace, rendered)
+
+
+def _lookup_variable(variables: Mapping[str, Any], key: str) -> Any:
+    if key in variables:
+        return variables[key]
+    current: Any = variables
+    for part in key.split("."):
+        if isinstance(current, Mapping) and part in current:
+            current = current[part]
+        else:
+            return f"{{{{ {key} }}}}"
+    return current

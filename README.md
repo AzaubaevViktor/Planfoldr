@@ -46,3 +46,15 @@ Deterministic e2e coverage uses stubbed model responses and does not require net
 ```bash
 python -m pytest tests/test_e2e_stub_scenarios.py
 ```
+
+## Optional Ollama Demo
+
+The local-model demo is opt-in and skips automatically unless enabled:
+
+```bash
+ollama serve
+ollama pull llama3.1
+PLANFOLDR_RUN_OLLAMA_E2E=1 python -m pytest tests/test_ollama_e2e.py
+```
+
+The demo scenario is [examples/scenarios/ollama_cli_todo_app.yaml](examples/scenarios/ollama_cli_todo_app.yaml). It writes generated work under `runs/`, which is ignored by git, and writes a trace plus `report.html`.
