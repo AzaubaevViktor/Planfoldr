@@ -1,0 +1,41 @@
+id: minimal_scenario
+goal: Validate linked YAML and prompt loading.
+
+inputs:
+  repository_path: ./runs/minimal/project
+
+outputs:
+  trace_path: ./runs/minimal/trace
+
+required_conditions:
+  - id: minimal_done
+    verifier_task: plan
+
+constraints:
+  tools:
+    allow:
+      - write_files
+  filesystem:
+    allow_read:
+      - ./tests/fixtures
+    allow_write:
+      - ./runs/minimal
+
+budgets:
+  max_iterations: 1
+  max_tool_calls: 1
+  max_model_calls: 1
+
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+
+defaults:
+  model:
+    provider: stub
+    name: deterministic
+  retry:
+    invalid_output: 0
+
+cycles:
+  - file: ./cycles/minimal_cycle.yaml

@@ -49,3 +49,12 @@ The runtime should fail early on invalid scenario structure. Schema objects shou
 ## Done
 
 Tests prove that valid scenarios load and invalid scenarios fail before runtime execution.
+
+## Implementation Notes
+
+- Pydantic schema objects live in `src/planfoldr/schema.py`.
+- YAML loading, linked cycle resolution and prompt file resolution live in `src/planfoldr/loader.py`.
+- `load_scenario(path)` returns a `LoadedScenario` with raw scenario data plus resolved cycles and prompt contents.
+- Validation failures raise `SchemaLoadError` with file path, YAML path, expected value and actual preview.
+- Loader fixtures and valid/invalid tests live under `tests/fixtures/` and `tests/test_schema_loader.py`.
+- Continue with [Task 003: Runtime Core](003_runtime_core.md).

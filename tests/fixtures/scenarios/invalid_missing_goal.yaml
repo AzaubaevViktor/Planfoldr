@@ -1,0 +1,13 @@
+id: invalid_missing_goal
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow: []
+budgets:
+  max_iterations: 1
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles: []

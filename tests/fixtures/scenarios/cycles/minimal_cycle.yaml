@@ -1,0 +1,50 @@
+id: minimal_cycle
+goal: Validate the loader can resolve a linked cycle.
+entrypoint: plan
+
+budgets:
+  max_iterations: 1
+  max_tool_calls: 1
+  max_model_calls: 1
+
+constraints:
+  tools:
+    allow:
+      - write_files
+
+context_access:
+  read:
+    - scenario.inputs
+  write:
+    - cycle.facts
+
+tasks:
+  - id: plan
+    type: model
+    task: Produce a minimal output.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: minimal_prompt
+        file: ../../prompts/minimal_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+
+links:
+  plan:
+    success: success
+    failure: fail
+
+nested_cycles: []
