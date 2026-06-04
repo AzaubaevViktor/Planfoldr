@@ -1,0 +1,23 @@
+id: e2e_command_failure_scenario
+goal: Cover command verifier failure.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - python
+  filesystem:
+    allow_read:
+      - .
+    allow_write:
+      - ./runs/e2e_command_failure
+budgets:
+  max_iterations: 1
+  max_tool_calls: 1
+  max_cpu_time: 5
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/e2e_command_failure_cycle.yaml

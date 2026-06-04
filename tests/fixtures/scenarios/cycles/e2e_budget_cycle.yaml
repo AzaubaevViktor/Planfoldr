@@ -1,0 +1,33 @@
+id: e2e_budget_cycle
+goal: Exhaust model call budget.
+entrypoint: model_task
+
+budgets:
+  max_iterations: 1
+  max_model_calls: 0
+
+tasks:
+  - id: model_task
+    type: model
+    task: This call should exceed budget.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: e2e_stub_prompt
+        file: ../../prompts/e2e_stub_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+
+links:
+  model_task:
+    success: success
+    budget_exceeded: fail
+
+nested_cycles: []

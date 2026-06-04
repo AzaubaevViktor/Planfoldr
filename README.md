@@ -38,3 +38,11 @@ python -m pytest
 Generated run artifacts belong under `runs/` and are ignored by git.
 
 After the project scaffold, continue with [tasks/002_schema_and_loader.md](tasks/002_schema_and_loader.md).
+
+## Stub E2E Tests
+
+Deterministic e2e coverage uses stubbed model responses and does not require network access or Ollama:
+
+```bash
+python -m pytest tests/test_e2e_stub_scenarios.py
+```

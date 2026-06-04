@@ -1,0 +1,51 @@
+id: e2e_success_cycle
+goal: Complete a deterministic stub flow.
+entrypoint: plan
+
+budgets:
+  max_iterations: 3
+  max_tool_calls: 2
+  max_model_calls: 2
+  max_cpu_time: 5
+
+tasks:
+  - id: plan
+    type: model
+    task: Plan with stub output.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: e2e_stub_prompt
+        file: ../../prompts/e2e_stub_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: verify
+    type: verify
+    task: Verify success.
+    executor:
+      kind: command
+      command: python3 -c "print('ok')"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+
+links:
+  plan:
+    success: verify
+    failure: fail
+  verify:
+    success: success
+    failure: fail
+
+nested_cycles: []

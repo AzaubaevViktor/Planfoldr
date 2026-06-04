@@ -1,0 +1,26 @@
+id: e2e_success_scenario
+goal: Cover successful stub e2e flow.
+inputs: {}
+outputs: {}
+required_conditions:
+  - id: verified
+    verifier_task: verify
+constraints:
+  tools:
+    allow:
+      - python
+  filesystem:
+    allow_read:
+      - .
+    allow_write:
+      - ./runs/e2e_success
+budgets:
+  max_iterations: 3
+  max_tool_calls: 2
+  max_model_calls: 2
+  max_cpu_time: 5
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/e2e_success_cycle.yaml

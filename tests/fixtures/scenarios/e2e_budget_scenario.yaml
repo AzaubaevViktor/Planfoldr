@@ -1,0 +1,22 @@
+id: e2e_budget_scenario
+goal: Cover budget exhaustion.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - python
+  filesystem:
+    allow_read:
+      - .
+    allow_write:
+      - ./runs/e2e_budget
+budgets:
+  max_iterations: 1
+  max_model_calls: 0
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/e2e_budget_cycle.yaml

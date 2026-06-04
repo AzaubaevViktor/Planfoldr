@@ -52,3 +52,11 @@ Stubbed e2e scenarios are the main safety net. They prove flow correctness witho
 ## Done
 
 The project has deterministic e2e tests for both success and failure flows.
+
+## Implementation Notes
+
+- Stub e2e fixtures live under `tests/fixtures/scenarios/e2e_*.yaml` and `tests/fixtures/scenarios/cycles/e2e_*.yaml`.
+- `tests/test_e2e_stub_scenarios.py` covers success, command failure, budget exhaustion, retry exhaustion and a bounded repair loop.
+- Every stub e2e test writes a trace directory and static HTML report under pytest `tmp_path`.
+- Stub e2e tests can be run with `python -m pytest tests/test_e2e_stub_scenarios.py`.
+- Continue with [Task 010: Ollama E2E](010_ollama_e2e.md).

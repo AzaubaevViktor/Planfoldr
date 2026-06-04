@@ -1,0 +1,39 @@
+id: e2e_retry_cycle
+goal: Exhaust invalid model output retries.
+entrypoint: invalid_model
+
+budgets:
+  max_iterations: 1
+  max_model_calls: 3
+
+tasks:
+  - id: invalid_model
+    type: model
+    task: Return invalid output until retry_exceeded.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: e2e_stub_prompt
+        file: ../../prompts/e2e_stub_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+
+links:
+  invalid_model:
+    success: success
+    failure: fail
+    retry_exceeded: fail
+
+nested_cycles: []

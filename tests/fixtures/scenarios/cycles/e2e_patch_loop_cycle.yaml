@@ -1,0 +1,87 @@
+id: e2e_patch_loop_cycle
+goal: Exercise a bounded repair loop.
+entrypoint: create_initial
+
+budgets:
+  max_iterations: 5
+  max_tool_calls: 3
+  max_model_calls: 3
+  max_cpu_time: 5
+
+tasks:
+  - id: create_initial
+    type: model
+    task: Create an initial version.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: e2e_stub_prompt
+        file: ../../prompts/e2e_stub_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: verify_initial
+    type: verify
+    task: Initial tests fail.
+    executor:
+      kind: command
+      command: python3 -c "import sys; sys.exit(1)"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: repair
+    type: model
+    task: Repair the project.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: e2e_stub_prompt
+        file: ../../prompts/e2e_stub_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: verify_repaired
+    type: verify
+    task: Repaired tests pass.
+    executor:
+      kind: command
+      command: python3 -c "print('patched')"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+
+links:
+  create_initial:
+    success: verify_initial
+    failure: fail
+  verify_initial:
+    success: success
+    failure: repair
+  repair:
+    success: verify_repaired
+    failure: fail
+  verify_repaired:
+    success: success
+    failure: fail
+
+nested_cycles: []

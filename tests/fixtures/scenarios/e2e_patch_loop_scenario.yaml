@@ -1,0 +1,24 @@
+id: e2e_patch_loop_scenario
+goal: Cover repair loop.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - python
+  filesystem:
+    allow_read:
+      - .
+    allow_write:
+      - ./runs/e2e_patch_loop
+budgets:
+  max_iterations: 5
+  max_tool_calls: 3
+  max_model_calls: 3
+  max_cpu_time: 5
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/e2e_patch_loop_cycle.yaml

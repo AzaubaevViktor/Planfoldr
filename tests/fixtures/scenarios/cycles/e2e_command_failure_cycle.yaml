@@ -1,0 +1,30 @@
+id: e2e_command_failure_cycle
+goal: Fail through a verifier command.
+entrypoint: verify_failure
+
+budgets:
+  max_iterations: 1
+  max_tool_calls: 1
+  max_cpu_time: 5
+
+tasks:
+  - id: verify_failure
+    type: verify
+    task: Fail deterministically.
+    executor:
+      kind: command
+      command: python3 -c "import sys; sys.exit(1)"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+
+links:
+  verify_failure:
+    success: success
+    failure: fail
+
+nested_cycles: []
