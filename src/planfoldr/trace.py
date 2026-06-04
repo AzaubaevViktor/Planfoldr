@@ -22,17 +22,78 @@ def run_and_trace(
     output_root: str | Path = "runs",
     run_id: Optional[str] = None,
 ) -> ScenarioResult:
-    result = run_scenario(loaded, executor)
     run_id = run_id or new_run_id()
     run_dir = Path(output_root) / loaded.document.id / run_id
     trace_dir = run_dir / "trace"
     report_path = run_dir / "report.html"
-    TraceWriter(loaded, result, trace_dir=trace_dir, report_path=report_path, run_id=run_id).write()
+    logger = ExecutionLogger(run_dir / "logs" / "execution.log")
+    logger.write("run_initialized", scenario_id=loaded.document.id, run_id=run_id)
+    logger.write("scenario_start", scenario_id=loaded.document.id, cycle_count=len(loaded.cycles))
+    try:
+        result = run_scenario(loaded, LoggingExecutor(executor, logger))
+    except Exception as exc:
+        logger.write("scenario_error", error_type=type(exc).__name__, reason=str(exc))
+        raise
+    logger.write("scenario_finish", status=result.status, reason=result.reason)
+    TraceWriter(
+        loaded,
+        result,
+        trace_dir=trace_dir,
+        report_path=report_path,
+        run_id=run_id,
+        execution_log_path=logger.path,
+    ).write()
     return result
 
 
 def new_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+class ExecutionLogger:
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(self, event: str, **fields: Any) -> None:
+        row = {
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "event": event,
+            **fields,
+        }
+        with self.path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+class LoggingExecutor:
+    def __init__(self, executor, logger: ExecutionLogger) -> None:
+        self.executor = executor
+        self.logger = logger
+
+    def __call__(self, task):
+        self.logger.write(
+            "task_start",
+            task_id=task.id,
+            task_type=task.type,
+            executor_kind=task.executor.kind,
+        )
+        try:
+            result = self.executor(task)
+        except Exception as exc:
+            self.logger.write(
+                "task_error",
+                task_id=task.id,
+                error_type=type(exc).__name__,
+                reason=str(exc),
+            )
+            raise
+        self.logger.write(
+            "task_finish",
+            task_id=task.id,
+            status=result.status,
+            reason=result.reason,
+        )
+        return result
 
 
 class TraceWriter:
@@ -44,6 +105,7 @@ class TraceWriter:
         trace_dir: str | Path,
         report_path: str | Path,
         run_id: Optional[str] = None,
+        execution_log_path: Optional[str | Path] = None,
         audit_events: Optional[Iterable[Dict[str, Any]]] = None,
         decisions: Optional[Iterable[Dict[str, Any]]] = None,
     ) -> None:
@@ -52,6 +114,7 @@ class TraceWriter:
         self.trace_dir = Path(trace_dir)
         self.report_path = Path(report_path)
         self.run_id = run_id
+        self.execution_log_path = Path(execution_log_path) if execution_log_path is not None else None
         self.audit_events = list(audit_events or [])
         self.decisions = list(decisions or [])
 
@@ -84,8 +147,20 @@ class TraceWriter:
             "task_executions": ["tasks/executions.json"],
             "audit_log": "audit.jsonl",
             "decision_log": "decisions.jsonl",
+            "execution_log": self._execution_log_manifest_path(),
             "report_path": str(self.report_path),
         }
+
+    def _execution_log_manifest_path(self) -> Optional[str]:
+        if self.execution_log_path is None:
+            return None
+        try:
+            return str(self.execution_log_path.relative_to(self.trace_dir))
+        except ValueError:
+            try:
+                return str(self.execution_log_path.relative_to(self.trace_dir.parent))
+            except ValueError:
+                return str(self.execution_log_path)
 
     def _write_executor_parts(self) -> None:
         for task in self.result.task_results:
@@ -146,6 +221,7 @@ class TraceWriter:
   <h1>{html.escape(self.loaded.document.id)}</h1>
   <p>Status: <strong>{html.escape(self.result.status)}</strong></p>
   <p>Trace manifest: <code>{html.escape(str(self.trace_dir / "manifest.json"))}</code></p>
+  <p>Execution log: <code>{html.escape(str(self.execution_log_path or ""))}</code></p>
   <h2>Cycles</h2>
   <ul>{cycles}</ul>
   <h2>Execution Log</h2>

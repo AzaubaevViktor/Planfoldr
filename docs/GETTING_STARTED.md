@@ -78,6 +78,8 @@ This writes:
 ```text
 runs/<scenario_id>/
   <run_id>/
+    logs/
+      execution.log
     trace/
       manifest.json
       scenario.json
@@ -87,6 +89,14 @@ runs/<scenario_id>/
 ```
 
 ## 5. Inspect Trace And Replay A Task
+
+While a run is still executing, start with:
+
+```text
+runs/<scenario_id>/<run_id>/logs/execution.log
+```
+
+This JSONL file is written immediately at run initialization and then before and after each task.
 
 Trace files are JSON or JSONL. The main entry point is:
 
@@ -136,4 +146,4 @@ The runtime still controls workflow. Ollama only supplies model task output. Gen
 - `retry_exceeded`: model output did not match `output_schema` after retries.
 - `failure`: a command returned non-zero, an executor failed, or a task output failed validation.
 
-When debugging, start with `tasks/executions.json`, then inspect model, command or tool detail files under the trace directory.
+When debugging a live run, start with `logs/execution.log`. After the run finishes, inspect `tasks/executions.json`, then model, command or tool detail files under the trace directory.
