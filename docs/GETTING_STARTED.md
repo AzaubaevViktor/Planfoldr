@@ -48,29 +48,12 @@ python -m pytest tests/test_e2e_stub_scenarios.py
 
 Stub e2e tests do not call real models. They cover success, command failure, budget exhaustion, retry exhaustion and a repair loop.
 
-## 4. Run A Scenario From Python
+## 4. Run A YAML Scenario
 
-Minimal pattern:
+Run a scenario by pointing Planfoldr at the root YAML file:
 
-```python
-from pathlib import Path
-
-from planfoldr.executors import ExecutorRegistry, StubModelAdapter
-from planfoldr.guards import BudgetTracker, PermissionEngine
-from planfoldr.loader import load_scenario
-from planfoldr.trace import run_and_trace
-
-scenario = load_scenario(Path("tests/fixtures/scenarios/e2e_success_scenario.yaml"))
-
-registry = ExecutorRegistry(
-    permission_engine=PermissionEngine(scenario.document.constraints, base_dir=Path("tests/fixtures/scenarios")),
-    budget_tracker=BudgetTracker(scenario.document.budgets),
-    prompts=scenario.cycles[0].prompts,
-    model_adapter=StubModelAdapter({"plan:e2e_stub_prompt": {"status": "success"}}),
-)
-
-result = run_and_trace(scenario, registry, output_root="runs")
-print(result.status)
+```bash
+python -m planfoldr run examples/scenarios/ollama_cli_todo_app.yaml
 ```
 
 This writes:
@@ -88,7 +71,7 @@ runs/<scenario_id>/
     report.html
 ```
 
-## 5. Inspect Trace And Replay A Task
+## 5. Inspect A Run
 
 While a run is still executing, start with:
 
@@ -104,13 +87,10 @@ Trace files are JSON or JSONL. The main entry point is:
 runs/<scenario_id>/<run_id>/trace/manifest.json
 ```
 
-Replay a captured task result without running the executor again:
+Captured task results are stored in:
 
-```python
-from planfoldr.trace import replay_task
-
-task_result = replay_task("runs/e2e_success_scenario/<run_id>/trace", "plan")
-print(task_result.output)
+```text
+runs/<scenario_id>/<run_id>/trace/tasks/executions.json
 ```
 
 Open `runs/<scenario_id>/<run_id>/report.html` in a browser for the static report.
@@ -122,13 +102,15 @@ The Ollama demo is opt-in:
 ```bash
 ollama serve
 ollama pull llama3.1
-PLANFOLDR_RUN_OLLAMA_E2E=1 python -m pytest tests/test_ollama_e2e.py
+python -m planfoldr run examples/scenarios/ollama_cli_todo_app.yaml
 ```
 
 Use another local model:
 
 ```bash
-PLANFOLDR_RUN_OLLAMA_E2E=1 PLANFOLDR_OLLAMA_MODEL=carstenuhlig/omnicoder-9b:latest PLANFOLDR_OLLAMA_TIMEOUT=180 python -m pytest tests/test_ollama_e2e.py
+python -m planfoldr run examples/scenarios/ollama_cli_todo_app.yaml \
+  --ollama-model carstenuhlig/omnicoder-9b:latest \
+  --ollama-timeout 180
 ```
 
 Scenario:
