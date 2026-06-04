@@ -12,6 +12,8 @@ from planfoldr.trace import run_and_trace
 
 
 SCENARIO = Path(__file__).parents[1] / "examples" / "scenarios" / "ollama_cli_todo_app.yaml"
+MODEL_ENV = "PLANFOLDR_OLLAMA_MODEL"
+TIMEOUT_ENV = "PLANFOLDR_OLLAMA_TIMEOUT"
 
 
 def _ollama_available() -> bool:
@@ -30,12 +32,15 @@ def test_ollama_cli_todo_demo(tmp_path: Path) -> None:
         pytest.skip("Ollama is not available on http://127.0.0.1:11434")
 
     loaded = load_scenario(SCENARIO)
+    model_override = os.environ.get(MODEL_ENV)
+    if model_override:
+        _override_model_name(loaded, model_override)
     inputs = loaded.document.inputs
     registry = ExecutorRegistry(
         permission_engine=PermissionEngine(loaded.document.constraints, base_dir=SCENARIO.parents[2]),
         budget_tracker=BudgetTracker(loaded.document.budgets),
         prompts=loaded.cycles[0].prompts,
-        model_adapter=OllamaModelAdapter(),
+        model_adapter=OllamaModelAdapter(timeout=float(os.environ.get(TIMEOUT_ENV, "30"))),
         prompt_variables={"inputs": inputs, **{f"inputs.{key}": value for key, value in inputs.items()}},
         invalid_output_retries=loaded.document.defaults.retry.invalid_output,
     )
@@ -49,3 +54,10 @@ def test_ollama_cli_todo_demo(tmp_path: Path) -> None:
     assert list(generated.glob("tests/test_*.py"))
     assert (tmp_path / loaded.document.id / "trace" / "manifest.json").exists()
     assert (tmp_path / loaded.document.id / "report.html").exists()
+
+
+def _override_model_name(loaded, model_name: str) -> None:
+    for cycle in loaded.cycles:
+        for task in cycle.document.tasks:
+            if task.executor.model is not None:
+                task.executor.model.name = model_name

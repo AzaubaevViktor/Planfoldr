@@ -77,3 +77,37 @@ def test_write_files_uses_latest_model_output(tmp_path: Path) -> None:
 
     assert result.status == "success"
     assert target.read_text(encoding="utf-8") == "# Generated\n"
+
+
+def test_write_files_ignores_tool_file_lists_when_finding_latest_model_output(tmp_path: Path) -> None:
+    target = tmp_path / "project" / "ARCHITECTURE.md"
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    constraints = loaded.document.constraints.model_copy(deep=True)
+    constraints.filesystem.allow_write.append(str(tmp_path))
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(constraints, base_dir=tmp_path),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        task_outputs={
+            "repair_project": {
+                "status": "success",
+                "files": [{"path": str(target), "content": "# Architecture\n"}],
+            },
+            "create_files": {
+                "status": "success",
+                "files": [str(tmp_path / "project" / "old.txt")],
+            },
+        },
+    )
+    task = Task(
+        id="apply_repair",
+        type="tool",
+        task="Apply repaired files.",
+        executor=Executor(kind="tool", tool="write_files"),
+        input_schema={"type": "object"},
+        output_schema={"type": "object", "required": ["status"]},
+    )
+
+    result = registry(task)
+
+    assert result.status == "success"
+    assert target.read_text(encoding="utf-8") == "# Architecture\n"

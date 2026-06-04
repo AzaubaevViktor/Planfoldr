@@ -61,4 +61,6 @@ ollama pull llama3.1
 PLANFOLDR_RUN_OLLAMA_E2E=1 python -m pytest tests/test_ollama_e2e.py
 ```
 
+Use `PLANFOLDR_OLLAMA_MODEL=<model-name>` to run the demo with another local Ollama model. Use `PLANFOLDR_OLLAMA_TIMEOUT=<seconds>` for slower models.
+
 The demo scenario is [examples/scenarios/ollama_cli_todo_app.yaml](examples/scenarios/ollama_cli_todo_app.yaml). It writes generated work under `runs/`, which is ignored by git, and writes a trace plus `report.html`.

@@ -100,8 +100,9 @@ class StubModelAdapter(ModelAdapter):
 
 
 class OllamaModelAdapter(ModelAdapter):
-    def __init__(self, endpoint: str = "http://127.0.0.1:11434/api/chat") -> None:
+    def __init__(self, endpoint: str = "http://127.0.0.1:11434/api/chat", timeout: float = 30) -> None:
         self.endpoint = endpoint
+        self.timeout = timeout
 
     def generate(
         self,
@@ -125,7 +126,7 @@ class OllamaModelAdapter(ModelAdapter):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
         except (OSError, urllib.error.URLError) as exc:
             return ModelResponse(
@@ -304,7 +305,8 @@ class ExecutorRegistry:
 
     def _latest_output_with_files(self) -> Dict[str, Any]:
         for output in reversed(list(self.task_outputs.values())):
-            if "files" in output:
+            files = output.get("files")
+            if isinstance(files, list) and all(isinstance(item, Mapping) and "path" in item for item in files):
                 return output
         return {}
 
