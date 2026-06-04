@@ -77,12 +77,13 @@ This writes:
 
 ```text
 runs/<scenario_id>/
-  trace/
-    manifest.json
-    scenario.json
-    tasks/executions.json
-    cycles/index.json
-  report.html
+  <run_id>/
+    trace/
+      manifest.json
+      scenario.json
+      tasks/executions.json
+      cycles/index.json
+    report.html
 ```
 
 ## 5. Inspect Trace And Replay A Task
@@ -90,7 +91,7 @@ runs/<scenario_id>/
 Trace files are JSON or JSONL. The main entry point is:
 
 ```text
-runs/<scenario_id>/trace/manifest.json
+runs/<scenario_id>/<run_id>/trace/manifest.json
 ```
 
 Replay a captured task result without running the executor again:
@@ -98,11 +99,11 @@ Replay a captured task result without running the executor again:
 ```python
 from planfoldr.trace import replay_task
 
-task_result = replay_task("runs/e2e_success_scenario/trace", "plan")
+task_result = replay_task("runs/e2e_success_scenario/<run_id>/trace", "plan")
 print(task_result.output)
 ```
 
-Open `runs/<scenario_id>/report.html` in a browser for the static report.
+Open `runs/<scenario_id>/<run_id>/report.html` in a browser for the static report.
 
 ## 6. Optional Ollama Demo
 

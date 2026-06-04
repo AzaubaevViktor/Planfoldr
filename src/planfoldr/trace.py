@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -19,12 +20,19 @@ def run_and_trace(
     executor,
     *,
     output_root: str | Path = "runs",
+    run_id: Optional[str] = None,
 ) -> ScenarioResult:
     result = run_scenario(loaded, executor)
-    trace_dir = Path(output_root) / loaded.document.id / "trace"
-    report_path = Path(output_root) / loaded.document.id / "report.html"
-    TraceWriter(loaded, result, trace_dir=trace_dir, report_path=report_path).write()
+    run_id = run_id or new_run_id()
+    run_dir = Path(output_root) / loaded.document.id / run_id
+    trace_dir = run_dir / "trace"
+    report_path = run_dir / "report.html"
+    TraceWriter(loaded, result, trace_dir=trace_dir, report_path=report_path, run_id=run_id).write()
     return result
+
+
+def new_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
 class TraceWriter:
@@ -35,6 +43,7 @@ class TraceWriter:
         *,
         trace_dir: str | Path,
         report_path: str | Path,
+        run_id: Optional[str] = None,
         audit_events: Optional[Iterable[Dict[str, Any]]] = None,
         decisions: Optional[Iterable[Dict[str, Any]]] = None,
     ) -> None:
@@ -42,6 +51,7 @@ class TraceWriter:
         self.result = result
         self.trace_dir = Path(trace_dir)
         self.report_path = Path(report_path)
+        self.run_id = run_id
         self.audit_events = list(audit_events or [])
         self.decisions = list(decisions or [])
 
@@ -64,6 +74,7 @@ class TraceWriter:
     def _manifest(self) -> Dict[str, Any]:
         return {
             "schema_version": TRACE_SCHEMA_VERSION,
+            "run_id": self.run_id,
             "scenario_id": self.loaded.document.id,
             "status": self.result.status,
             "reason": self.result.reason,

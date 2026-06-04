@@ -21,10 +21,10 @@ def _registry(loaded):
 def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
 
-    result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path)
+    result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="trace-test")
 
-    trace_dir = tmp_path / "executor_scenario" / "trace"
-    report = tmp_path / "executor_scenario" / "report.html"
+    trace_dir = tmp_path / "executor_scenario" / "trace-test" / "trace"
+    report = tmp_path / "executor_scenario" / "trace-test" / "report.html"
     assert result.status == "success"
     assert (trace_dir / "manifest.json").exists()
     assert (trace_dir / "tasks" / "executions.json").exists()
@@ -35,17 +35,28 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
 
 def test_task_replay_restores_captured_result(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
-    result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path)
+    result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="replay-test")
 
-    replayed = replay_task(tmp_path / "executor_scenario" / "trace", "ask_model")
+    replayed = replay_task(tmp_path / "executor_scenario" / "replay-test" / "trace", "ask_model")
 
     assert replayed.task_id == "ask_model"
     assert replayed.output == result.task_results[0].output
 
 
+def test_run_and_trace_keeps_multiple_run_directories(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+
+    run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="first-run")
+    run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="second-run")
+
+    scenario_dir = tmp_path / "executor_scenario"
+    assert (scenario_dir / "first-run" / "trace" / "manifest.json").exists()
+    assert (scenario_dir / "second-run" / "trace" / "manifest.json").exists()
+
+
 def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
-    result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path / "first")
+    result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path / "first", run_id="manual-source")
     writer = TraceWriter(
         loaded,
         result,

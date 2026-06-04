@@ -18,9 +18,10 @@ def _run_stub(name: str, tmp_path: Path, responses, retries: int = 0):
         model_adapter=StubModelAdapter(responses),
         invalid_output_retries=retries,
     )
-    result = run_and_trace(loaded, registry, output_root=tmp_path)
-    trace_dir = tmp_path / loaded.document.id / "trace"
-    report = tmp_path / loaded.document.id / "report.html"
+    run_id = Path(name).stem
+    result = run_and_trace(loaded, registry, output_root=tmp_path, run_id=run_id)
+    trace_dir = tmp_path / loaded.document.id / run_id / "trace"
+    report = tmp_path / loaded.document.id / run_id / "report.html"
     assert trace_dir.exists()
     assert (trace_dir / "manifest.json").exists()
     assert report.exists()

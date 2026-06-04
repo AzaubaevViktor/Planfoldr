@@ -45,15 +45,15 @@ def test_ollama_cli_todo_demo(tmp_path: Path) -> None:
         invalid_output_retries=loaded.document.defaults.retry.invalid_output,
     )
 
-    result = run_and_trace(loaded, registry, output_root=tmp_path)
+    result = run_and_trace(loaded, registry, output_root=tmp_path, run_id="ollama-test")
 
     generated = SCENARIO.parents[2] / inputs["repository_path"]
     assert result.status == "success"
     assert (generated / "AGENTS.md").exists()
     assert (generated / "ARCHITECTURE.md").exists()
     assert list(generated.glob("tests/test_*.py"))
-    assert (tmp_path / loaded.document.id / "trace" / "manifest.json").exists()
-    assert (tmp_path / loaded.document.id / "report.html").exists()
+    assert (tmp_path / loaded.document.id / "ollama-test" / "trace" / "manifest.json").exists()
+    assert (tmp_path / loaded.document.id / "ollama-test" / "report.html").exists()
 
 
 def _override_model_name(loaded, model_name: str) -> None:
