@@ -80,6 +80,7 @@ runs/<scenario_id>/<run_id>/logs/execution.log
 ```
 
 This JSONL file is written immediately at run initialization and then before and after each task.
+Streaming model progress is tracked as follow-up work in `tasks/011_streaming_model_progress.md`; until that lands, a long model task may still show only `task_start` until the blocking model request finishes or times out.
 
 Trace files are JSON or JSONL. The main entry point is:
 

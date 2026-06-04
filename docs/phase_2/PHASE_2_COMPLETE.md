@@ -54,6 +54,7 @@ Future work can start from hardening the prototype:
 - broaden schema validation coverage;
 - add richer trace/report views;
 - improve model prompt robustness for the Ollama demo;
+- add streaming model progress and token accounting; see `tasks/011_streaming_model_progress.md`;
 - add full scenario replay;
 - add real nested-cycle budget delegation;
 - add CI around the canonical pytest command.
