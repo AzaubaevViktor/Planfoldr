@@ -67,6 +67,8 @@ venv.bak/
 # IDE / editor
 .idea/
 .vscode/
+!.vscode/
+!.vscode/settings.json
 
 # Planfoldr generated artifacts
 runs/
