@@ -64,5 +64,9 @@ During a slow Ollama run, `runs/<scenario_id>/<run_id>/logs/execution.log` recei
 - `OllamaModelAdapter` uses `stream: true` and accumulates streamed chunks into the existing `ModelResponse` shape.
 - `ExecutorRegistry` exposes a model progress callback and annotates progress events with task id, attempt, model and provider.
 - `LoggingExecutor` forwards model progress events into `logs/execution.log`.
+- Stream chunks are written live under `trace/models/<execution_id>/chunks/`.
+- The full chronological stream is written to `trace/models/<execution_id>/assembled.txt`.
+- Parsed content and provider thinking text are split into `content.txt` and `thinking.txt`.
+- The HTML report shows model text sections and includes cycle id in the task table.
 - Mid-stream token counts use an approximate character-based counter; final stream metadata uses provider counts when Ollama reports them.
 - Unit coverage for streaming progress lives in `tests/test_trace.py` with a fake streaming adapter.

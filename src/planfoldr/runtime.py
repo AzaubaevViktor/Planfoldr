@@ -179,10 +179,15 @@ def run_cycle(loaded: LoadedCycle, executor: ExecutorFn) -> CycleResult:
         current_id = target
 
 
+def new_execution_id() -> str:
+    return f"exec_{uuid4().hex}"
+
+
 def make_task_result(
     task_id: str,
     status: str,
     *,
+    execution_id: Optional[str] = None,
     reason: Optional[str] = None,
     output: Optional[Mapping[str, Any]] = None,
     request: Optional[Mapping[str, Any]] = None,
@@ -192,7 +197,7 @@ def make_task_result(
     now = _now()
     return TaskResult(
         task_id=task_id,
-        execution_id=f"exec_{uuid4().hex}",
+        execution_id=execution_id or new_execution_id(),
         status=status,
         reason=reason,
         output=dict(output or {"status": status}),

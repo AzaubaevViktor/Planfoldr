@@ -81,6 +81,8 @@ runs/<scenario_id>/<run_id>/logs/execution.log
 
 This JSONL file is written immediately at run initialization and then before and after each task. During streaming model calls it also receives `model_stream_start`, `model_stream_progress`, `model_stream_finish` and `model_stream_error` events with task id, attempt, character count and token metadata.
 
+Streaming text is stored outside the live log. For model execution `exec_...`, inspect `trace/models/exec_.../chunks/` for individual chunks, `trace/models/exec_.../assembled.txt` for the full stream, `trace/models/exec_.../content.txt` for parsed model content and `trace/models/exec_.../thinking.txt` when the provider streams thinking text. The HTML report also includes model text sections and shows each task's cycle in the task table.
+
 Trace files are JSON or JSONL. The main entry point is:
 
 ```text

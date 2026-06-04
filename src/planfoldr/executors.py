@@ -24,7 +24,7 @@ from planfoldr.guards import (
     need_permission_result,
 )
 from planfoldr.loader import LoadedPrompt
-from planfoldr.runtime import Outcome, TaskResult, make_task_result
+from planfoldr.runtime import Outcome, TaskResult, make_task_result, new_execution_id
 from planfoldr.schema import ModelConfig, Task
 from planfoldr.validation import OutputValidationError, VerifierEvidence, validate_task_output
 
@@ -132,9 +132,11 @@ class OllamaModelAdapter(ModelAdapter):
             method="POST",
         )
         content_parts: List[str] = []
+        thinking_parts: List[str] = []
         raw_lines: List[str] = []
         final_payload: Dict[str, Any] = {}
         next_progress_chars = 512
+        stream_chars = 0
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 for raw_line in response:
@@ -148,23 +150,49 @@ class OllamaModelAdapter(ModelAdapter):
                         _emit_progress(
                             progress_callback,
                             "model_stream_finish",
-                            chars=sum(len(part) for part in content_parts),
+                            chars=stream_chars,
+                            content_chars=sum(len(part) for part in content_parts),
+                            thinking_chars=sum(len(part) for part in thinking_parts),
                             tokens=_provider_tokens(chunk),
                         )
                         break
-                    content = chunk.get("message", {}).get("content", "")
-                    if not content:
-                        continue
-                    content_parts.append(content)
-                    chars = sum(len(part) for part in content_parts)
-                    if chars >= next_progress_chars:
+                    message = chunk.get("message", {})
+                    thinking = message.get("thinking", "")
+                    content = message.get("content", "")
+                    if thinking:
+                        thinking_parts.append(thinking)
+                        stream_chars += len(thinking)
+                        _emit_progress(
+                            progress_callback,
+                            "model_stream_chunk",
+                            kind="thinking",
+                            text=thinking,
+                            chars=stream_chars,
+                            content_chars=sum(len(part) for part in content_parts),
+                            thinking_chars=sum(len(part) for part in thinking_parts),
+                        )
+                    if content:
+                        content_parts.append(content)
+                        stream_chars += len(content)
+                        _emit_progress(
+                            progress_callback,
+                            "model_stream_chunk",
+                            kind="content",
+                            text=content,
+                            chars=stream_chars,
+                            content_chars=sum(len(part) for part in content_parts),
+                            thinking_chars=sum(len(part) for part in thinking_parts),
+                        )
+                    if stream_chars >= next_progress_chars:
                         _emit_progress(
                             progress_callback,
                             "model_stream_progress",
-                            chars=chars,
-                            tokens=_approx_tokens(chars),
+                            chars=stream_chars,
+                            content_chars=sum(len(part) for part in content_parts),
+                            thinking_chars=sum(len(part) for part in thinking_parts),
+                            tokens=_approx_tokens(stream_chars),
                         )
-                        next_progress_chars = chars + 512
+                        next_progress_chars = stream_chars + 512
         except (OSError, urllib.error.URLError) as exc:
             _emit_progress(progress_callback, "model_stream_error", reason=str(exc))
             return ModelResponse(
@@ -186,7 +214,9 @@ class OllamaModelAdapter(ModelAdapter):
                 "available": True,
                 "model": model.name,
                 "streaming": True,
-                "chars": len(content),
+                "chars": stream_chars,
+                "content_chars": len(content),
+                "thinking_chars": sum(len(part) for part in thinking_parts),
                 "tokens": _provider_tokens(final_payload),
             },
         )
@@ -271,6 +301,7 @@ class ExecutorRegistry:
                 return make_task_result(
                     task.id,
                     Outcome.RETRY_EXCEEDED.value,
+                    execution_id=result.execution_id,
                     reason=str(exc),
                     output={
                         "status": Outcome.RETRY_EXCEEDED.value,
@@ -291,10 +322,12 @@ class ExecutorRegistry:
 
     def _execute_model_once(self, task: Task, *, attempt: int) -> TaskResult:
         self.budget_tracker.consume_model_call()
+        execution_id = new_execution_id()
         prompt_meta = self._render_prompt(task)
         model = task.executor.model or ModelConfig(provider="stub", name="deterministic")
         self._emit_model_progress(
             "model_stream_start",
+            execution_id=execution_id,
             task_id=task.id,
             attempt=attempt,
             model=model.name,
@@ -308,6 +341,7 @@ class ExecutorRegistry:
             tools=[],
             progress_callback=lambda event, fields: self._emit_model_progress(
                 event,
+                execution_id=execution_id,
                 task_id=task.id,
                 attempt=attempt,
                 model=model.name,
@@ -321,6 +355,7 @@ class ExecutorRegistry:
         return make_task_result(
             task.id,
             status,
+            execution_id=execution_id,
             reason=response.output.get("reason"),
             output=response.output,
             evidence=_verifier_evidence(task, status, "Model output matched declared schema"),

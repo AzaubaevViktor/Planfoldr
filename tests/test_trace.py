@@ -35,7 +35,9 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert log_path.exists()
     assert list((trace_dir / "models").glob("*.json"))
     assert list((trace_dir / "commands").glob("*.json"))
-    assert "Execution Log" in report.read_text(encoding="utf-8")
+    report_text = report.read_text(encoding="utf-8")
+    assert "Execution Log" in report_text
+    assert "<th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th>" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events
@@ -101,6 +103,24 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
     assert progress[0]["task_id"] == "ask_model"
     assert progress[0]["tokens"]["source"] == "approximate"
     assert any(event["event"] == "model_stream_finish" for event in events)
+    assert "partial content" not in log_path.read_text(encoding="utf-8")
+
+    execution_id = next(event["execution_id"] for event in events if event["event"] == "model_stream_start")
+    stream_dir = tmp_path / "executor_scenario" / "stream-run" / "trace" / "models" / execution_id
+    assert (stream_dir / "chunks" / "000001.thinking.txt").read_text(encoding="utf-8") == "thinking "
+    assert (stream_dir / "chunks" / "000002.content.txt").read_text(encoding="utf-8") == "partial content"
+    assert (stream_dir / "assembled.txt").read_text(encoding="utf-8") == "thinking partial content"
+    assert (stream_dir / "content.txt").read_text(encoding="utf-8") == "partial content"
+    report_text = (tmp_path / "executor_scenario" / "stream-run" / "report.html").read_text(encoding="utf-8")
+    assert "Model Text" in report_text
+    assert "partial content" in report_text
+    assert "thinking " in report_text
+    model_metadata = json.loads(
+        (tmp_path / "executor_scenario" / "stream-run" / "trace" / "models" / f"{execution_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert model_metadata["stream_artifacts"]["content"] == f"models/{execution_id}/content.txt"
 
 
 def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:
@@ -125,12 +145,36 @@ class FakeStreamingModelAdapter:
     def generate(self, *, task, model, messages, config, tools, progress_callback=None):
         if progress_callback is not None:
             progress_callback(
+                "model_stream_chunk",
+                {"kind": "thinking", "text": "thinking ", "chars": 9, "thinking_chars": 9, "content_chars": 0},
+            )
+            progress_callback(
+                "model_stream_chunk",
+                {
+                    "kind": "content",
+                    "text": "partial content",
+                    "chars": 24,
+                    "thinking_chars": 9,
+                    "content_chars": 15,
+                },
+            )
+            progress_callback(
                 "model_stream_progress",
-                {"chars": 640, "tokens": {"generated": 160, "source": "approximate"}},
+                {
+                    "chars": 640,
+                    "thinking_chars": 9,
+                    "content_chars": 15,
+                    "tokens": {"generated": 160, "source": "approximate"},
+                },
             )
             progress_callback(
                 "model_stream_finish",
-                {"chars": 780, "tokens": {"generated": 195, "source": "provider"}},
+                {
+                    "chars": 780,
+                    "thinking_chars": 9,
+                    "content_chars": 15,
+                    "tokens": {"generated": 195, "source": "provider"},
+                },
             )
         return ModelResponse(
             output={"status": "success"},
