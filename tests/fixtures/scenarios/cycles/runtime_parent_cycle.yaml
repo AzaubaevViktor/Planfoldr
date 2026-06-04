@@ -1,0 +1,25 @@
+id: runtime_parent_cycle
+goal: Validate parent request propagation.
+entrypoint: first
+
+budgets:
+  max_iterations: 2
+
+tasks:
+  - id: first
+    type: tool
+    task: Request permission.
+    executor:
+      kind: tool
+      tool: noop
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  first:
+    success: success
+    need_permission: parent
+
+nested_cycles: []

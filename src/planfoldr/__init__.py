@@ -1,7 +1,17 @@
 """Planfoldr runtime package."""
 
 from planfoldr.loader import LoadedScenario, SchemaLoadError, load_scenario
+from planfoldr.runtime import Outcome, ScenarioResult, TaskResult, run_scenario
 
-__all__ = ["LoadedScenario", "SchemaLoadError", "__version__", "load_scenario"]
+__all__ = [
+    "LoadedScenario",
+    "Outcome",
+    "ScenarioResult",
+    "SchemaLoadError",
+    "TaskResult",
+    "__version__",
+    "load_scenario",
+    "run_scenario",
+]
 
 __version__ = "0.1.0"

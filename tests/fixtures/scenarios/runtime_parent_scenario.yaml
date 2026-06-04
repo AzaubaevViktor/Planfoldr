@@ -1,0 +1,16 @@
+id: runtime_parent_scenario
+goal: Validate parent requests.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - noop
+budgets:
+  max_iterations: 2
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/runtime_parent_cycle.yaml

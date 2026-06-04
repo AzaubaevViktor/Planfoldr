@@ -1,0 +1,24 @@
+id: runtime_missing_link_cycle
+goal: Validate missing links fail loudly.
+entrypoint: first
+
+budgets:
+  max_iterations: 2
+
+tasks:
+  - id: first
+    type: tool
+    task: Return need_context.
+    executor:
+      kind: tool
+      tool: noop
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  first:
+    success: success
+
+nested_cycles: []

@@ -1,0 +1,25 @@
+id: runtime_failure_cycle
+goal: Validate failure branching.
+entrypoint: first
+
+budgets:
+  max_iterations: 2
+
+tasks:
+  - id: first
+    type: tool
+    task: Return failure.
+    executor:
+      kind: tool
+      tool: noop
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  first:
+    success: success
+    failure: fail
+
+nested_cycles: []

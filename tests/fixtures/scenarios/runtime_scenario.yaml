@@ -1,0 +1,16 @@
+id: runtime_scenario
+goal: Validate runtime success.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - noop
+budgets:
+  max_iterations: 3
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/runtime_success_cycle.yaml

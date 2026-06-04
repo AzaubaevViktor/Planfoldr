@@ -1,0 +1,37 @@
+id: runtime_success_cycle
+goal: Validate success branching.
+entrypoint: first
+
+budgets:
+  max_iterations: 3
+
+tasks:
+  - id: first
+    type: tool
+    task: Run first task.
+    executor:
+      kind: tool
+      tool: noop
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+  - id: second
+    type: tool
+    task: Run second task.
+    executor:
+      kind: tool
+      tool: noop
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  first:
+    success: second
+  second:
+    success: success
+    failure: fail
+
+nested_cycles: []

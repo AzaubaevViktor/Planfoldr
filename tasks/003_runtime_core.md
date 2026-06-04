@@ -51,3 +51,13 @@ The runtime owns control flow. Tasks return enum outcomes, and links decide the 
 ## Done
 
 Stub tasks can run through a small nested scenario and produce the expected final status.
+
+## Implementation Notes
+
+- Runtime core lives in `src/planfoldr/runtime.py`.
+- `Outcome`, `TaskResult`, `CycleResult` and `ScenarioResult` are JSON-friendly runtime primitives.
+- `run_scenario` and `run_cycle` execute loaded scenarios sequentially from each cycle `entrypoint`.
+- Links support task targets plus terminal `success`, terminal `fail` and control target `parent`.
+- Task execution is injected through an executor callable; real command/model/tool executors start in Task 006.
+- Runtime tests live in `tests/test_runtime_core.py`.
+- Continue with [Task 004: Context, State And Audit](004_context_state_audit.md).
