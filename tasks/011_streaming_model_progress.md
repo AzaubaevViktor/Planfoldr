@@ -57,3 +57,12 @@ Append JSONL events like:
 ## Done
 
 During a slow Ollama run, `runs/<scenario_id>/<run_id>/logs/execution.log` receives periodic model progress events before the model task finishes.
+
+## Implementation Notes
+
+- Streaming support lives in `src/planfoldr/executors.py`.
+- `OllamaModelAdapter` uses `stream: true` and accumulates streamed chunks into the existing `ModelResponse` shape.
+- `ExecutorRegistry` exposes a model progress callback and annotates progress events with task id, attempt, model and provider.
+- `LoggingExecutor` forwards model progress events into `logs/execution.log`.
+- Mid-stream token counts use an approximate character-based counter; final stream metadata uses provider counts when Ollama reports them.
+- Unit coverage for streaming progress lives in `tests/test_trace.py` with a fake streaming adapter.

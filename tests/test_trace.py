@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from planfoldr.executors import ExecutorRegistry, StubModelAdapter
+from planfoldr.executors import ExecutorRegistry, ModelResponse, StubModelAdapter
 from planfoldr.guards import BudgetTracker, PermissionEngine
 from planfoldr.loader import load_scenario
 from planfoldr.trace import TraceWriter, replay_task, run_and_trace
@@ -83,6 +83,26 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     assert events[3]["task_id"] == "ask_model"
 
 
+def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        prompts=loaded.cycles[0].prompts,
+        model_adapter=FakeStreamingModelAdapter(),
+    )
+
+    run_and_trace(loaded, registry, output_root=tmp_path, run_id="stream-run")
+
+    log_path = tmp_path / "executor_scenario" / "stream-run" / "logs" / "execution.log"
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    progress = [event for event in events if event["event"] == "model_stream_progress"]
+    assert progress
+    assert progress[0]["task_id"] == "ask_model"
+    assert progress[0]["tokens"]["source"] == "approximate"
+    assert any(event["event"] == "model_stream_finish" for event in events)
+
+
 def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
     result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path / "first", run_id="manual-source")
@@ -99,3 +119,21 @@ def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:
 
     assert "audit_1" in (tmp_path / "manual" / "trace" / "audit.jsonl").read_text(encoding="utf-8")
     assert "decision_1" in (tmp_path / "manual" / "trace" / "decisions.jsonl").read_text(encoding="utf-8")
+
+
+class FakeStreamingModelAdapter:
+    def generate(self, *, task, model, messages, config, tools, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback(
+                "model_stream_progress",
+                {"chars": 640, "tokens": {"generated": 160, "source": "approximate"}},
+            )
+            progress_callback(
+                "model_stream_finish",
+                {"chars": 780, "tokens": {"generated": 195, "source": "provider"}},
+            )
+        return ModelResponse(
+            output={"status": "success"},
+            raw='{"status":"success"}',
+            metadata={"adapter": "fake-streaming", "streaming": True},
+        )

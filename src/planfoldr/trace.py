@@ -71,6 +71,8 @@ class LoggingExecutor:
         self.logger = logger
 
     def __call__(self, task):
+        if hasattr(self.executor, "set_model_progress_callback"):
+            self.executor.set_model_progress_callback(self._write_model_progress)
         self.logger.write(
             "task_start",
             task_id=task.id,
@@ -94,6 +96,9 @@ class LoggingExecutor:
             reason=result.reason,
         )
         return result
+
+    def _write_model_progress(self, event: str, fields: Dict[str, Any]) -> None:
+        self.logger.write(event, **fields)
 
 
 class TraceWriter:

@@ -13,7 +13,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from string import Template
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from planfoldr.guards import (
     BudgetExceeded,
@@ -27,6 +27,9 @@ from planfoldr.loader import LoadedPrompt
 from planfoldr.runtime import Outcome, TaskResult, make_task_result
 from planfoldr.schema import ModelConfig, Task
 from planfoldr.validation import OutputValidationError, VerifierEvidence, validate_task_output
+
+
+ProgressCallback = Callable[[str, Dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class ModelAdapter:
         messages: List[Dict[str, str]],
         config: Mapping[str, Any],
         tools: List[str],
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> ModelResponse:
         raise NotImplementedError
 
@@ -84,6 +88,7 @@ class StubModelAdapter(ModelAdapter):
         messages: List[Dict[str, str]],
         config: Mapping[str, Any],
         tools: List[str],
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> ModelResponse:
         prompt_id = str(config.get("prompt_id", ""))
         key = self._select_key(task.id, prompt_id)
@@ -112,11 +117,12 @@ class OllamaModelAdapter(ModelAdapter):
         messages: List[Dict[str, str]],
         config: Mapping[str, Any],
         tools: List[str],
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> ModelResponse:
         payload = {
             "model": model.name,
             "messages": messages,
-            "stream": False,
+            "stream": True,
             "format": "json",
         }
         request = urllib.request.Request(
@@ -125,26 +131,64 @@ class OllamaModelAdapter(ModelAdapter):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        content_parts: List[str] = []
+        raw_lines: List[str] = []
+        final_payload: Dict[str, Any] = {}
+        next_progress_chars = 512
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = response.read().decode("utf-8")
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    raw_lines.append(line)
+                    chunk = json.loads(line)
+                    if chunk.get("done"):
+                        final_payload = chunk
+                        _emit_progress(
+                            progress_callback,
+                            "model_stream_finish",
+                            chars=sum(len(part) for part in content_parts),
+                            tokens=_provider_tokens(chunk),
+                        )
+                        break
+                    content = chunk.get("message", {}).get("content", "")
+                    if not content:
+                        continue
+                    content_parts.append(content)
+                    chars = sum(len(part) for part in content_parts)
+                    if chars >= next_progress_chars:
+                        _emit_progress(
+                            progress_callback,
+                            "model_stream_progress",
+                            chars=chars,
+                            tokens=_approx_tokens(chars),
+                        )
+                        next_progress_chars = chars + 512
         except (OSError, urllib.error.URLError) as exc:
+            _emit_progress(progress_callback, "model_stream_error", reason=str(exc))
             return ModelResponse(
                 output={"status": Outcome.FAILURE.value, "reason": f"Ollama unavailable: {exc}"},
                 raw=str(exc),
                 metadata={"adapter": "ollama", "available": False},
             )
 
-        payload = json.loads(raw)
-        content = payload.get("message", {}).get("content", "{}")
+        content = "".join(content_parts)
         try:
             output = json.loads(content)
         except json.JSONDecodeError:
             output = {"status": Outcome.FAILURE.value, "reason": "Ollama returned non-JSON content"}
         return ModelResponse(
             output=output,
-            raw=raw,
-            metadata={"adapter": "ollama", "available": True, "model": model.name},
+            raw="\n".join(raw_lines),
+            metadata={
+                "adapter": "ollama",
+                "available": True,
+                "model": model.name,
+                "streaming": True,
+                "chars": len(content),
+                "tokens": _provider_tokens(final_payload),
+            },
         )
 
 
@@ -158,6 +202,10 @@ class ExecutorRegistry:
     prompt_variables: Mapping[str, Any] = field(default_factory=dict)
     invalid_output_retries: int = 0
     task_outputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    model_progress_callback: Optional[ProgressCallback] = None
+
+    def set_model_progress_callback(self, callback: Optional[ProgressCallback]) -> None:
+        self.model_progress_callback = callback
 
     def __call__(self, task: Task) -> TaskResult:
         before = self.budget_tracker.snapshot()
@@ -245,12 +293,27 @@ class ExecutorRegistry:
         self.budget_tracker.consume_model_call()
         prompt_meta = self._render_prompt(task)
         model = task.executor.model or ModelConfig(provider="stub", name="deterministic")
+        self._emit_model_progress(
+            "model_stream_start",
+            task_id=task.id,
+            attempt=attempt,
+            model=model.name,
+            provider=model.provider,
+        )
         response = self.model_adapter.generate(
             task=task,
             model=model,
             messages=[{"role": "user", "content": prompt_meta.rendered_prompt}],
-            config={"prompt_id": prompt_meta.prompt_id},
+            config={"prompt_id": prompt_meta.prompt_id, "attempt": attempt},
             tools=[],
+            progress_callback=lambda event, fields: self._emit_model_progress(
+                event,
+                task_id=task.id,
+                attempt=attempt,
+                model=model.name,
+                provider=model.provider,
+                **fields,
+            ),
         )
         if response.budget_cost:
             self.budget_tracker.consume_model_budget(response.budget_cost)
@@ -270,6 +333,10 @@ class ExecutorRegistry:
                 "raw_response": response.raw,
             },
         )
+
+    def _emit_model_progress(self, event: str, **fields: Any) -> None:
+        if self.model_progress_callback is not None:
+            self.model_progress_callback(event, fields)
 
     def _execute_tool(self, task: Task) -> TaskResult:
         tool_name = task.executor.tool or ""
@@ -380,6 +447,29 @@ def _verifier_evidence(task: Task, status: str, proof: str) -> Optional[Dict[str
     if task.type != "verify":
         return None
     return VerifierEvidence(status=status, proof=proof).to_dict()
+
+
+def _emit_progress(
+    progress_callback: Optional[ProgressCallback],
+    event: str,
+    **fields: Any,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(event, fields)
+
+
+def _approx_tokens(chars: int) -> Dict[str, Any]:
+    return {"generated": max(1, chars // 4), "source": "approximate"}
+
+
+def _provider_tokens(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    if not payload:
+        return {"generated": None, "prompt": None, "source": "unsupported"}
+    return {
+        "generated": payload.get("eval_count"),
+        "prompt": payload.get("prompt_eval_count"),
+        "source": "provider",
+    }
 
 
 def _render_text(template: str, variables: Mapping[str, Any]) -> str:
