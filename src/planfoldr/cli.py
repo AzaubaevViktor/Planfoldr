@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -47,12 +48,13 @@ def _run(args: argparse.Namespace) -> int:
         _override_model_name(loaded, args.ollama_model)
 
     run_id = args.run_id or new_run_id()
+    loaded.document.inputs = _render_runtime_inputs(loaded.document.inputs, run_id=run_id)
     registry = ExecutorRegistry(
         permission_engine=PermissionEngine(loaded.document.constraints, base_dir=args.base_dir),
         budget_tracker=BudgetTracker(loaded.document.budgets),
         prompts=_collect_prompts(loaded),
         model_adapter=_select_model_adapter(loaded, timeout=args.ollama_timeout),
-        prompt_variables=_prompt_variables(loaded.document.inputs),
+        prompt_variables=_prompt_variables(loaded.document.inputs, run_id=run_id),
         invalid_output_retries=_invalid_output_retries(loaded),
     )
     result = run_and_trace(loaded, registry, output_root=args.output_root, run_id=run_id)
@@ -96,8 +98,38 @@ def _invalid_output_retries(loaded) -> int:
     return defaults.retry.invalid_output
 
 
-def _prompt_variables(inputs: dict) -> dict:
-    return {"inputs": inputs, **{f"inputs.{key}": value for key, value in inputs.items()}}
+def _prompt_variables(inputs: dict, *, run_id: str = "") -> dict:
+    return {
+        "inputs": inputs,
+        "runtime": {"python": sys.executable, "run_id": run_id},
+        "runtime.python": sys.executable,
+        "runtime.run_id": run_id,
+        **{f"inputs.{key}": value for key, value in inputs.items()},
+    }
+
+
+def _render_runtime_inputs(inputs: dict, *, run_id: str) -> dict:
+    runtime_values = {
+        "{{ runtime.run_id }}": run_id,
+        "{{ runtime.python }}": sys.executable,
+    }
+    return {
+        key: _replace_runtime_placeholders(value, runtime_values)
+        for key, value in inputs.items()
+    }
+
+
+def _replace_runtime_placeholders(value, runtime_values: dict):
+    if isinstance(value, str):
+        rendered = value
+        for placeholder, replacement in runtime_values.items():
+            rendered = rendered.replace(placeholder, replacement)
+        return rendered
+    if isinstance(value, dict):
+        return {key: _replace_runtime_placeholders(item, runtime_values) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_runtime_placeholders(item, runtime_values) for item in value]
+    return value
 
 
 def _override_model_name(loaded, model_name: str) -> None:

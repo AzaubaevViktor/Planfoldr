@@ -1,14 +1,27 @@
 id: ollama_cli_todo_app
 goal: Generate and verify a Python CLI todo-list project.
-entrypoint: setup_repo
+entrypoint: setup_workspace
 
 budgets:
-  max_iterations: 8
-  max_tool_calls: 8
-  max_model_calls: 3
+  max_iterations: 12
+  max_tool_calls: 16
+  max_model_calls: 6
   max_cpu_time: 30
 
 tasks:
+  - id: setup_workspace
+    type: command
+    task: Create the generated project workspace.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} -c \"from pathlib import Path; Path('{{ inputs.repository_path }}').mkdir(parents=True, exist_ok=True)\""
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
   - id: setup_repo
     type: command
     task: Create a generated git repository.
@@ -64,7 +77,7 @@ tasks:
     task: Run generated project tests.
     executor:
       kind: command
-      command: python3 -m pytest
+      command: "{{ runtime.python }} -m pytest"
       cwd: "{{ inputs.repository_path }}"
     input_schema:
       type: object
@@ -104,6 +117,10 @@ tasks:
         - status
 
 links:
+  setup_workspace:
+    success: setup_repo
+    failure: fail
+    need_permission: fail
   setup_repo:
     success: generate_project
     failure: fail

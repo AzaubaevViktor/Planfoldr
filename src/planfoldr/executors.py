@@ -259,10 +259,12 @@ class ExecutorRegistry:
         return _with_budget_snapshots(result, before, after)
 
     def _execute_command(self, task: Task) -> TaskResult:
-        command = _render_text(task.executor.command or "", self.prompt_variables)
+        command = _render_text(task.executor.command or "", self._template_variables())
         self.permission_engine.check_command(command)
         self.budget_tracker.consume_tool_call()
-        cwd = self.permission_engine.check_read_path(_render_text(task.executor.cwd or ".", self.prompt_variables))
+        cwd = self.permission_engine.check_read_path(
+            _render_text(task.executor.cwd or ".", self._template_variables())
+        )
         completed = subprocess.run(
             shlex.split(command),
             cwd=str(cwd),
@@ -393,7 +395,7 @@ class ExecutorRegistry:
         files = payload.get("files", [])
         written: List[str] = []
         for item in files:
-            target = self.permission_engine.check_write_path(_render_text(item["path"], self.prompt_variables))
+            target = self.permission_engine.check_write_path(_render_text(item["path"], self._template_variables()))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(item.get("content", "")), encoding="utf-8")
             written.append(str(target))
@@ -421,14 +423,23 @@ class ExecutorRegistry:
             loaded = self.prompts[prompt_ref.id]
             rendered = loaded.content
             prompt_id = prompt_ref.id
-        rendered = _render_text(rendered, self.prompt_variables)
+        variables = self._template_variables()
+        rendered = _render_text(rendered, variables)
         digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         return PromptMetadata(
             prompt_id=prompt_id,
             hash=f"sha256:{digest}",
-            variables=dict(self.prompt_variables),
+            variables=variables,
             rendered_prompt=rendered,
         )
+
+    def _template_variables(self) -> Dict[str, Any]:
+        variables = dict(self.prompt_variables)
+        variables["tasks"] = {
+            task_id: {"output": output}
+            for task_id, output in self.task_outputs.items()
+        }
+        return variables
 
     def _validate_non_model_output(self, task: Task, result: TaskResult) -> TaskResult:
         if task.executor.kind == "model" or result.status in {

@@ -18,4 +18,9 @@ Requirements:
 - include ARCHITECTURE.md;
 - use no external runtime dependencies;
 - keep paths inside `{{ inputs.repository_path }}`;
+- use a single Python package directory named `todo`;
+- do not create a top-level `todo.py` file;
+- make `todo/__init__.py` export the public API used by tests;
+- if tests import `Todo` or `TodoList` from `todo`, those names must exist in `todo/__init__.py`;
+- keep test imports consistent with the files you create;
 - do not decide workflow transitions.

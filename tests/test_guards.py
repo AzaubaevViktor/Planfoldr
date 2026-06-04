@@ -22,6 +22,7 @@ def test_budget_tracker_reports_exhaustion() -> None:
 
     report = exc_info.value.report
     assert report.limit == "max_iterations"
+    assert report.used == 1
     assert report.ram_enforcement == "unsupported"
 
     result = budget_exceeded_result("task.one", report)
@@ -39,6 +40,8 @@ def test_model_budget_and_call_limits_are_tracked() -> None:
         tracker.consume_model_call(budget_cost=0.1)
 
     assert exc_info.value.report.limit == "max_model_calls"
+    assert exc_info.value.report.used == 2
+    assert tracker.usage.model_calls == 2
 
 
 def test_tool_allowlist_and_deny_rules_are_enforced() -> None:

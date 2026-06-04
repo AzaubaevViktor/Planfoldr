@@ -111,3 +111,29 @@ def test_write_files_ignores_tool_file_lists_when_finding_latest_model_output(tm
 
     assert result.status == "success"
     assert target.read_text(encoding="utf-8") == "# Architecture\n"
+
+
+def test_command_templates_can_read_previous_task_outputs() -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        task_outputs={"previous": {"message": "from prior task"}},
+    )
+    task = Task(
+        id="echo_previous",
+        type="command",
+        task="Echo previous output.",
+        executor=Executor(
+            kind="command",
+            command="python3 -c \"print('{{ tasks.previous.output.message }}')\"",
+            cwd=".",
+        ),
+        input_schema={"type": "object"},
+        output_schema={"type": "object", "required": ["status"]},
+    )
+
+    result = registry(task)
+
+    assert result.status == "success"
+    assert result.output["stdout"] == "from prior task\n"

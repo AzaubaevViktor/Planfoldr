@@ -72,35 +72,46 @@ class BudgetTracker:
         }
 
     def consume_iteration(self, amount: int = 1) -> None:
+        self._ensure_available("max_iterations", self.usage.iterations, amount, self.configured.max_iterations)
         self.usage.iterations += amount
-        self._check("max_iterations", self.usage.iterations, self.configured.max_iterations)
 
     def consume_tool_call(self, amount: int = 1) -> None:
+        self._ensure_available("max_tool_calls", self.usage.tool_calls, amount, self.configured.max_tool_calls)
         self.usage.tool_calls += amount
-        self._check("max_tool_calls", self.usage.tool_calls, self.configured.max_tool_calls)
 
     def consume_model_call(self, *, budget_cost: float = 0.0) -> None:
+        self._ensure_available("max_model_calls", self.usage.model_calls, 1, self.configured.max_model_calls)
+        self._ensure_available(
+            "max_model_budget",
+            self.usage.model_budget,
+            budget_cost,
+            self.configured.max_model_budget,
+        )
         self.usage.model_calls += 1
         self.usage.model_budget += budget_cost
-        self._check("max_model_calls", self.usage.model_calls, self.configured.max_model_calls)
-        self._check("max_model_budget", self.usage.model_budget, self.configured.max_model_budget)
 
     def consume_model_budget(self, budget_cost: float) -> None:
+        self._ensure_available(
+            "max_model_budget",
+            self.usage.model_budget,
+            budget_cost,
+            self.configured.max_model_budget,
+        )
         self.usage.model_budget += budget_cost
-        self._check("max_model_budget", self.usage.model_budget, self.configured.max_model_budget)
 
     def consume_cpu_time(self, seconds: float) -> None:
+        self._ensure_available("max_cpu_time", self.usage.cpu_time, seconds, self.configured.max_cpu_time)
         self.usage.cpu_time += seconds
-        self._check("max_cpu_time", self.usage.cpu_time, self.configured.max_cpu_time)
 
-    def _check(self, limit: str, used: float, maximum: Optional[float]) -> None:
-        if maximum is not None and used > maximum:
+    def _ensure_available(self, limit: str, used: float, amount: float, maximum: Optional[float]) -> None:
+        attempted = used + amount
+        if maximum is not None and attempted > maximum:
             raise BudgetExceeded(
                 BudgetReport(
                     limit=limit,
                     used=used,
                     maximum=maximum,
-                    reason=f"{limit} exceeded: used {used}, maximum {maximum}",
+                    reason=f"{limit} exhausted: used {used}, attempted {attempted}, maximum {maximum}",
                 )
             )
 
