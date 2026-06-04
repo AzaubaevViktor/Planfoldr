@@ -1,8 +1,8 @@
-# Task 006: Command And Model Executors
+# Task 006: Command, Tool And Model Executors
 
 ## Goal
 
-Implement MVP executor types: `command` and `model`.
+Implement MVP executor types: `command`, `tool` and `model`.
 
 ## Concept
 
@@ -13,6 +13,7 @@ Executors are adapters. They do work, but they do not decide workflow. The runti
 - Command executor can run configured commands.
 - Command executor captures exit code, stdout and stderr.
 - Model executor interface exists.
+- Tool executor interface exists for internal operations with explicit constraints.
 - Stub model adapter exists for tests.
 - Ollama model adapter exists for local e2e.
 - Model metadata is captured.
@@ -21,13 +22,23 @@ Executors are adapters. They do work, but they do not decide workflow. The runti
 ## Constraints
 
 - Commands must go through permission checks.
+- Tool executors must go through permission checks.
 - Model calls must go through budget checks.
 - Do not make Ollama required for regular unit tests.
+
+## Phase 2 Decisions
+
+- Internal operations are separate tools with described constraints, not arbitrary shell snippets.
+- Command executor boundary includes explicit `cwd`, controlled `env`, budget-derived timeout and filesystem checks before writes where possible.
+- Model adapter input shape is `model`, `messages`, `config`, `tools`.
+- Stub model chooses responses using all available fixture keys: task id, prompt id, fixture sequence and related metadata.
+- If Ollama/local model is unavailable, return `failure` with a clear reason.
 
 ## Subtasks
 
 - Implement executor registry.
 - Implement command executor.
+- Implement constrained tool executor interface.
 - Implement model executor interface.
 - Implement stub model adapter.
 - Implement Ollama adapter.

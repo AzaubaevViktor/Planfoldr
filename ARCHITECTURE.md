@@ -181,6 +181,7 @@ On budget exhaustion, the runtime returns `budget_exceeded` with a report. The p
 MVP executor types:
 - `command`
 - `model`
+- `tool` for constrained internal operations
 
 Verifier tasks may use:
 - command execution;
@@ -189,6 +190,8 @@ Verifier tasks may use:
 - model request with a verification prompt.
 
 Model selection is explicit per model task, with scenario defaults as fallback.
+
+Internal operations, such as materializing files from structured model output, are represented as constrained tools. They are not arbitrary shell snippets.
 
 ## Prompts
 

@@ -22,9 +22,17 @@ The repository needs enough structure for independent agents to add runtime piec
 - Do not add network-only setup as a hard requirement.
 - Keep files small and boring.
 
+## Phase 2 Decisions
+
+- Use Python.
+- Package/module name is `planfoldr`.
+- Dependencies are recorded in `requirements.txt`.
+- Canonical test command is `python -m pytest` from a virtualenv.
+- Generated run workdirs must not be committed; `runs/` remains ignored.
+
 ## Subtasks
 
-- Choose the implementation stack.
+- Create Python project metadata.
 - Create package/project metadata.
 - Create source directory.
 - Create test directory.

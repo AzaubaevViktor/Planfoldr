@@ -24,6 +24,15 @@ Required conditions are verifier task chains. Model outputs must match declared 
 - Verifier evidence must be captured.
 - Custom scripts must go through permission checks.
 
+## Phase 2 Decisions
+
+- `input_schema` and `output_schema` use JSON Schema.
+- Every task output must include `status`.
+- Verifiers are separate tasks; model verifier tasks are allowed.
+- Verifier templates may be added to avoid repeated YAML.
+- Verifier evidence contains status, proof and audit log reference.
+- Every retry consumes model/tool call budgets.
+
 ## Subtasks
 
 - Select or implement schema validation.

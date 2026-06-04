@@ -15,6 +15,7 @@ Primary decisions are captured in:
 - [docs/phase_1/MVP_SPEC.md](docs/phase_1/MVP_SPEC.md) — MVP requirements and acceptance criteria.
 - [docs/phase_1/SCHEMA_DRAFT.md](docs/phase_1/SCHEMA_DRAFT.md) — initial YAML and trace schema draft.
 - [docs/phase_2/QUESTIONS.md](docs/phase_2/QUESTIONS.md) — open implementation questions for Phase 2.
+- [docs/phase_2/DECISIONS.md](docs/phase_2/DECISIONS.md) — normalized Phase 2 implementation decisions.
 - [tasks](tasks) — implementation tasks for Phase 2.
 
 The cleaned Phase 1 answer record remains in [QUESTIONS_PHASE_1.md](QUESTIONS_PHASE_1.md).

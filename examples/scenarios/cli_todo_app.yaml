@@ -20,6 +20,7 @@ constraints:
       - python
       - pytest
       - ollama
+      - write_files
   filesystem:
     allow_write:
       - ./runs/cli_todo_app_demo

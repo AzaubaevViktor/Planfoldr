@@ -26,6 +26,7 @@ Budgets and permissions are inherited from parent cycles and can be delegated to
 - Full sandboxing is out of scope.
 - Permission checks should be centralized.
 - Budget accounting should be deterministic where possible.
+- RAM budget enforcement is out of scope for MVP; report it as unsupported/placeholder if configured.
 
 ## Subtasks
 
@@ -36,6 +37,13 @@ Budgets and permissions are inherited from parent cycles and can be delegated to
 - Implement tool allowlist checks.
 - Implement filesystem allowlist checks.
 - Add tests for budget exhaustion and denied access.
+
+## Phase 2 Decisions
+
+- Model budget may use request count, token count or provider-returned cost.
+- Filesystem allowlists use resolved paths; leave room for future jail-mount behavior.
+- Command permissions use allowlist and blacklist regex rules.
+- Nested budget/permission requests return to parent; parent link decides next task or failure.
 
 ## Dependencies
 

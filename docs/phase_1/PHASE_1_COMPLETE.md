@@ -32,6 +32,12 @@ Open implementation questions for Phase 2:
 docs/phase_2/QUESTIONS.md
 ```
 
+Normalized implementation decisions for Phase 2:
+
+```text
+docs/phase_2/DECISIONS.md
+```
+
 ## Source Material
 
 - Cleaned Phase 1 answers: `QUESTIONS_PHASE_1.md`

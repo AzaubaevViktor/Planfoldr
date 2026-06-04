@@ -38,6 +38,7 @@ Expected demo output:
 
 - Run `command` tasks.
 - Run `model` tasks through an adapter.
+- Run constrained `tool` tasks for internal operations.
 - Provide a stub model adapter for tests.
 - Provide an Ollama model adapter for local e2e.
 
@@ -92,11 +93,12 @@ Expected demo output:
 ### Reporting
 
 - Produce CLI logs.
-- Produce structured trace file.
+- Produce structured trace directory with manifest.
 - Produce static one-page HTML report.
 - HTML report shows nested execution structure.
 - HTML report allows deep levels to be collapsed.
 - HTML report allows step-by-step model request/response inspection.
+- HTML report can lazily load trace parts.
 
 ## Non-Functional Requirements
 

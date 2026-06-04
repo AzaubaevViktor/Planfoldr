@@ -22,6 +22,14 @@ The runtime should fail early on invalid scenario structure. Schema objects shou
 - Do not build a full DSL.
 - Keep schema validation deterministic.
 
+## Phase 2 Decisions
+
+- Use Pydantic for scenario/cycle/task schemas.
+- Use PyYAML for YAML parsing.
+- Resolve linked YAML and prompt paths relative to the file that declares the link.
+- Reject unknown fields; all fields must be explicit.
+- Validation errors include file path, YAML path, expected field/type and actual value preview.
+
 ## Subtasks
 
 - Define scenario data structures.

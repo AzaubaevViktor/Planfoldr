@@ -23,6 +23,16 @@ The runtime owns control flow. Tasks return enum outcomes, and links decide the 
 - Do not add complex parallel DAG logic yet.
 - Keep runtime decisions explicit and traceable.
 
+## Phase 2 Decisions
+
+- Result envelope is JSON-serializable.
+- Cycle starts from explicit `entrypoint`.
+- Link terminal states are `success` and `fail`.
+- `parent` is a control target, not a terminal state.
+- Outcome names use `need_*`.
+- MVP execution is sequential.
+- Parent-child communication uses typed outcome plus `request` payload; parent link decides the next task or terminal state.
+
 ## Subtasks
 
 - Define outcome enum.

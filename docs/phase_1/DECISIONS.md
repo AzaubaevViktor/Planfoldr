@@ -104,7 +104,7 @@ Budgets can be delegated from a cycle to nested cycles.
 
 ## Models And Prompts
 
-- MVP executor types are `command` and `model`.
+- MVP executor types are `command`, `model` and constrained `tool` for internal operations.
 - Model is explicit per model task, with defaults available.
 - Invalid model output triggers configured retries with schema clarification.
 - Prompts are templates with variables, ids and content hashes.

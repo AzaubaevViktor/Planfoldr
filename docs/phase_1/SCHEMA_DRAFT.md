@@ -27,6 +27,7 @@ constraints:
       - python
       - pytest
       - ollama
+      - write_files
   filesystem:
     allow_write:
       - ./runs/cli_todo_app_demo
@@ -62,6 +63,7 @@ cycles:
 ```yaml
 id: build_cli_todo_app
 goal: Build the todo CLI project and verify tests.
+entrypoint: plan_project
 
 budgets:
   max_iterations: 6
@@ -75,6 +77,7 @@ constraints:
       - python
       - pytest
       - ollama
+      - write_files
 
 context_access:
   read:
@@ -112,15 +115,26 @@ tasks:
           type: array
 
   - id: create_files
-    type: command
+    type: tool
     task: Materialize files produced by the model.
     executor:
-      kind: command
-      command: planfoldr-internal-write-files
+      kind: tool
+      tool: write_files
+      constraints:
+        filesystem:
+          allow_write:
+            - "{{ inputs.repository_path }}"
     input_schema:
       type: object
     output_schema:
       type: object
+      required:
+        - status
+      properties:
+        status:
+          enum:
+            - success
+            - failure
 
   - id: verify_tests
     type: verify
@@ -133,6 +147,13 @@ tasks:
       type: object
     output_schema:
       type: object
+      required:
+        - status
+      properties:
+        status:
+          enum:
+            - success
+            - failure
 
 links:
   plan_project:
@@ -171,6 +192,24 @@ nested_cycles: []
 ```
 
 ## Trace File
+
+MVP trace is stored as a directory, not only as one flat file.
+
+```text
+runs/<scenario_id>/
+  trace/
+    manifest.json
+    scenario.json
+    cycles/
+    tasks/
+    tools/
+    models/
+    audit.jsonl
+    decisions.jsonl
+  report.html
+```
+
+`manifest.json` points to the structured trace parts and is the default entry point for report rendering.
 
 ```json
 {

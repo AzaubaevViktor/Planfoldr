@@ -23,6 +23,14 @@ Every task has private context. Parent context is available only through declare
 - Do not allow global writes without declared access.
 - Keep audit events machine-readable.
 
+## Phase 2 Decisions
+
+- Store context as nested dict snapshots plus immutable audit events.
+- Use scope names `task`, `cycle`, `scenario`, `decision_log`, `audit_log`.
+- Express context permissions as `context_access.read/write/delete` arrays of dotted paths.
+- Audit events include event id, timestamp, actor id, action, scope path, value summary and result.
+- Domain facts are not propagated upward implicitly; lower cycles report results to parent cycles through a specified output format.
+
 ## Subtasks
 
 - Define context scopes.
