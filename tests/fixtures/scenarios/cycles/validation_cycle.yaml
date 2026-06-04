@@ -1,0 +1,39 @@
+id: validation_cycle
+goal: Validate model output retry behavior.
+entrypoint: validate_model
+
+budgets:
+  max_iterations: 3
+  max_model_calls: 3
+
+tasks:
+  - id: validate_model
+    type: model
+    task: Return structured output.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: validation_prompt
+        file: ../../prompts/validation_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+
+links:
+  validate_model:
+    success: success
+    failure: fail
+    retry_exceeded: fail
+
+nested_cycles: []

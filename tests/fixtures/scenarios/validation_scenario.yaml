@@ -1,0 +1,22 @@
+id: validation_scenario
+goal: Validate output schemas.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - noop
+  filesystem:
+    allow_read:
+      - .
+    allow_write:
+      - ./runs/validation
+budgets:
+  max_iterations: 3
+  max_model_calls: 3
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/validation_cycle.yaml

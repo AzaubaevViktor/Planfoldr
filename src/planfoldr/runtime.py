@@ -187,6 +187,7 @@ def make_task_result(
     output: Optional[Mapping[str, Any]] = None,
     request: Optional[Mapping[str, Any]] = None,
     metadata: Optional[Mapping[str, Any]] = None,
+    evidence: Optional[Mapping[str, Any]] = None,
 ) -> TaskResult:
     now = _now()
     return TaskResult(
@@ -197,6 +198,7 @@ def make_task_result(
         output=dict(output or {"status": status}),
         request=dict(request) if request is not None else None,
         metadata=dict(metadata or {}),
+        evidence=dict(evidence) if evidence is not None else None,
         started_at=now,
         finished_at=now,
     )

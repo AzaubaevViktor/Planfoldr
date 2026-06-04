@@ -50,3 +50,14 @@ Required conditions are verifier task chains. Model outputs must match declared 
 ## Done
 
 A cycle can prove success through verifier tasks, and invalid model output cannot drive transitions unchecked.
+
+## Implementation Notes
+
+- MVP output validation lives in `src/planfoldr/validation.py`.
+- `validate_task_output` checks required `status`, JSON Schema `type`, `required`, `properties`, `items` and `enum`.
+- `ExecutorRegistry` validates task outputs before links consume them.
+- Model tasks retry invalid output up to `invalid_output_retries`; exhausted retries return `retry_exceeded`.
+- Verifier tasks attach `VerifierEvidence` to task results.
+- Command, custom script and model verifiers are represented as normal `verify` tasks using command/model executors.
+- Tests live in `tests/test_validation.py`.
+- Continue with [Task 008: Trace, Task Replay And HTML Report](008_trace_replay_report.md).
