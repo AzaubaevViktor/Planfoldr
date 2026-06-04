@@ -30,9 +30,9 @@ Models are executors inside `model` tasks.
 ```text
 Scenario
   Cycle
-    Task
-    Cycle
-      Task
+    -> Task -> task -> task -> task -> task ->
+    Cycle                             .^  |
+      -> Task -> task -> task -> task `   `> task -> 
 ```
 
 `Scenario` is the whole run. It owns the top-level goal, required conditions, constraints, budgets, inputs, outputs, cycles and context policy.
