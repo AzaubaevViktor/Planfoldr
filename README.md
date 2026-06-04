@@ -11,6 +11,7 @@ Phase 2 is complete as an MVP prototype.
 
 Primary decisions are captured in:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — target architecture and MVP boundaries.
+- [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) — short practical guide for running and inspecting the prototype.
 - [docs/phase_1/PHASE_1_COMPLETE.md](docs/phase_1/PHASE_1_COMPLETE.md) — Phase 1 completion marker and Phase 2 entry point.
 - [docs/phase_2/PHASE_2_COMPLETE.md](docs/phase_2/PHASE_2_COMPLETE.md) — Phase 2 completion marker and implementation summary.
 - [docs/phase_1/DECISIONS.md](docs/phase_1/DECISIONS.md) — normalized decisions from answered questions.
@@ -40,6 +41,7 @@ python -m pytest
 Generated run artifacts belong under `runs/` and are ignored by git.
 
 See [docs/phase_2/PHASE_2_COMPLETE.md](docs/phase_2/PHASE_2_COMPLETE.md) for implementation evidence and known MVP boundaries.
+For a quick usage walkthrough, read [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 ## Stub E2E Tests
 
