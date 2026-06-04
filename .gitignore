@@ -68,5 +68,8 @@ venv.bak/
 .idea/
 .vscode/
 
+# Planfoldr generated artifacts
+runs/
+
 # macOS
 .DS_Store

@@ -1,0 +1,43 @@
+# Task 003: Runtime Core
+
+## Goal
+
+Implement the deterministic scenario/cycle/task execution loop.
+
+## Concept
+
+The runtime owns control flow. Tasks return enum outcomes, and links decide the next step. Models and commands are called only through executors.
+
+## Necessary Conditions
+
+- Scenario run returns final status.
+- Cycle run returns final status.
+- Task execution returns a result envelope.
+- Links branch by enum outcome.
+- Terminal states `success` and `fail` work.
+- Parent cycle can receive typed child requests.
+
+## Constraints
+
+- Do not implement real executors here beyond test doubles.
+- Do not add complex parallel DAG logic yet.
+- Keep runtime decisions explicit and traceable.
+
+## Subtasks
+
+- Define outcome enum.
+- Define task result envelope.
+- Implement scenario runner.
+- Implement cycle runner.
+- Implement link resolution.
+- Implement parent request propagation.
+- Add unit tests for success, failure and missing link.
+
+## Dependencies
+
+- Depends on task 002.
+- Blocks tasks 004, 005 and 006.
+
+## Done
+
+Stub tasks can run through a small nested scenario and produce the expected final status.

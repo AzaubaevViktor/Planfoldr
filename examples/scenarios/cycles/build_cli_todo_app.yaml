@@ -1,0 +1,89 @@
+id: build_cli_todo_app
+goal: Build the todo CLI project and verify tests.
+
+budgets:
+  max_iterations: 6
+  max_tool_calls: 25
+  max_model_calls: 10
+
+constraints:
+  tools:
+    allow:
+      - git
+      - python
+      - pytest
+      - ollama
+
+context_access:
+  read:
+    - scenario.inputs
+    - scenario.constraints
+  write:
+    - cycle.facts
+    - cycle.decisions
+
+tasks:
+  - id: plan_project
+    type: model
+    task: Produce a JSON implementation plan for a small CLI todo-list app.
+    executor:
+      kind: model
+      model:
+        provider: ollama
+        name: llama3.1
+      prompt:
+        id: plan_cli_todo_app
+        file: ../../prompts/plan_cli_todo_app.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+        - files
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+        files:
+          type: array
+
+  - id: create_files
+    type: command
+    task: Materialize files produced by the model.
+    executor:
+      kind: command
+      command: planfoldr-internal-write-files
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+  - id: verify_tests
+    type: verify
+    task: Run project tests.
+    executor:
+      kind: command
+      command: pytest
+      cwd: "{{ inputs.repository_path }}"
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  plan_project:
+    success: create_files
+    failure: fail
+    retry_exceeded: fail
+  create_files:
+    success: verify_tests
+    failure: fail
+    need_permission: parent
+  verify_tests:
+    success: success
+    failure: fail
+    budget_exceeded: parent
+
+nested_cycles: []

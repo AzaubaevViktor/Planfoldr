@@ -1,0 +1,50 @@
+id: cli_todo_app_demo
+goal: Create a simple CLI todo-list project with tests.
+
+inputs:
+  workspace_root: ./runs/cli_todo_app_demo/workspace
+  repository_path: ./runs/cli_todo_app_demo/workspace/project
+
+outputs:
+  report_path: ./runs/cli_todo_app_demo/report.html
+  trace_path: ./runs/cli_todo_app_demo/trace.json
+
+required_conditions:
+  - id: project_tests_pass
+    verifier_task: verify_tests
+
+constraints:
+  tools:
+    allow:
+      - git
+      - python
+      - pytest
+      - ollama
+  filesystem:
+    allow_write:
+      - ./runs/cli_todo_app_demo
+    allow_read:
+      - ./examples
+      - ./runs/cli_todo_app_demo
+
+budgets:
+  max_iterations: 8
+  max_tool_calls: 30
+  max_model_calls: 12
+  max_model_budget: 1.00
+  max_cpu_time: 300
+  max_ram: 1073741824
+
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+
+defaults:
+  model:
+    provider: ollama
+    name: llama3.1
+  retry:
+    invalid_output: 2
+
+cycles:
+  - file: ./cycles/build_cli_todo_app.yaml

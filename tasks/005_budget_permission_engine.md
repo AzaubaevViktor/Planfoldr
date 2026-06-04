@@ -1,0 +1,48 @@
+# Task 005: Budget And Permission Engine
+
+## Goal
+
+Track budgets and enforce basic permissions.
+
+## Concept
+
+Budgets and permissions are inherited from parent cycles and can be delegated to nested cycles. A denied action returns a typed outcome rather than escaping the runtime model.
+
+## Necessary Conditions
+
+- Track `max_iterations`.
+- Track `max_tool_calls`.
+- Track `max_model_calls`.
+- Track `max_model_budget`.
+- Track `max_cpu_time`.
+- Track `max_ram`.
+- Enforce tool allowlist.
+- Enforce filesystem allowlist.
+- Return `budget_exceeded` with a report.
+- Return `need_permission` for denied permissions.
+
+## Constraints
+
+- Full sandboxing is out of scope.
+- Permission checks should be centralized.
+- Budget accounting should be deterministic where possible.
+
+## Subtasks
+
+- Define budget model.
+- Define budget report.
+- Implement budget debit/check APIs.
+- Define permission model.
+- Implement tool allowlist checks.
+- Implement filesystem allowlist checks.
+- Add tests for budget exhaustion and denied access.
+
+## Dependencies
+
+- Depends on task 003.
+- Uses context/audit from task 004 when available.
+- Blocks task 006.
+
+## Done
+
+Executors cannot run disallowed tools or write outside allowed filesystem paths through the runtime APIs.
