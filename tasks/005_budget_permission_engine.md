@@ -54,3 +54,12 @@ Budgets and permissions are inherited from parent cycles and can be delegated to
 ## Done
 
 Executors cannot run disallowed tools or write outside allowed filesystem paths through the runtime APIs.
+
+## Implementation Notes
+
+- Budget and permission checks live in `src/planfoldr/guards.py`.
+- `BudgetTracker` tracks iterations, tool calls, model calls, model budget and CPU time; RAM is reported as unsupported when configured.
+- `PermissionEngine` enforces tool allow/deny regex rules and resolved filesystem read/write allowlists.
+- Guard failures can be converted into runtime task results with `budget_exceeded_result` and `need_permission_result`.
+- Tests live in `tests/test_guards.py`.
+- Continue with [Task 006: Command, Tool And Model Executors](006_executors_command_model.md).
