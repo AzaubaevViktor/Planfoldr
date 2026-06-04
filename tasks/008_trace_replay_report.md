@@ -56,3 +56,13 @@ The trace is the main observability artifact. The HTML report is a human view ov
 ## Done
 
 Every e2e run leaves a trace JSON and static HTML report that can be inspected without rerunning the scenario.
+
+## Implementation Notes
+
+- Trace and report support lives in `src/planfoldr/trace.py`.
+- `run_and_trace` runs a loaded scenario and writes `runs/<scenario_id>/trace/` plus `report.html`.
+- `TraceWriter` writes `manifest.json`, `scenario.json`, cycle/task execution parts, model/command/tool details, audit and decision logs.
+- `replay_task(trace_dir, task_id)` restores a captured `TaskResult` without re-executing any adapter.
+- The HTML report is static and includes cycle structure, execution log and task filtering.
+- Tests live in `tests/test_trace.py`.
+- Continue with [Task 009: E2E Stub Scenarios](009_e2e_stub_scenarios.md).
