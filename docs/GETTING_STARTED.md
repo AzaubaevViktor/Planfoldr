@@ -114,6 +114,12 @@ ollama pull llama3.1
 PLANFOLDR_RUN_OLLAMA_E2E=1 python -m pytest tests/test_ollama_e2e.py
 ```
 
+Use another local model:
+
+```bash
+PLANFOLDR_RUN_OLLAMA_E2E=1 PLANFOLDR_OLLAMA_MODEL=carstenuhlig/omnicoder-9b:latest PLANFOLDR_OLLAMA_TIMEOUT=180 python -m pytest tests/test_ollama_e2e.py
+```
+
 Scenario:
 
 ```text
