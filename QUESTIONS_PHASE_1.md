@@ -1,349 +1,192 @@
 # Questions Phase 1
 
-Список вопросов для первичной проработки Planfoldr и выбора формы MVP.
+Cleaned record of Phase 1 questions and final answers.
 
-У каждого вопроса есть четыре варианта ответа:
-- Просто — минимальное решение для быстрого MVP.
-- Среднесложно — решение с умеренной гибкостью.
-- Сложно — решение для более серьезного продукта.
-- Архитектурно дальновидно — вариант, который закладывает долгосрочную модель системы.
+This file is no longer a questionnaire with candidate answers. It is the compact source record of decisions that were used to create:
+- `ARCHITECTURE.md`
+- `docs/phase_1/DECISIONS.md`
+- `docs/phase_1/MVP_SPEC.md`
+- `docs/phase_1/SCHEMA_DRAFT.md`
+- `tasks/`
 
-## 1. Пользователь и ценность
+New implementation questions for Phase 2 live in `docs/phase_2/QUESTIONS.md`.
+
+## Product And Value
 
 ### 1. Кто первый пользователь Planfoldr?
 
-- Ответ: solo-разработчик, который пишет флоу для автоматизированной системы
-- Просто: solo-разработчик, который запускает сценарии локально через CLI.
-- Среднесложно: небольшая команда, которая хочет повторяемые сценарии для типовых задач разработки.
-- Сложно: engineering-команда, интегрирующая Planfoldr в CI/CD и PR-процессы.
-- Архитектурно дальновидно: платформа для построения проверяемых агентных процессов поверх разных моделей, инструментов и сред исполнения.
+- Ответ: solo-разработчик, который пишет флоу для автоматизированной системы.
 
 ### 2. Какую боль MVP должен закрыть первой?
 
-- Ответ: Тесты на части флоу (с заглушками-ответами от реальной модели) и большой e2e-тест с локальной моделью
-- Просто: показать, что сценарий можно запустить пошагово и получить понятный execution log.
-- Среднесложно: сделать воспроизводимым один полезный flow, например анализ падения теста.
-- Сложно: снизить количество пропущенных шагов и ручной проверки в реальном dev-процессе.
-- Архитектурно дальновидно: отделить управление процессом от модели и сделать модель только исполнителем внутри проверяемых блоков.
+- Ответ: тесты на части флоу с заглушками-ответами от реальной модели и большой e2e-тест с локальной моделью.
 
 ### 3. Что пользователь получает на выходе сценария?
 
-- Ответ: html отчёт с видимой структурой исполнения и возможностью пошагово смотреть, что делала модель на каждом шаге + возможность скрывать глубокие уровни
-- Просто: финальный статус, лог шагов и краткий отчет.
-- Среднесложно: structured output каждого блока, итоговый отчет и список измененных фактов контекста.
-- Сложно: patch, проверки, причины решений, trace исполнения и machine-readable result.
-- Архитектурно дальновидно: полный audit trail, пригодный для replay, сравнения запусков и автоматической верификации.
+- Ответ: HTML-отчет с видимой структурой исполнения, возможностью пошагово смотреть, что делала модель на каждом шаге, и возможностью скрывать глубокие уровни.
 
 ### 4. Какой сценарий выбрать для MVP?
 
-- Ответ: e2e-тест приложения с локальной моделью через ollama, которая, например, пишет с нуля простой проект уровня cli-todo-list в отдельном git-репозитории (код + тесты + тестовый прогон). 
-- Просто: "запустить команду, собрать вывод, сделать summary".
-- Среднесложно: "проанализировать падение теста и предложить patch".
-- Сложно: "исправить падающий тест, применить изменения и проверить результат".
-- Архитектурно дальновидно: "многоцикловое исправление теста с бюджетами, typed transitions и explicit context updates".
+- Ответ: e2e-тест приложения с локальной моделью через Ollama, которая пишет с нуля простой проект уровня `cli-todo-list` в отдельном git-репозитории: код, тесты и тестовый прогон.
 
-## 2. Базовые сущности
+## Core Entities
 
 ### 5. Чем Scenario отличается от Cycle?
 
-- Ответ: Scenario - весь запуск, cycle — сущность с блоками, и вложенным циклом. Важно отметить, что cycle существуют один внутри другого, и могут взаимодействовать друг с другом в конкретных описанных точках структурированно
-- Просто: Scenario — весь запуск, Cycle — повторяемая часть внутри него.
-- Среднесложно: Scenario содержит цель, НУ, бюджеты и набор циклов; Cycle содержит блоки и правила повторения.
-- Сложно: Scenario задает внешний contract, Cycle задает управляемый loop с собственными входами, выходами, бюджетами и ограничениями.
-- Архитектурно дальновидно: Scenario — orchestration boundary, Cycle — composable control-flow unit, который можно вкладывать, переиспользовать и тестировать отдельно.
+- Ответ: `Scenario` — весь запуск. `Cycle` — сущность с задачами и вложенными циклами. Циклы существуют один внутри другого и могут структурированно взаимодействовать друг с другом только в конкретных описанных точках.
 
-### 6. Что такое Block?
+### 6. Что такое Task?
 
-- Ответ: среднесложно
-- Просто: один исполняемый шаг.
-- Среднесложно: шаг с типом, входом, выходом, ограничениями и бюджетом.
-- Сложно: атомарная task-единица с typed input/output, executor, validation и transition result.
-- Архитектурно дальновидно: контрактная capability-единица, отделенная от конкретного исполнителя: model, command, human, verifier, context updater.
+- Ответ: задача с типом, входом, выходом, ограничениями и бюджетом.
 
 ### 7. Нужно ли переименовывать Block в Task?
 
-- Ответ: Мне нравится архитектурно дальновидно
-- Просто: оставить Block до конца MVP.
-- Среднесложно: использовать Task в пользовательском DSL, но сохранить Block как внутренний термин.
-- Сложно: развести Task как намерение и Block как исполняемый runtime step.
-- Архитектурно дальновидно: построить терминологию вокруг Intent -> Task -> Execution -> Result, чтобы не смешивать описание работы и факт исполнения.
+- Ответ: да. Используем архитектурно дальновидную терминологию `Intent -> Task -> Execution -> Result`, чтобы не смешивать описание работы и факт исполнения.
 
 ### 8. Какие поля обязательны для Scenario?
 
-- Ответ: сложно
-- Просто: id, goal, blocks.
-- Среднесложно: id, goal, success_conditions, budgets, cycles.
-- Сложно: id, goal, required_conditions, constraints, budgets, inputs, outputs, cycles, context_policy.
-- Архитектурно дальновидно: formal contract: purpose, invariants, permissions, budgets, lifecycle, context model, observability policy, replay policy.
+- Ответ: `id`, `goal`, `required_conditions`, `constraints`, `budgets`, `inputs`, `outputs`, `cycles`, `context_policy`.
 
 ### 9. Какие поля обязательны для Cycle?
 
-- Ответ: id, goal, blocks, block links, nested_cycles, budgets, constrains
-- Просто: id, blocks, max_iterations.
-- Среднесложно: id, entrypoint, blocks, transitions, budget.
-- Сложно: id, entry_contract, exit_contract, blocks, transitions, nested_cycles, budgets, constraints.
-- Архитектурно дальновидно: reusable control-flow component with typed ports, feedback points, override policy and parent-child communication rules.
+- Ответ: `id`, `goal`, `tasks`, `links`, `nested_cycles`, `budgets`, `constraints`.
 
-### 10. Какие поля обязательны для Block?
+### 10. Какие поля обязательны для Task?
 
-- Ответ: среднесложно. verifier будет отдельным Block/Task
-- Просто: id, type, input, output.
-- Среднесложно: id, type, task, input_schema, output_schema, executor.
-- Сложно: id, task, constraints, budget, permissions, input_schema, output_schema, verifier, transition_mapping.
-- Архитектурно дальновидно: declarative contract plus runtime binding: capability, executor selection, provenance, validation, retry policy, observability and deterministic replay metadata.
+- Ответ: `id`, `type`, `task`, `input_schema`, `output_schema`, `executor`. Verifier будет отдельной задачей.
 
-## 3. Flow и ветвления
+## Flow And Branching
 
-### 11. Как описывать переходы между блоками?
+### 11. Как описывать переходы между задачами?
 
-- Ответ: branch по enum-статусу
-- Просто: next_block_id.
-- Среднесложно: branch по enum-статусу output блока.
-- Сложно: typed transitions с условиями на структурированный output.
-- Архитектурно дальновидно: формальная transition system с валидируемыми guards, typed ports и возможностью статического анализа сценария.
+- Ответ: branch по enum-статусу результата задачи.
 
 ### 12. Какие статусы исполнения нужны в MVP?
 
-- Ответ: success, failure, budget_exceeded, need_context, need_decision, need_answer, need_inner_cycle, need_permission, need_tool, retry_exceeded
-- Просто: success, failure.
-- Среднесложно: success, failure, needs_input, budget_exceeded.
-- Сложно: success, failure, retry, skipped, blocked, needs_parent, needs_inner_cycle.
-- Архитектурно дальновидно: единая outcome-модель с причинами, severity, recoverability и machine-actionable next steps.
+- Ответ: `success`, `failure`, `budget_exceeded`, `need_context`, `need_decision`, `need_answer`, `need_inner_cycle`, `need_permission`, `need_tool`, `retry_exceeded`.
 
-### 13. Что делать при ошибке блока?
+### 13. Что делать при ошибке задачи?
 
-- Ответ: смотря какой. Если budget_exceeded, то принимать решение выше можно ли повысить бюджет. Надо смотреть на причину failure, которую нижний цикл указывает и принимать решение
-- Просто: остановить сценарий.
-- Среднесложно: retry один раз и потом остановить.
-- Сложно: retry/fallback/ask parent в зависимости от типа ошибки.
-- Архитектурно дальновидно: error handling как часть declarative policy: recovery strategy, escalation path, budget impact, audit event.
+- Ответ: зависит от типа ошибки. При `budget_exceeded` нижний цикл возвращает причину и отчет, а родительский цикл решает, можно ли повысить бюджет или нужно остановиться. По другим failure-причинам родитель тоже принимает решение на основе структурированной причины.
 
 ### 14. Нужен ли parallel execution в MVP?
 
-- Ответ: Циклы разных уровней будут ждать разного. Так, например, у нижнего слоя будет блок, который будет отдавать данные на верхний цикл к конкретному блоку, а он будет ждать (либо хотя бы одного, либо всех). Поэтому каждый блок должен работать параллельно, можно пока каждый цикл в отдельном треде
-- Просто: нет, только последовательные шаги.
-- Среднесложно: нет в runtime, но DSL не должен мешать добавить параллельность позже.
-- Сложно: поддержать независимые parallel branches для command/verify блоков.
-- Архитектурно дальновидно: DAG + nested cycles + deterministic join semantics + conflict resolution.
+- Ответ: циклы разных уровней могут ждать разные события. Нижний слой может отдавать данные наверх к конкретной задаче, а верхний слой может ждать один результат или все результаты. Минимально допустимо запускать каждый цикл в отдельном thread/async task.
 
-## 4. Контекст
+## Context
 
 ### 15. Что считается контекстом?
 
-- Ответ: несколько уровней: block context+state, cycle context+state, scenraio context+state, decision log, что-то обязательно попадает в контекст, что-то доступно по запросу
-- Просто: текстовое поле, которое передается между шагами.
-- Среднесложно: набор key-value фактов и заметок сценария.
-- Сложно: несколько уровней: block context, cycle context, scenario context.
-- Архитектурно дальновидно: typed context graph с provenance, scope, lifetime, access rules и explicit mutations.
+- Ответ: несколько уровней: task context/state, cycle context/state, scenario context/state, decision log. Часть данных обязательно попадает в контекст, часть доступна по запросу.
 
 ### 16. Как обновляется контекст?
 
-- Ответ: Для каждого блока/цикла описывается к какой части контекста есть доступ на read/write/delete. Есть audit log, где написано, кто что сделал. По умолчанию у каждого блока есть его личный контекст, где он может делать что хочет, и контекст уровня выше на read  
-- Просто: каждый блок может добавить текст в общий лог.
-- Среднесложно: только специальные context_update блоки меняют контекст.
-- Сложно: обновления проходят schema validation и фиксируются как events.
-- Архитектурно дальновидно: immutable event log + derived context snapshots + replayable context evolution.
+- Ответ: для каждой задачи и каждого цикла описывается доступ к частям контекста на read/write/delete. Есть audit log, где фиксируется, кто что сделал. По умолчанию у каждой задачи есть личный контекст, где она может делать что хочет, и доступ на чтение к разрешенному контексту уровня выше.
 
-### 17. Может ли блок читать глобальный контекст напрямую?
+### 17. Может ли задача читать глобальный контекст напрямую?
 
-- Ответ: Если явно есть доступ
-- Просто: да, весь контекст передается каждому блоку.
-- Среднесложно: блок получает только выбранные поля контекста.
-- Сложно: доступ к контексту задается в контракте блока.
-- Архитектурно дальновидно: capability-based context access with scoped views, redaction and deterministic context builders.
+- Ответ: только если у нее явно есть доступ.
 
 ### 18. Как предотвратить утекание и забывание контекста?
 
-- Ответ: архитектурно дальновидно
-- Просто: сохранять все outputs в лог.
-- Среднесложно: явно выбирать факты, которые поднимаются наверх.
-- Сложно: разделить ephemeral notes, verified facts и decisions.
-- Архитектурно дальновидно: facts go up, constraints go down, все изменения контекста проходят typed contracts и provenance tracking.
+- Ответ: facts go up, constraints go down. Все изменения контекста проходят typed contracts и provenance tracking.
 
-## 5. НУ, ограничения и верификация
+## Verification
 
 ### 19. Что такое НУ в MVP?
 
-- Ответ: список проверок, которые передаются как цепочка verifier-ов. То есть это будут блоки verifier
-- Просто: текстовое описание условия успеха.
-- Среднесложно: список проверок, которые надо выполнить перед success.
-- Сложно: machine-checkable conditions: команды, схемы, diff checks, custom validators.
-- Архитектурно дальновидно: formal success contract, связывающий цель, constraints, verification blocks и evidence.
+- Ответ: список проверок, которые передаются как цепочка verifier-задач.
 
-### 20. Какие verify-блоки нужны первыми?
+### 20. Какие verifier-задачи нужны первыми?
 
-- Ответ: command, schema_validation, custom_script, запрос к модели с описанием что нужно проверить
-- Просто: command exits with 0.
-- Среднесложно: command, file_exists, schema_validation.
-- Сложно: command, diff_check, regex_check, json_schema, custom_script.
-- Архитектурно дальновидно: pluggable verification framework with evidence artifacts and deterministic replay.
+- Ответ: command, schema validation, custom script, запрос к модели с описанием того, что нужно проверить.
 
 ### 21. Где живут ограничения?
 
-- Ответ: есть два типа ограничений: те, которые будут проверены verifier-ом, и те, которые описаны в контракте сценария/цикла/блока. Скорее это будет white-list возможностей, какие инструменты блок/цикл сможет использовать
-- Просто: внутри Scenario как текст.
-- Среднесложно: на уровне Scenario и Block.
-- Сложно: Scenario/Cycle/Block имеют свои constraints, которые наследуются вниз.
-- Архитектурно дальновидно: constraints are first-class policies: composable, enforceable, inherited, overridable only by parent.
+- Ответ: есть два типа ограничений: те, которые будут проверены verifier-задачей, и те, которые описаны в контракте сценария, цикла или задачи. Второй тип — это в первую очередь allowlist возможностей: какие инструменты и пути доступны.
 
 ### 22. Как понять, что цель достигнута?
 
-- Ответ: По тому, что verifier-ы cycle прошли
-- Просто: последний блок вернул success.
-- Среднесложно: все required verify-блоки успешны.
-- Сложно: выполнены НУ, не нарушены constraints, бюджет не превышен, output валиден.
-- Архитектурно дальновидно: success is a typed terminal state backed by evidence, audit trace and contract satisfaction proof.
+- Ответ: verifier-задачи цикла прошли.
 
-## 6. Бюджеты и доступы
+## Budgets And Permissions
 
 ### 23. Какие бюджеты нужны в MVP?
 
-- Ответ: max_iterations, max_tool_call for tool, max_model_calls for models, max_model_budget for models, max_cputime, max_ram, которые cycle может либо тратить сам внутри, либо отдаёт часть подциклам
-- Просто: max_iterations.
-- Среднесложно: max_iterations, max_commands, max_model_calls.
-- Сложно: time, tokens, money, commands, retries, filesystem writes.
-- Архитектурно дальновидно: unified resource budget model with deterministic accounting and parent-child budget delegation.
+- Ответ: `max_iterations`, `max_tool_calls`, `max_model_calls`, `max_model_budget`, `max_cpu_time`, `max_ram`. Цикл может тратить бюджет внутри себя или отдавать часть бюджета подциклам.
 
 ### 24. Что делать при превышении бюджета?
 
-- Ответ: вернуть budget_exceeded с отчетом.
-- Просто: остановить сценарий.
-- Среднесложно: вернуть budget_exceeded с отчетом.
-- Сложно: запросить parent decision или перейти в fallback.
-- Архитектурно дальновидно: budget exhaustion is a typed control-flow event with policy-driven recovery and audit trail.
+- Ответ: вернуть `budget_exceeded` с отчетом.
 
 ### 25. Как задаются доступы?
 
-- Ответ: allowlist tools и filesystem paths, передаются от внешних циклов к внутренним, можно запрашивать дополнительные права
-- Просто: списком разрешенных command types.
-- Среднесложно: allowlist tools и filesystem paths.
-- Сложно: permissions per Scenario/Cycle/Block.
-- Архитектурно дальновидно: capability model with scoped grants, deterministic enforcement and parent-controlled delegation.
+- Ответ: через allowlist tools и filesystem paths. Доступы передаются от внешних циклов к внутренним. Внутренний цикл может запрашивать дополнительные права.
 
 ### 26. Нужно ли реально enforce-ить доступы в MVP?
 
-- Ответ: нужны tool allowlist и fs allowlist
-- Просто: нет, только описывать в конфиге.
-- Среднесложно: валидировать config и запрещать неизвестные tool types.
-- Сложно: enforce-ить command allowlist и filesystem scope.
-- Архитектурно дальновидно: sandboxed execution with auditable permissions and policy engine.
+- Ответ: да, нужны tool allowlist и filesystem allowlist.
 
-## 7. Модели и исполнители
+## Models And Executors
 
 ### 27. Какие типы исполнителей нужны в MVP?
 
-- Ответ: просто
-- Просто: command и model.
-- Среднесложно: command, model, verify, context_update.
-- Сложно: command, model, verify, human_input, file_patch, context_update.
-- Архитектурно дальновидно: executor registry with typed capabilities, versioning, policies and deterministic result envelopes.
+- Ответ: `command` и `model`.
 
-### 28. Как выбирать модель для блока?
+### 28. Как выбирать модель для задачи?
 
-- Ответ: model задается явно в каждом model-блоке, либо из умолчаний
-- Просто: одна модель на весь сценарий.
-- Среднесложно: model задается явно в каждом model-блоке.
-- Сложно: model выбирается через policy по типу задачи и бюджету.
-- Архитектурно дальновидно: model routing as deterministic policy with constraints, fallback, cost accounting and quality gates.
+- Ответ: model задается явно в каждом model-task, либо берется из defaults.
 
 ### 29. Что делать с невалидным output модели?
 
-- Ответ: заданное количество retry с уточнением схемы
-- Просто: считать блок failed.
-- Среднесложно: один retry с уточнением схемы.
-- Сложно: repair pass, retry budget, fallback model, then failure.
-- Архитектурно дальновидно: structured output validation pipeline with repair, provenance, confidence and typed failure reasons.
+- Ответ: заданное количество retry с уточнением схемы.
 
 ### 30. Должны ли prompts быть версионируемыми?
 
-- Ответ: prompt templates с variables, id и версионирование (хеши), в аудите ссылка на id prompt-а, переменные и как они подставились
-- Просто: нет, prompt хранится прямо в block config.
-- Среднесложно: prompt хранится отдельно и имеет id/version.
-- Сложно: prompt templates с variables, schema и тестами.
-- Архитектурно дальновидно: prompt artifacts as versioned executable specs with evaluation history and compatibility metadata.
+- Ответ: да. Prompt templates должны иметь variables, id и версионирование через hashes. В audit должна быть ссылка на prompt id, переменные и итоговую подстановку.
 
-## 8. Детерминизм и replay
+## Determinism And Replay
 
 ### 31. Что нужно сохранять для воспроизводимости?
 
-- Ответ: Весь вход, весь выход, ответ от модели, результат выполнения тулов
-- Просто: execution log.
-- Среднесложно: input/output каждого блока и использованные команды.
-- Сложно: model request/response, command output, timestamps, budgets, config version.
-- Архитектурно дальновидно: complete run trace with tool artifacts, environment fingerprints, model metadata and replay modes.
+- Ответ: весь вход, весь выход, ответ модели, результат выполнения tools.
 
 ### 32. Нужно ли replay в MVP?
 
-- Ответ: replay блоков
-- Просто: нет.
-- Среднесложно: replay только по сохраненным outputs без повторного исполнения.
-- Сложно: replay отдельных блоков и всего сценария.
-- Архитектурно дальновидно: deterministic replay engine with mocked tools, snapshot comparison and divergence detection.
+- Ответ: replay отдельных задач.
 
 ### 33. Как сравнивать два запуска?
 
-- Ответ: финальный статус
-- Просто: сравнивать финальный статус.
-- Среднесложно: сравнивать sequence блоков и их outcomes.
-- Сложно: сравнивать typed outputs, budgets, context updates и artifacts.
-- Архитектурно дальновидно: semantic run diff with deterministic/expected/nondeterministic regions.
+- Ответ: по финальному статусу.
 
-## 9. Формат и интерфейс MVP
+## Format And Interface
 
 ### 34. Какой формат описания сценариев выбрать?
 
-- Ответ: yaml + yaml links + ссылка на внешние файлы
-- Просто: JSON.
-- Среднесложно: YAML.
-- Сложно: TypeScript/Python DSL плюс экспорт в JSON.
-- Архитектурно дальновидно: declarative schema as source of truth, with multiple frontends: YAML, SDK, visual editor.
+- Ответ: YAML, YAML links и ссылки на внешние файлы.
 
 ### 35. Каким должен быть первый интерфейс?
 
-- Ответ: cli runner + logs + static html one-page report
-- Просто: CLI runner.
-- Среднесложно: CLI runner плюс human-readable run report.
-- Сложно: CLI, local web viewer для trace и конфигурационный валидатор.
-- Архитектурно дальновидно: runtime + authoring tools + observability UI + CI integration.
+- Ответ: CLI runner, logs и static HTML one-page report.
 
 ### 36. Нужна ли UI-визуализация flow в MVP?
 
-- Ответ: нет, нужен структурированный вывод чтобы модель могла отлаживать в процессе работы
-- Просто: нет.
-- Среднесложно: текстовая схема или Mermaid export.
-- Сложно: HTML trace viewer.
-- Архитектурно дальновидно: visual scenario builder with typed contracts, live validation and run inspection.
+- Ответ: нет. Нужен структурированный вывод, чтобы модель могла отлаживать процесс работы.
 
 ### 37. Какой критерий готовности MVP?
 
-- Ответ: e2e тесты запускаются с заглушками и проходят (успешный сценарий/неуспешный сценарий), e2e с локальной моделью готов пройти
-- Просто: один сценарий запускается end-to-end и пишет лог.
-- Среднесложно: один сценарий имеет typed outputs, budgets и verification.
-- Сложно: сценарий можно воспроизвести, протестировать и сравнить с предыдущим запуском.
-- Архитектурно дальновидно: MVP доказывает главный принцип: model is not the controller, controller is deterministic and auditable.
+- Ответ: e2e-тесты запускаются с заглушками и проходят для успешного и неуспешного сценария. E2e с локальной моделью готов пройти.
 
-## 10. Что сознательно не делать в Phase 1
+## Phase 1 Scope
 
 ### 38. Что исключить из MVP?
 
-- Ответ: можно вычислить из ответов выше
-- Просто: nested cycles, replay, UI, permissions enforcement, model routing.
-- Среднесложно: исключить UI и parallelism, но оставить typed contracts и context updates.
-- Сложно: исключить только distributed execution и full sandboxing.
-- Архитектурно дальновидно: Phase 1 должен быть маленьким, но не противоречить будущим nested cycles, replay, policies and observability.
+- Ответ: вычисляется из решений выше. Явно исключены production web app, visual scenario builder, distributed runtime, full sandboxing, automatic model routing, full scenario replay, semantic run diff и сложный parallel DAG conflict resolution.
 
 ### 39. Как избежать переусложнения?
 
-- Ответ: архитектурно дальновидно
-- Просто: реализовать один сценарий и один формат конфига.
-- Среднесложно: ограничить количество block types и transition types.
-- Сложно: формально зафиксировать scope Phase 1 и Phase 2.
-- Архитектурно дальновидно: разделить stable core contracts и experimental adapters, чтобы MVP был маленьким, но архитектурно честным.
+- Ответ: разделить stable core contracts и experimental adapters, чтобы MVP был маленьким, но архитектурно честным.
 
 ### 40. Что должно быть главным артефактом Phase 1?
 
-- Ответ: написать ARCHITECTURE.md, составить tasks/<task_id>_short_name.md в которых расписать цель, общую концепцию, НУ, ограничения, составить список задач и зависимостей между ними.
-- Просто: README с описанием MVP.
-- Среднесложно: scenario schema и один runnable example.
-- Сложно: runtime prototype, schema validation, example scenario, run trace.
-- Архитектурно дальновидно: executable specification: schema, tests, examples, trace format and clear boundaries of deterministic control.
+- Ответ: написать `ARCHITECTURE.md`, составить `tasks/<task_id>_short_name.md`, где расписаны цель, общая концепция, НУ, ограничения, список задач и зависимости между ними.

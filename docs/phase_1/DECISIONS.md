@@ -53,7 +53,7 @@ Verifier is a separate task type, not a field on every task.
 - Transitions branch by enum status.
 - Nested cycles communicate at explicitly described points.
 - Parent cycles decide how to react to failures and budget exhaustion.
-- Parallelism is desired: cycles can run separately, and parent blocks may wait for one or all child results.
+- Parallelism is desired: cycles can run separately, and parent tasks may wait for one or all child results.
 
 ## Outcomes
 

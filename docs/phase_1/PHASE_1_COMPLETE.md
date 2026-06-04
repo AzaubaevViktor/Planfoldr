@@ -26,9 +26,15 @@ Then follow:
 docs/phase_1/IMPLEMENTATION_ORDER.md
 ```
 
+Open implementation questions for Phase 2:
+
+```text
+docs/phase_2/QUESTIONS.md
+```
+
 ## Source Material
 
-- Raw answered questions: `QUESTIONS_PHASE_1.md`
+- Cleaned Phase 1 answers: `QUESTIONS_PHASE_1.md`
 - Normalized decisions: `docs/phase_1/DECISIONS.md`
 - Architecture: `ARCHITECTURE.md`
 - MVP spec: `docs/phase_1/MVP_SPEC.md`
