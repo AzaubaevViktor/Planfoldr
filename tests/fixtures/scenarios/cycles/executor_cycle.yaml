@@ -1,0 +1,47 @@
+id: executor_cycle
+goal: Validate command and model executors.
+entrypoint: ask_model
+
+budgets:
+  max_iterations: 4
+  max_tool_calls: 3
+  max_model_calls: 3
+  max_cpu_time: 5
+
+tasks:
+  - id: ask_model
+    type: model
+    task: Ask the stub model.
+    executor:
+      kind: model
+      model:
+        provider: stub
+        name: deterministic
+      prompt:
+        id: executor_prompt
+        file: ../../prompts/executor_prompt.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+  - id: run_command
+    type: command
+    task: Run a local command.
+    executor:
+      kind: command
+      command: python3 -c "print('executor ok')"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  ask_model:
+    success: run_command
+    failure: fail
+  run_command:
+    success: success
+    failure: fail
+
+nested_cycles: []

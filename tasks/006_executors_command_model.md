@@ -54,3 +54,14 @@ Executors are adapters. They do work, but they do not decide workflow. The runti
 ## Done
 
 Stubbed model tasks and command tasks run through the same task execution path and produce traceable results.
+
+## Implementation Notes
+
+- Executors live in `src/planfoldr/executors.py`.
+- `ExecutorRegistry` is the runtime callable for `command`, `tool` and `model` tasks.
+- Command execution uses permission checks, budget accounting, controlled empty env, cwd resolution and captures exit code/stdout/stderr.
+- Tool execution supports constrained `noop` and `write_files` helpers.
+- Model execution supports `StubModelAdapter` for tests and `OllamaModelAdapter` for optional local use.
+- Prompt metadata captures prompt id, sha256 hash, variables and rendered prompt in each model task result.
+- Tests live in `tests/test_executors.py`.
+- Continue with [Task 007: Verifiers And Output Validation](007_verifiers_and_output_validation.md).

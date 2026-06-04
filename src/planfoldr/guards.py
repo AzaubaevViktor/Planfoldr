@@ -85,6 +85,10 @@ class BudgetTracker:
         self._check("max_model_calls", self.usage.model_calls, self.configured.max_model_calls)
         self._check("max_model_budget", self.usage.model_budget, self.configured.max_model_budget)
 
+    def consume_model_budget(self, budget_cost: float) -> None:
+        self.usage.model_budget += budget_cost
+        self._check("max_model_budget", self.usage.model_budget, self.configured.max_model_budget)
+
     def consume_cpu_time(self, seconds: float) -> None:
         self.usage.cpu_time += seconds
         self._check("max_cpu_time", self.usage.cpu_time, self.configured.max_cpu_time)

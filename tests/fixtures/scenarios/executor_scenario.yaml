@@ -1,0 +1,28 @@
+id: executor_scenario
+goal: Validate executors.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - python
+      - write_files
+      - noop
+    deny:
+      - git push
+  filesystem:
+    allow_read:
+      - .
+    allow_write:
+      - ./runs/executor
+budgets:
+  max_iterations: 4
+  max_tool_calls: 3
+  max_model_calls: 3
+  max_cpu_time: 5
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/executor_cycle.yaml
