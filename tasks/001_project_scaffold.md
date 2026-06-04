@@ -48,3 +48,11 @@ The repository needs enough structure for independent agents to add runtime piec
 ## Done
 
 An agent can clone the repo, run the documented test command and see one passing smoke test.
+
+## Implementation Notes
+
+- Python package metadata lives in `pyproject.toml`.
+- Runtime package source lives under `src/planfoldr/`.
+- Tests live under `tests/`.
+- Local setup and the canonical test command are documented in `README.md`.
+- Continue with [Task 002: Schema And Loader](002_schema_and_loader.md).

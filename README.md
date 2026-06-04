@@ -23,3 +23,18 @@ The cleaned Phase 1 answer record remains in [QUESTIONS_PHASE_1.md](QUESTIONS_PH
 ## Phase 2 Entry Point
 
 Start Phase 2 from [tasks/001_project_scaffold.md](tasks/001_project_scaffold.md), then follow [docs/phase_1/IMPLEMENTATION_ORDER.md](docs/phase_1/IMPLEMENTATION_ORDER.md).
+
+## Local Setup
+
+Planfoldr Phase 2 uses Python and the `planfoldr` package under `src/`.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pytest
+```
+
+Generated run artifacts belong under `runs/` and are ignored by git.
+
+After the project scaffold, continue with [tasks/002_schema_and_loader.md](tasks/002_schema_and_loader.md).
