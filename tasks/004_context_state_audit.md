@@ -48,3 +48,13 @@ Every task has private context. Parent context is available only through declare
 ## Done
 
 Tests show that task-local mutation works, parent writes require permission and all mutations are audited.
+
+## Implementation Notes
+
+- Context and audit primitives live in `src/planfoldr/context.py`.
+- `ContextStore` stores task/cycle/scenario context snapshots and matching state snapshots.
+- Task-scope reads/writes are private and allowed by default; cycle/scenario access requires declared `ContextAccess`.
+- Mutations, denied mutations, state writes and decisions append immutable `AuditEvent` objects.
+- Facts can be propagated upward only through explicit write access such as `cycle.facts`.
+- Tests live in `tests/test_context_audit.py`.
+- Continue with [Task 005: Budget And Permission Engine](005_budget_permission_engine.md).
