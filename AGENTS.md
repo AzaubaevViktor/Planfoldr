@@ -42,6 +42,7 @@
 ```
 
 - Optional Ollama coverage is opt-in and may require a local model plus explicit environment variables. Do not run it as part of the default suite unless the user asks or the quest requires it.
+- When the user asks for Ollama/model tests or a quest requires them, it is acceptable to run local Ollama models up to and including 12 GB from `ollama list` without trying to conserve GPU, wall-clock time, or token usage. This is a local machine; resource usage for those eligible models is allowed to be effectively unbounded for verification.
 - If `compileall` is useful, keep pycache output inside an allowed temp path, for example:
 
 ```bash
