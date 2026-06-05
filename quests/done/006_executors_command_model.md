@@ -65,3 +65,11 @@ Stubbed model tasks and command tasks run through the same task execution path a
 - Prompt metadata captures prompt id, sha256 hash, variables and rendered prompt in each model task result.
 - Tests live in `tests/test_executors.py`.
 - Continue with [Task 007: Verifiers And Output Validation](007_verifiers_and_output_validation.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `src/planfoldr/executors.py`, `tests/test_executors.py` and optional Ollama paths cover command, tool, model, prompt metadata and guard integration.
+- ✅ No unchecked quest lines remain in this file.

@@ -56,3 +56,11 @@ An agent can clone the repo, run the documented test command and see one passing
 - Tests live under `tests/`.
 - Local setup and the canonical test command are documented in `README.md`.
 - Continue with [Task 002: Schema And Loader](002_schema_and_loader.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `pyproject.toml`, `requirements.txt`, `src/planfoldr/`, `tests/`, `.gitignore`, `README.md` and the smoke test scaffold exist.
+- ✅ No unchecked quest lines remain in this file.

@@ -47,3 +47,11 @@ The optional Ollama e2e test now performs a hidden final CLI behavior check afte
 - The checker runs each candidate entry point in an isolated state directory with `PYTHONPATH` pointed at the generated repository.
 - The contract checks that `add` persists items, `list` shows them from a later process and `done` changes the visible state of the chosen item.
 - `examples/prompts/ollama_generate_cli_todo.md` now explicitly asks for add/list/done commands, while the exact final checker remains outside model-visible workflow.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks, Done and Implementation Notes line is complete.
+- ✅ Evidence: hidden checker and synthetic coverage in `tests/test_ollama_e2e.py`, renamed `orchestration_020` quest and prompt clarification in `examples/prompts/ollama_generate_cli_todo.md`.
+- ✅ No unchecked quest lines remain in this file.

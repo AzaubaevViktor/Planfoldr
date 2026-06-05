@@ -46,6 +46,38 @@ Trace bundle writing is easier to maintain, with the same persisted artifact lay
 - Are public trace paths unchanged?
 - Are extracted long fields still written and replayable?
 
+## Completion Audit
+
+Checked: 2026-06-06.
+
+### Necessary Conditions
+
+- ✅ Task, model, tool and command execution directories keep the same public file layout today.
+- ❌ Shared code writes common `status.json`, `input.json`, `context.json` and `output.json` fields.
+- ✅ Executor-specific additions such as model text artifacts remain supported today.
+- ❌ Existing trace/report tests have not been rerun for this refactor because the refactor is not implemented.
+
+### Constraints
+
+- ✅ Do not change public trace paths while refactoring.
+- ✅ Do not remove compatibility files such as `trace/tasks/executions.json`, `trace/inputs/<execution_id>.json` or `trace/models/<execution_id>/stream.jsonl`.
+- ❌ Keep the helper deterministic and easy to inspect; the helper does not exist yet.
+
+### Subtasks
+
+- ✅ Identify duplicated bundle-writing fields across task and executor artifact directories.
+- ❌ Add a small helper for writing common execution bundle files.
+- ✅ Keep model stream/raw-response copying as executor-specific behavior.
+- ❌ Update tests only if the refactor exposes clearer assertions.
+- ❌ Run the full test suite for this refactor.
+
+### Outcome And Verification
+
+- ❌ Outcome is not complete; trace bundle writing still uses repeated explicit writes.
+- ❌ Trace/report tests have not been rerun for this refactor.
+- ✅ Public trace paths are currently unchanged.
+- ✅ Extracted long fields are still written and replayable in the existing trace implementation.
+
 ## Implementation Notes
 
 Generated as a follow-up after completing `report_001`; lower priority than `view_001`.

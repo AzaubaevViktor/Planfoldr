@@ -91,6 +91,67 @@ The runtime can execute a scenario where the upper cycle maintains a persistent 
 - Does completion require verifier evidence or an explicit allowed decision?
 - Can the HTML report show ticket state, dependencies, owners and linked evidence?
 
+## Completion Audit
+
+Checked: 2026-06-06.
+
+### Necessary Conditions
+
+- ✅ Context stores a structured ticket tree for the current run: `TicketTree` is JSON-serializable, but it is not yet wired into run context persistence.
+- ✅ Each ticket has a stable id, title, description and type.
+- ✅ Ticket types include at least research, documentation, code, tests, manual_testing, verification and orchestration.
+- ✅ Each ticket has dependencies that identify tickets required before it can run.
+- ✅ Each ticket has an explicit status, including blocked, ready, running, needs_review, done, failed and cancelled.
+- ❌ Each running ticket stores full owner details including cycle id, task id, execution id and model/provider when relevant; owner data exists but only generic maps are covered.
+- ❌ Tickets can link to audit events and decision records created while working on them.
+- ✅ Tickets can link to trace artifacts, model streams, command outputs, workspace files and verifier evidence through generic `artifacts` and `evidence` fields.
+- ✅ Tickets can require review before being marked done through the `needs_review` status.
+- ✅ Ticket completion requires verifier evidence or an explicit human/system decision.
+- ❌ The top-level cycle owns ticket-tree consistency and final completion.
+- ❌ Nested execution cycles can update assigned tickets but cannot declare the entire tree complete.
+- ❌ The top-level cycle can spawn nested cycles to execute ready tickets.
+- ❌ The top-level cycle can spawn a separate nested cycle whose only job is to create or refine tickets.
+- ❌ Nested cycles can request additional context, research or decisions before continuing as part of ticket orchestration.
+- ❌ The runtime can recover current ticket state from persisted run files.
+- ❌ HTML report can show the ticket tree, status, dependencies, owners and linked audit/decision/trace records.
+
+### Constraints
+
+- ✅ Keep the persisted ticket format deterministic and JSON-serializable.
+- ❌ Do not hide ticket transitions inside model text; every transition must be explicit trace data.
+- ✅ Do not let a model mark a ticket done without validation evidence unless the scenario explicitly allows it.
+- ❌ Do not require a server for reading the final ticket tree; no final persisted tree/report view exists yet.
+- ❌ Keep ticket state scoped to the current run; ticket helpers are not yet scoped by runtime.
+- ✅ Avoid coupling ticket types to Python classes until the schema proves stable.
+- ✅ Preserve compatibility with existing scenario/cycle/task YAML where practical.
+
+### Subtasks
+
+- ✅ Define the ticket tree schema and status transition rules.
+- ❌ Add context storage for ticket tree snapshots and incremental ticket events.
+- ✅ Add runtime helpers for creating, updating, assigning and completing tickets.
+- ✅ Add validation so dependencies determine blocked versus ready state.
+- ❌ Add trace records for ticket transitions, audit links and decision links.
+- ❌ Add a top-level orchestration cycle pattern that maintains the ticket tree.
+- ❌ Add a nested execution cycle pattern that works one assigned ticket.
+- ❌ Add a nested ticket-creation cycle pattern for expanding or refining the tree.
+- ✅ Add verifier support for ticket completion evidence.
+- ❌ Add budget accounting per ticket and per spawned cycle.
+- ❌ Add report rendering for the ticket tree, dependency graph and current owners.
+- ✅ Add tests for ticket status transitions and dependency readiness.
+- ❌ Add tests for nested cycle ticket assignment and completion handoff.
+- ❌ Add a larger e2e scenario that exercises ticket creation, execution, review and completion.
+- ❌ Document how scenario authors describe ticket-driven flows in YAML.
+
+### Outcome And Verification
+
+- ❌ Outcome is not complete: the runtime cannot yet execute a ticket-tree-driven scenario end to end.
+- ✅ Context ticket schema has stable ids, statuses and dependencies at the helper level.
+- ❌ Ticket transitions are not yet explicit trace data.
+- ❌ Nested cycles cannot yet execute assigned tickets through ticket orchestration.
+- ✅ Completion helper requires verifier evidence or an explicit decision.
+- ❌ HTML report cannot yet show ticket state, dependencies, owners and linked evidence.
+
 ## Implementation Notes
 
 - Queue after the introspection/report layer and model tool-call syntax, because ticket-tree orchestration will create more nested state to inspect.

@@ -66,3 +66,11 @@ Every e2e run leaves a trace JSON and static HTML report that can be inspected w
 - The HTML report is static and includes cycle structure, execution log and task filtering.
 - Tests live in `tests/test_trace.py`.
 - Continue with [Task 009: E2E Stub Scenarios](009_e2e_stub_scenarios.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `src/planfoldr/trace.py` and `tests/test_trace.py` cover trace writing, replay and static report generation.
+- ✅ No unchecked quest lines remain in this file.

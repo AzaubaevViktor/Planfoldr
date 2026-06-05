@@ -115,3 +115,11 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Deeper line-level diff summaries are split into `view_002`.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Status, Goal, Concept, Necessary Conditions, Constraints, Subtasks, Outcome, Verification and Implementation Notes line is complete.
+- ✅ Evidence: readable live report rendering in `src/planfoldr/trace.py`, with status/task/detail/retry/file-change coverage in tests; `view_002` completes the deeper diff line.
+- ✅ No unchecked quest lines remain in this file.

@@ -72,6 +72,62 @@ The e2e scenario demonstrates nested planning/execution cycles, completes only a
 - Does the upper cycle require verifier evidence before marking plan items done?
 - Is Ollama coverage optional and excluded from the default test suite?
 
+## Completion Audit
+
+Checked: 2026-06-06.
+
+### Necessary Conditions
+
+- ❌ Scenario asks the model to build a small but non-trivial app.
+- ❌ Generated project includes multiple files and tests for this scenario.
+- ❌ Scenario is split into at least two cycles.
+- ❌ The upper cycle creates a structured plan with multiple checklist items.
+- ❌ The upper cycle delegates plan items to the lower cycle for execution.
+- ❌ The upper cycle verifies each plan item against actual workspace state before marking it done.
+- ❌ The lower cycle executes one or more parts of the plan.
+- ❌ The lower cycle can request additional information, inspect context or gather workspace state before acting.
+- ❌ The lower cycle returns execution results back to the upper cycle.
+- ❌ The scenario keeps iterating until the upper cycle decides the plan is complete.
+- ❌ A task intentionally creates or exposes a failing test.
+- ❌ A verifier confirms that the test is actually failing before repair.
+- ❌ A repair task makes the suite pass again.
+- ❌ A guard/verifier ensures tests were not deleted to make the suite pass.
+- ❌ Trace and report make the break/repair sequence understandable for this scenario.
+
+### Constraints
+
+- ❌ Use only models up to 12B for real Ollama runs; no real run for this scenario exists yet.
+- ✅ Do not require Ollama for regular unit tests.
+- ❌ Keep generated app dependency-free or use only the standard library; no generated app exists yet.
+- ❌ Keep the scenario bounded by explicit budgets; no scenario YAML exists yet.
+- ❌ Preserve all test files unless a task explicitly allows editing them; no inventory guard exists for this scenario yet.
+- ❌ Do not let the lower cycle mark the whole plan complete by itself; no lower cycle exists yet.
+- ❌ Do not accept plan-item completion without verifier evidence; plan item completion is not implemented yet.
+
+### Subtasks
+
+- ❌ Design the demo app and regression story.
+- ❌ Design the upper planning/supervision cycle.
+- ❌ Design the lower execution/context-gathering cycle.
+- ❌ Define the structured plan format and completion evidence.
+- ❌ Add verifier tasks for each plan item.
+- ❌ Add scenario YAML for generate, break, verify-fail, repair and verify-pass.
+- ❌ Add tasks for context requests and workspace inspection in the lower cycle.
+- ❌ Add handoff data between upper and lower cycles.
+- ❌ Add a task that checks test files still exist.
+- ❌ Add a verifier that compares test-file inventory before and after repair.
+- ❌ Add optional Ollama e2e coverage.
+- ❌ Document how to run and inspect the scenario.
+
+### Outcome And Verification
+
+- ❌ Outcome is not complete; the scenario remains blocked by `orchestration_020`.
+- ❌ The scenario does not yet use at least two cycles with upper supervision and lower execution.
+- ❌ No verifier proves an intended test failure before repair.
+- ❌ No repair pass proves the suite passes without deleting tests.
+- ❌ No upper-cycle verifier-evidence gate exists yet.
+- ✅ Optional Ollama coverage remains excluded from the default test suite in the existing project.
+
 ## Implementation Notes
 
 - Queue after the foundational introspection, retry, tool-call and ticket-tree work; this scenario should validate those pieces together.

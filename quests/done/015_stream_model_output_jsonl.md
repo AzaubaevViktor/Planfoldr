@@ -35,3 +35,11 @@ Per-chunk files make long generations painful to inspect and can flood the files
 ## Done
 
 A running model task writes live chunk events to `trace/models/<execution_id>/stream.jsonl`, with no `chunks/000001.*.txt` fan-out.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks and Done line is complete.
+- ✅ Evidence: stream JSONL writing/manifest/report support in `src/planfoldr/trace.py`, getting-started docs and tests that assert no per-chunk fan-out.
+- ✅ No unchecked quest lines remain in this file.

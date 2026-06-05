@@ -102,3 +102,11 @@ Generated after `view_001` added basic file change events.
 - Added minimal `write_files` delete support through file items with `delete: true`.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Status, Goal, Concept, Necessary Conditions, Constraints, Subtasks, Outcome, Examples, Verification and Implementation Notes line is complete.
+- ✅ Evidence: write-file diff summaries/delete support and report rendering in `src/planfoldr/executors.py` and `src/planfoldr/trace.py`, with focused report tests.
+- ✅ No unchecked quest lines remain in this file.

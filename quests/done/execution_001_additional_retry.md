@@ -55,3 +55,11 @@ When a retry happens, the model receives a concise explanation of what was wrong
 - Added validation retry feedback to subsequent model prompts and persisted it through prompt metadata and trace input artifacts.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Status, Goal, Concept, Necessary Conditions, Constraints, Subtasks, Outcome, Verification and Implementation Notes line is complete.
+- ✅ Evidence: retry-feedback behavior in `src/planfoldr/executors.py`, persisted prompt/input artifacts in `src/planfoldr/trace.py` and retry coverage in tests.
+- ✅ No unchecked quest lines remain in this file.

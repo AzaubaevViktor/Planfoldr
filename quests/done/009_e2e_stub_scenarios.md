@@ -60,3 +60,11 @@ The project has deterministic e2e tests for both success and failure flows.
 - Every stub e2e test writes a trace directory and static HTML report under pytest `tmp_path`.
 - Stub e2e tests can be run with `python -m pytest tests/test_e2e_stub_scenarios.py`.
 - Continue with [Task 010: Ollama E2E](010_ollama_e2e.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `tests/test_e2e_stub_scenarios.py` and `tests/fixtures/scenarios/e2e_*.yaml` cover success, expected failures, budget exhaustion, retry exhaustion and repair-loop traces/reports.
+- ✅ No unchecked quest lines remain in this file.

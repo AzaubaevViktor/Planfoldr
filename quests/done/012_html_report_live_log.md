@@ -54,3 +54,11 @@ The report should not be only a final static summary. It should be possible to o
 ## Done
 
 Opening `runs/<scenario_id>/<run_id>/report.html` shows current run status, remaining budget, task inputs, model text, detailed run events and can refresh data from the run artifact manifest.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks and Done line is complete.
+- ✅ Evidence: manifest-backed live report/status support in `src/planfoldr/trace.py` and report/status assertions in `tests/test_trace.py`.
+- ✅ No unchecked quest lines remain in this file.

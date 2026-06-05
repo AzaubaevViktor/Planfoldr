@@ -33,3 +33,11 @@ The task table is hard to read when cycles are involved. A developer should be a
 ## Done
 
 The report task table clearly shows which cycle owns each task.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks and Done line is complete.
+- ✅ Evidence: cycle metadata/report rendering in `src/planfoldr/trace.py` and multi-cycle report coverage in `tests/test_trace.py` plus report fixtures.
+- ✅ No unchecked quest lines remain in this file.

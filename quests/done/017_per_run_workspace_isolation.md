@@ -33,3 +33,11 @@ Generated projects should live under the current run timestamp rather than a sha
 ## Done
 
 Every generated project for test/demo runs lives under its own `runs/<scenario_id>/<run_id>/workspace/` directory.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks and Done line is complete.
+- ✅ Evidence: runtime variables in CLI context, example scenario workspace paths, `tests/test_cli.py` and run-local workspace docs in `docs/GETTING_STARTED.md`.
+- ✅ No unchecked quest lines remain in this file.

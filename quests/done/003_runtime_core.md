@@ -61,3 +61,11 @@ Stub tasks can run through a small nested scenario and produce the expected fina
 - Task execution is injected through an executor callable; real command/model/tool executors start in Task 006.
 - Runtime tests live in `tests/test_runtime_core.py`.
 - Continue with [Task 004: Context, State And Audit](004_context_state_audit.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `src/planfoldr/runtime.py` and `tests/test_runtime_core.py` cover statuses, envelopes, links, terminal states and parent propagation.
+- ✅ No unchecked quest lines remain in this file.

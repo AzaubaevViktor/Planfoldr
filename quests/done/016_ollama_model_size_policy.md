@@ -50,3 +50,11 @@ Project docs and optional Ollama commands consistently use models with 12B param
 - `planfoldr compare-ollama-models <scenario>` runs the same scenario across eligible installed models and writes `model_comparison.json` plus `model_comparison.html`.
 - The comparison summary includes model name, apparent size, parameter hint, run id, status, reason, budget snapshot, generated file count, generated test count and links to trace/report artifacts.
 - `planfoldr run --ollama-model ...` rejects obvious model names above the <=12B policy before starting the scenario.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks, Done and Implementation Notes line is complete.
+- ✅ Evidence: `src/planfoldr/ollama_policy.py`, CLI commands in `src/planfoldr/cli.py`, `tests/test_ollama_policy.py`, `docs/OLLAMA_MODEL_NOTES.md` and updated Ollama docs.
+- ✅ No unchecked quest lines remain in this file.

@@ -62,3 +62,11 @@ A model can emit supported `<tool_call>` syntax, Planfoldr records the raw outpu
 - Added model-boundary parsing for `<tool_call>` blocks, producing `need_tool_call` for valid calls and diagnostic `failure` output for malformed blocks.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Status, Goal, Concept, Necessary Conditions, Constraints, Subtasks, Outcome, Verification and Implementation Notes line is complete.
+- ✅ Evidence: tool-call parsing and diagnostics in `src/planfoldr/executors.py`, plus valid/malformed/plain-text coverage in `tests/test_executors.py`.
+- ✅ No unchecked quest lines remain in this file.

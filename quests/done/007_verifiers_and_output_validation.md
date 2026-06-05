@@ -61,3 +61,11 @@ A cycle can prove success through verifier tasks, and invalid model output canno
 - Command, custom script and model verifiers are represented as normal `verify` tasks using command/model executors.
 - Tests live in `tests/test_validation.py`.
 - Continue with [Task 008: Trace, Task Replay And HTML Report](008_trace_replay_report.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `src/planfoldr/validation.py`, executor validation paths and `tests/test_validation.py` cover schema checks, retries and verifier evidence.
+- ✅ No unchecked quest lines remain in this file.

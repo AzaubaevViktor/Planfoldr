@@ -36,3 +36,11 @@ Some model traces contain confusing `raw_response` content. Before building more
 ## Done
 
 There is a short documented conclusion about `raw_response`, and the demo has a recommended <=12B Ollama model.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Subtasks and Done line is complete.
+- ✅ Evidence: `docs/OLLAMA_MODEL_NOTES.md`, explicit content/thinking artifacts in traces and <=12B recommendation/update paths in docs/examples.
+- ✅ No unchecked quest lines remain in this file.

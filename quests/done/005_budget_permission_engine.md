@@ -63,3 +63,11 @@ Executors cannot run disallowed tools or write outside allowed filesystem paths 
 - Guard failures can be converted into runtime task results with `budget_exceeded_result` and `need_permission_result`.
 - Tests live in `tests/test_guards.py`.
 - Continue with [Task 006: Command, Tool And Model Executors](006_executors_command_model.md).
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `src/planfoldr/guards.py` and `tests/test_guards.py` cover tracked budgets, permission allowlists and typed guard failures.
+- ✅ No unchecked quest lines remain in this file.

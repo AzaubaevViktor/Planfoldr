@@ -70,3 +70,11 @@ During a slow Ollama run, `runs/<scenario_id>/<run_id>/logs/execution.log` recei
 - The HTML report shows model text sections and includes cycle id in the task table.
 - Mid-stream token counts use an approximate character-based counter; final stream metadata uses provider counts when Ollama reports them.
 - Unit coverage for streaming progress lives in `tests/test_trace.py` with a fake streaming adapter.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Proposed Events, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: streaming support in `src/planfoldr/executors.py`, live logging/report support in `src/planfoldr/trace.py` and fake streaming coverage in `tests/test_trace.py`.
+- ✅ No unchecked quest lines remain in this file.

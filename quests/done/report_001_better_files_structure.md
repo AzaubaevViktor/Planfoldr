@@ -89,3 +89,11 @@ Each run has a readable `report.html` and a structured `trace/` tree where scena
 - Changed `trace/scenario.json` into a scenario execution summary and moved the source scenario document to `trace/scenario_definition.json`; both are available during live runs.
 - Completed and moved to `quests/done/`.
 - Verified the slice with `.venv/bin/python -m pytest tests/test_trace.py -q`.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Status, Goal, Concept, Target Structure, Necessary Conditions, Constraints, Subtasks, Outcome, Verification and Implementation Notes line is complete.
+- ✅ Evidence: structured artifact layout, long-field extraction and compatibility paths in `src/planfoldr/trace.py`, with path/extraction/replay coverage in `tests/test_trace.py`.
+- ✅ No unchecked quest lines remain in this file.

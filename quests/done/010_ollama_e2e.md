@@ -64,3 +64,11 @@ A developer with Ollama installed can run the demo scenario and inspect the gene
 - `ExecutorRegistry` can materialize the latest model output containing `files` through the constrained `write_files` tool.
 - Optional test coverage lives in `tests/test_ollama_e2e.py` and is skipped unless `PLANFOLDR_RUN_OLLAMA_E2E=1`; it also skips when Ollama is unavailable.
 - Local run command: `PLANFOLDR_RUN_OLLAMA_E2E=1 python -m pytest tests/test_ollama_e2e.py`.
+
+## Completion Audit
+
+Checked: 2026-06-06.
+
+- ✅ Every listed Goal, Concept, Necessary Conditions, Constraints, Phase 2 Decisions, Subtasks, Dependencies, Done and Implementation Notes line is complete.
+- ✅ Evidence: `examples/scenarios/ollama_cli_todo_app.yaml`, `examples/scenarios/cycles/ollama_cli_todo_app.yaml`, demo prompts and `tests/test_ollama_e2e.py`.
+- ✅ No unchecked quest lines remain in this file.
