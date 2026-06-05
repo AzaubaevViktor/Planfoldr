@@ -3,9 +3,9 @@ File name: `execution_001_additional_retry.md`
 
 ## Status
 
-Current status: in_progress
+Current status: done
 Blocked by: none
-Description: Implementing retry feedback now that trace artifacts can persist previous failure details and retry prompts cleanly.
+Description: Completed retry feedback for invalid model output retries.
 
 ## Goal
 
@@ -53,3 +53,5 @@ When a retry happens, the model receives a concise explanation of what was wrong
 
 - Queue after `report_001`; retry messages should be written as readable trace artifacts.
 - Added validation retry feedback to subsequent model prompts and persisted it through prompt metadata and trace input artifacts.
+- Completed and moved to `quests/done/`.
+- Verified with `.venv/bin/python -m pytest -q`.
