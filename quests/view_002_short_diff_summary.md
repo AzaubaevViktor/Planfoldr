@@ -40,11 +40,55 @@ Show concise diff summaries for file-changing tasks, including changed file coun
 
 Report pages show concise diff summaries for file-changing tasks while keeping detailed diff content collapsed.
 
+### Examples
+
+То есть как это должно выглядеть:
+```
+Starting `ollama_cli_todo_app_demo`
+cut with additional human-readable info
+
+cycle_name: prev_task -> [active task] -> next task
+command: command args in cwd
+cut with additional human-readable info about execution process
+result: success (reason)
+short diff (X files changed, Y delted, +200 lines -100)
+cut with additional diff info
+
+cycle_name: prev_task -> [active task] -> next task
+command: command args in cwd
+cut with additional human-readable info about execution process
+result: success (reason)
+short diff (X files changed, Y delted, +200 lines -100)
+cut with additional diff info
+
+cycle_name: prev_task -> [active task] -> next task
+model: goal with X НУ
+cut with additional human readable info about model message (if it works now, with generated part of text)
+result: failure (wrong format)
+
+retry 1/3 with additional message to model
+cut with additional message
+
+cycle_name: prev_task -> [active task] -> next task
+model: goal with X НУ with retry info
+cut with additional human readable info about model message (if it works now, with generated part of text)
+result: success
+
+cycle up/down to new_cycle_name
+
+...
+
+```
+
 ## Verification
 
 - Does a created file appear in the summary?
 - Does a modified file show line additions/removals?
 - Are large diffs kept collapsed or linked as artifacts?
+- Does cycle and tasks structure shows in report.html?
+- Does current tasks show's correctly?
+- Does streamed output show's in HTML?
+- Does tasks type is understandable in HTML?
 
 ## Implementation Notes
 

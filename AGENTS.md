@@ -1,5 +1,7 @@
 # Agent Instructions
 
+NEVER EVER REMOVE MY PRETTY EXAMPLES
+
 ## Git Hygiene
 
 - Commit messages made by AI agents must start with the `[AI]` prefix.
