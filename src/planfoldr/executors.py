@@ -416,15 +416,25 @@ class ExecutorRegistry:
         payload = self.task_inputs.get(task.id) or self._latest_output_with_files()
         files = payload.get("files", [])
         written: List[str] = []
+        file_changes: List[Dict[str, Any]] = []
         for item in files:
             target = self.permission_engine.check_write_path(_render_text(item["path"], self._template_variables()))
+            content = str(item.get("content", ""))
+            existed = target.exists()
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(item.get("content", "")), encoding="utf-8")
+            target.write_text(content, encoding="utf-8")
             written.append(str(target))
+            file_changes.append(
+                {
+                    "path": str(target),
+                    "action": "modified" if existed else "created",
+                    "bytes": len(content.encode("utf-8")),
+                }
+            )
         return make_task_result(
             task.id,
             Outcome.SUCCESS.value,
-            output={"status": Outcome.SUCCESS.value, "files": written},
+            output={"status": Outcome.SUCCESS.value, "files": written, "file_changes": file_changes},
             evidence=_verifier_evidence(task, Outcome.SUCCESS.value, f"Wrote {len(written)} file(s)"),
             metadata={"executor": "tool", "tool": "write_files"},
         )

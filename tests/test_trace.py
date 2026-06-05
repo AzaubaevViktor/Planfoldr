@@ -202,7 +202,11 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
         "write_files",
         Outcome.SUCCESS.value,
         execution_id="exec_tool",
-        output={"status": "success", "files": ["demo.txt"]},
+        output={
+            "status": "success",
+            "files": ["demo.txt"],
+            "file_changes": [{"path": "demo.txt", "action": "created", "bytes": 12}],
+        },
         metadata={"executor": "tool", "tool": "write_files"},
     )
     result = ScenarioResult(
@@ -243,6 +247,9 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
     assert {"kind": "command", "path": f"trace/{command_stdout_path}"} in artifacts
     assert (trace_dir / "tools" / "write_files" / "exec_tool" / "status.json").exists()
     assert (trace_dir / "tools" / "write_files" / "exec_tool" / "output.json").exists()
+    report_text = (tmp_path / "large" / "report.html").read_text(encoding="utf-8")
+    assert "File Changes" in report_text
+    assert "demo.txt" in report_text
 
 
 def test_task_replay_restores_captured_result(tmp_path: Path) -> None:

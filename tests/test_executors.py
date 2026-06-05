@@ -77,6 +77,8 @@ def test_write_files_uses_latest_model_output(tmp_path: Path) -> None:
 
     assert result.status == "success"
     assert target.read_text(encoding="utf-8") == "# Generated\n"
+    assert result.output["file_changes"][0]["action"] == "created"
+    assert result.output["file_changes"][0]["bytes"] == len("# Generated\n".encode("utf-8"))
 
 
 def test_write_files_ignores_tool_file_lists_when_finding_latest_model_output(tmp_path: Path) -> None:

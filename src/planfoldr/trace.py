@@ -986,7 +986,13 @@ class TraceWriter:
             _report_pre(label, _read_optional_text(self.trace_dir / base / name))
             for label, name in files
         )
-        return f"<details><summary>Task Details</summary><p>{links}</p>{previews}</details>"
+        return (
+            "<details><summary>Task Details</summary>"
+            f"<p>{links}</p>"
+            f"{_file_changes_html(task.output.get('file_changes'))}"
+            f"{previews}"
+            "</details>"
+        )
 
     def _cycle_task_list_html(self, cycle: CycleResult) -> str:
         if not cycle.task_results:
@@ -1440,6 +1446,25 @@ def _report_pre(title: str, text: str) -> str:
     if not text:
         return ""
     return f"<h3>{html.escape(title)}</h3><pre>{html.escape(text)}</pre>"
+
+
+def _file_changes_html(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return ""
+    rows = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<li>"
+            f"<strong>{html.escape(str(item.get('action') or 'changed'))}</strong> "
+            f"<code>{html.escape(str(item.get('path') or ''))}</code> "
+            f"<span class='muted'>{html.escape(str(item.get('bytes') or 0))} byte(s)</span>"
+            "</li>"
+        )
+    if not rows:
+        return ""
+    return f"<h3>File Changes</h3><ul>{''.join(rows)}</ul>"
 
 
 def _model_metadata_without_raw_response(task: TaskResult) -> Dict[str, Any]:
