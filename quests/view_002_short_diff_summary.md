@@ -89,6 +89,9 @@ cycle up/down to new_cycle_name
 - Does current tasks show's correctly?
 - Does streamed output show's in HTML?
 - Does tasks type is understandable in HTML?
+- We see two parts in report.html
+    - current status from status.json
+    - flow with addition info from all other files like in example
 
 ## Implementation Notes
 

@@ -37,6 +37,10 @@ Explain the current problem, the intended design direction and why this change m
 
 Describe the final acceptance state in one paragraph. A future agent should be able to read this and know whether the quest can move to `quests/done/`.
 
+### Examples
+
+Imagine example how it should looks like
+
 ## Verification
 
 Self-check questions before deciding that task are done
