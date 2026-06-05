@@ -1,4 +1,11 @@
-# Task 018: Complex Repair E2E Scenario
+# Task scenario_018: Complex Repair E2E Scenario
+File name: `scenario_018_complex_repair_e2e_scenario.md`
+
+## Status
+
+Current status: ready
+Blocked by: none
+Description: Ready to design and implement the nested repair e2e scenario.
 
 ## Goal
 
@@ -53,6 +60,18 @@ The scenario should also exercise nested orchestration. A top-level supervision 
 - Add optional Ollama e2e coverage.
 - Document how to run and inspect the scenario.
 
-## Done
+## Outcome
 
 The e2e scenario demonstrates nested planning/execution cycles, completes only after the upper plan verifies every item, demonstrates a real failing-test repair cycle and fails if the model solves the problem by deleting tests.
+
+## Verification
+
+- Does the scenario use at least two cycles with upper supervision and lower execution?
+- Does a verifier prove the intended test failure before repair?
+- Does repair make the suite pass again without deleting tests?
+- Does the upper cycle require verifier evidence before marking plan items done?
+- Is Ollama coverage optional and excluded from the default test suite?
+
+## Implementation Notes
+
+Not started.

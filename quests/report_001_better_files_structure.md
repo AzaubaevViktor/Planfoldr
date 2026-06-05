@@ -1,4 +1,11 @@
 # Task report_001: Better Report File Structure
+File name: `report_001_better_files_structure.md`
+
+## Status
+
+Current status: ready
+Blocked by: none
+Description: Ready to redesign report and trace artifact layout.
 
 ## Goal
 
@@ -58,6 +65,18 @@ Large values should not be repeatedly embedded in JSON files. When a JSON field 
 - Add tests for long JSON field extraction and artifact references.
 - Update documentation or quest notes that mention the old report layout.
 
-## Done
+## Outcome
 
 Each run has a readable `report.html` and a structured `trace/` tree where scenario, cycle, task, tool and model artifacts are stored consistently, with large JSON fields extracted into adjacent content files.
+
+## Verification
+
+- Does a run create `report.html` and the expected `trace/` structure?
+- Are scenario, cycle, task, tool and model artifacts written to stable relative paths?
+- Are JSON fields over the size threshold extracted into adjacent typed artifacts?
+- Can the report refresh from persisted artifact data without a server?
+- Do existing report and trace tests remain compatible during migration?
+
+## Implementation Notes
+
+Not started.

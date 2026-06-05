@@ -1,4 +1,11 @@
 # Task model_001: Use Model Tool-Call Syntax
+File name: `model_001_use_tool_call_syntax.md`
+
+## Status
+
+Current status: ready
+Blocked by: none
+Description: Ready to implement `<tool_call>` parsing at the model output boundary.
 
 ## Goal
 
@@ -38,6 +45,17 @@ When a model emits a supported tool call, the runtime should parse it, validate 
 - Add unit tests for valid, invalid and mixed plain-text/tool-call output.
 - Add or update trace fixtures so raw and assembled output remain inspectable.
 
-## Done
+## Outcome
 
 A model can emit supported `<tool_call>` syntax, Planfoldr records the raw output, parses the requested call, returns `need_tool_call` to orchestration and keeps all existing plain-text model behavior working.
+
+## Verification
+
+- Does valid `<tool_call>` output produce a deterministic `need_tool_call` result?
+- Are malformed tool-call blocks rejected with useful diagnostics?
+- Does plain text model output still follow the existing result path?
+- Are raw, streamed and assembled model outputs still traceable?
+
+## Implementation Notes
+
+Not started.

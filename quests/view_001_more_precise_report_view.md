@@ -1,4 +1,11 @@
 # Task view_001: More Precise Report View
+File name: `view_001_more_precise_report_view.md`
+
+## Status
+
+Current status: blocked
+Blocked by: report_001
+Description: Requires the structured report artifact layout from `report_001` before the detailed view can be implemented cleanly.
 
 ## Goal
 
@@ -84,6 +91,18 @@ cycle up/down to new_cycle_name
 - Add tests or fixtures for active, successful, failed and retried runs.
 - Verify the report remains readable from `file://`.
 
-## Done
+## Outcome
 
 Opening `report.html` during or after a run shows a chronological, expandable and human-readable execution view that exposes cycle structure, task context, inputs, outputs, requester/destination links, budget snapshots, file changes and retry history.
+
+## Verification
+
+- Does `report.html` show progress before the first model task finishes?
+- Can a reader see cycle transitions, task lifecycle events and requester/destination links?
+- Are context, input and output readable from expandable task sections?
+- Are budget snapshots, file changes, retry attempts and retry messages visible?
+- Does the report remain usable when opened directly from `file://`?
+
+## Implementation Notes
+
+Not started.

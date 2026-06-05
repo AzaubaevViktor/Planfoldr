@@ -42,7 +42,7 @@ The optional Ollama e2e test now performs a hidden final CLI behavior check afte
 
 ## Implementation Notes
 
-- Previous quest `019_ticket_tree_context_orchestration.md` is now `quests/020_ticket_tree_context_orchestration.md`.
+- Previous quest `019_ticket_tree_context_orchestration.md` is now `quests/orchestration_020_ticket_tree_context_orchestration.md`.
 - The hidden final check lives in `tests/test_ollama_e2e.py` as `_assert_generated_cli_behaves_like_todo_prompt`.
 - The checker runs each candidate entry point in an isolated state directory with `PYTHONPATH` pointed at the generated repository.
 - The contract checks that `add` persists items, `list` shows them from a later process and `done` changes the visible state of the chosen item.

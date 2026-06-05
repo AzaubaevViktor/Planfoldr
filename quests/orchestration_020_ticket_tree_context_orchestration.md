@@ -1,4 +1,11 @@
-# Quest 019: Ticket Tree Context Orchestration
+# Task orchestration_020: Ticket Tree Context Orchestration
+File name: `orchestration_020_ticket_tree_context_orchestration.md`
+
+## Status
+
+Current status: ready
+Blocked by: none
+Description: Ready to design persistent ticket-tree orchestration for larger scenario flows.
 
 ## Goal
 
@@ -72,6 +79,18 @@ The big cycle should be able to spawn nested cycles that either execute existing
 - Add a larger e2e scenario that exercises ticket creation, execution, review and completion.
 - Document how scenario authors describe ticket-driven flows in YAML.
 
-## Done
+## Outcome
 
 The runtime can execute a scenario where the upper cycle maintains a persistent ticket tree, delegates ready tickets to nested cycles, accepts verified results back into the tree, optionally creates new tickets through a separate cycle and finishes only when the whole tree is verified complete.
+
+## Verification
+
+- Does context persist a structured ticket tree with stable ids, statuses and dependencies?
+- Are ticket transitions explicit trace data rather than hidden in model text?
+- Can nested cycles execute assigned tickets without declaring the whole tree complete?
+- Does completion require verifier evidence or an explicit allowed decision?
+- Can the HTML report show ticket state, dependencies, owners and linked evidence?
+
+## Implementation Notes
+
+Not started.

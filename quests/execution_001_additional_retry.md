@@ -1,4 +1,11 @@
 # Task execution_001: Explain Previous Failure On Retry
+File name: `execution_001_additional_retry.md`
+
+## Status
+
+Current status: ready
+Blocked by: none
+Description: Ready to implement retry feedback for failed model attempts.
 
 ## Goal
 
@@ -31,6 +38,17 @@ Retries are more useful when the model receives actionable feedback. If a previo
 - Persist retry feedback in trace artifacts.
 - Add tests for validation failure, execution failure and malformed model output retries.
 
-## Done
+## Outcome
 
 When a retry happens, the model receives a concise explanation of what was wrong previously, and the same retry feedback is visible in the run trace.
+
+## Verification
+
+- Does a retry prompt include the previous failure category and readable error?
+- Is the retry feedback persisted in trace artifacts?
+- Do retry limits, budget accounting and redaction behavior remain unchanged?
+- Do tests cover validation failure, execution failure and malformed model output retries?
+
+## Implementation Notes
+
+Not started.
