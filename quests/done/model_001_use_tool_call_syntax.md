@@ -3,9 +3,9 @@ File name: `model_001_use_tool_call_syntax.md`
 
 ## Status
 
-Current status: in_progress
+Current status: done
 Blocked by: none
-Description: Implementing `<tool_call>` parsing now that malformed output can be traced and retried with feedback.
+Description: Completed `<tool_call>` parsing at the model output boundary.
 
 ## Goal
 
@@ -60,3 +60,5 @@ A model can emit supported `<tool_call>` syntax, Planfoldr records the raw outpu
 
 - Queue after `report_001` and `execution_001`; malformed `<tool_call>` output needs useful trace diagnostics and retry feedback.
 - Added model-boundary parsing for `<tool_call>` blocks, producing `need_tool_call` for valid calls and diagnostic `failure` output for malformed blocks.
+- Completed and moved to `quests/done/`.
+- Verified with `.venv/bin/python -m pytest -q`.
