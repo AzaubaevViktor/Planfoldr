@@ -821,6 +821,7 @@ class TraceWriter:
                     else None,
                     "raw_response_chars": metadata.get("raw_response_chars"),
                     "raw_response_lines": metadata.get("raw_response_lines"),
+                    "retry_feedback": metadata.get("retry_feedback"),
                 }
                 for task in task_records
                 if task.get("metadata", {}).get("executor") == "model"
@@ -946,12 +947,19 @@ class TraceWriter:
                     artifact=f"trace/{_raw_response_artifact_path(task.execution_id)}",
                 )
             )
-            if not any((content, thinking, assembled, raw_response)):
+            retry_feedback = task.metadata.get("retry_feedback")
+            retry_feedback_text = (
+                json.dumps(retry_feedback, indent=2, sort_keys=True)
+                if isinstance(retry_feedback, dict)
+                else ""
+            )
+            if not any((content, thinking, assembled, raw_response, retry_feedback_text)):
                 continue
             sections.append(
                 "<details open>"
                 f"<summary>{html.escape(task.task_id)} - {html.escape(task.execution_id)}</summary>"
                 f"<p class='muted'>Status: {html.escape(task.status)}</p>"
+                f"{_report_pre('Retry Feedback', retry_feedback_text)}"
                 f"{_report_pre('Content', content)}"
                 f"{_report_pre('Thinking', thinking)}"
                 f"{_report_pre('Assembled Stream', assembled)}"
@@ -1703,6 +1711,9 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
               if (text) parts.push(`<h3>Raw Response</h3><pre>${escapeHtml(text)}</pre>`);
             } catch (error) {}
           }
+        }
+        if (item.retry_feedback) {
+          parts.unshift(`<h3>Retry Feedback</h3><pre>${escapeHtml(JSON.stringify(item.retry_feedback, null, 2))}</pre>`);
         }
         if (parts.length > 0) {
           blocks.push(`<details open><summary>${escapeHtml(item.cycle_path || item.cycle_id || '')} / ${escapeHtml(item.task_id || '')} - ${escapeHtml(item.execution_id || '')}</summary>${parts.join('')}</details>`);

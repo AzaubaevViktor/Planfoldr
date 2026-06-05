@@ -159,6 +159,9 @@ def test_trace_persists_model_retry_feedback_in_task_input(tmp_path: Path) -> No
     assert payload["prompt"]["retry_feedback"]["category"] == "output_validation"
     assert payload["prompt"]["retry_feedback"]["path"] == "$.status"
     assert "Previous attempt failed" in payload["messages"][0]["content"]
+    report_text = (tmp_path / "validation_scenario" / "retry-feedback" / "report.html").read_text(encoding="utf-8")
+    assert "Retry Feedback" in report_text
+    assert "output_validation" in report_text
 
 
 def test_trace_writes_model_raw_response_as_separate_artifact(tmp_path: Path) -> None:

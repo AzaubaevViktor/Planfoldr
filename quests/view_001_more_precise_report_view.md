@@ -109,3 +109,4 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Started with expandable task details in the task table, backed by per-task `status.json`, `context.json`, `input.json` and `output.json` artifacts.
 - Live report shell now renders queued/running work from `status.json`, so the task table is useful before the first model task completes.
 - Report pages now show cycle structure directly, including queued live cycles and completed cycle task summaries.
+- Model sections now surface retry feedback as a readable report block when a successful retry followed a validation failure.
