@@ -57,10 +57,17 @@ The local-model demo is opt-in and skips automatically unless enabled:
 
 ```bash
 ollama serve
-ollama pull llama3.1
+ollama pull carstenuhlig/omnicoder-9b:latest
+python -m planfoldr ollama-models
 python -m planfoldr run examples/scenarios/ollama_cli_todo_app.yaml
 ```
 
-Use `--ollama-model <model-name>` to run the demo with another local Ollama model. Use `--ollama-timeout <seconds>` for slower models.
+Routine demo and comparison runs should use local Ollama models up to and including 12B parameters, and Planfoldr rejects model names with obvious larger parameter hints. Use `--ollama-model <model-name>` to run the demo with another compatible local Ollama model. Use `--ollama-timeout <seconds>` for slower models.
+
+To compare several installed compatible models and write a summary artifact:
+
+```bash
+python -m planfoldr compare-ollama-models examples/scenarios/ollama_cli_todo_app.yaml --ollama-timeout 180
+```
 
 The demo scenario is [examples/scenarios/ollama_cli_todo_app.yaml](examples/scenarios/ollama_cli_todo_app.yaml). It writes generated work under `runs/`, which is ignored by git, and writes each execution log, trace and `report.html` into a timestamped run subdirectory.

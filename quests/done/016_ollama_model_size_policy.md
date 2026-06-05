@@ -42,3 +42,11 @@ Large local models can be useful, but current development runs should stay withi
 ## Done
 
 Project docs and optional Ollama commands consistently use models with 12B parameters or fewer, and model comparison runs can persist per-model results showing which eligible installed model handled the demo best.
+
+## Implementation Notes
+
+- Default docs now recommend `carstenuhlig/omnicoder-9b:latest`, which is an installed <=12B coding model on the current machine.
+- `planfoldr ollama-models` parses `ollama list` and prints accepted/skipped policy decisions with apparent installed size and parameter hints.
+- `planfoldr compare-ollama-models <scenario>` runs the same scenario across eligible installed models and writes `model_comparison.json` plus `model_comparison.html`.
+- The comparison summary includes model name, apparent size, parameter hint, run id, status, reason, budget snapshot, generated file count, generated test count and links to trace/report artifacts.
+- `planfoldr run --ollama-model ...` rejects obvious model names above the <=12B policy before starting the scenario.

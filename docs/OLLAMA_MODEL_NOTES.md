@@ -27,6 +27,20 @@ On 2026-06-05, `ollama list` showed these installed <=12B candidates:
 
 Larger installed models such as `qwen3-coder:30b` are outside the current demo policy and should not be used for routine Planfoldr test/demo runs.
 
+Inspect the current local policy decision table with:
+
+```bash
+python -m planfoldr ollama-models
+```
+
+Run the same demo scenario across eligible installed models with:
+
+```bash
+python -m planfoldr compare-ollama-models examples/scenarios/ollama_cli_todo_app.yaml --ollama-timeout 180
+```
+
+The comparison command writes `model_comparison.json` and `model_comparison.html` under `runs/<scenario_id>/<comparison_id>/`. Each row links to the normal per-run `report.html` and `trace/report_data.json` for that model.
+
 ## Demo Result
 
 Command run:
