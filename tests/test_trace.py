@@ -76,6 +76,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert report_data["scenario"]["status"] == "success"
     assert report_data["cycle_artifacts"][0]["path"] == "trace/cycles/executor_cycle.json"
     assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
+    assert report_data["task_executions"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
     assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")
     assert report_data["task_inputs"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
     assert report_data["task_inputs"][0]["executor_artifact_dir"].startswith("trace/models/deterministic/")
@@ -88,7 +89,9 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "Execution Log" in report_text
     assert "trace/report_data.json" in report_text
     assert "renderModels" in report_text
-    assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th>" in report_text
+    assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th>" in report_text
+    assert "Task Details" in report_text
+    assert "trace/tasks/model/" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events

@@ -3,9 +3,9 @@ File name: `view_001_more_precise_report_view.md`
 
 ## Status
 
-Current status: ready
+Current status: in_progress
 Blocked by: none
-Description: Ready to build on the structured report artifact layout completed in `report_001`.
+Description: Building the readable report view on top of the structured artifact layout completed in `report_001`.
 
 ## Goal
 
@@ -106,3 +106,4 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 ## Implementation Notes
 
 - Depends on `report_001` so the UI can render stable persisted artifacts rather than process-memory state.
+- Started with expandable task details in the task table, backed by per-task `status.json`, `context.json`, `input.json` and `output.json` artifacts.

@@ -609,6 +609,10 @@ class TraceWriter:
                     record["metadata"] = _model_metadata_without_raw_response(task)
                 record["cycle_id"] = cycle.cycle_id
                 record["cycle_path"] = cycle_path
+                record["task_type"] = self._task_type(cycle.cycle_id, task.task_id)
+                record["task_artifact_dir"] = f"trace/{self._task_artifact_dir(cycle.cycle_id, task.task_id, task.execution_id)}"
+                executor_dir = self._executor_artifact_dir(task)
+                record["executor_artifact_dir"] = f"trace/{executor_dir}" if executor_dir else None
                 records.append(record)
         return records
 
@@ -854,6 +858,7 @@ class TraceWriter:
             f"<td>{html.escape(task.task_id)}</td>"
             f"<td>{html.escape(task.status)}</td>"
             f"<td>{html.escape(task.reason or '')}</td>"
+            f"<td>{self._task_table_detail_html(cycle, task)}</td>"
             "</tr>"
             for cycle in self.result.cycle_results
             for task in cycle.task_results
@@ -904,7 +909,7 @@ class TraceWriter:
   <h2>Task Executions</h2>
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
-    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th></tr></thead>
     <tbody id="task-rows">{rows}</tbody>
   </table>
   <h2>Task Inputs</h2>
@@ -952,6 +957,24 @@ class TraceWriter:
         if not sections:
             return "<p class='muted'>No model text captured.</p>"
         return "\n".join(sections)
+
+    def _task_table_detail_html(self, cycle: CycleResult, task: TaskResult) -> str:
+        base = self._task_artifact_dir(cycle.cycle_id, task.task_id, task.execution_id)
+        files = [
+            ("Status", "status.json"),
+            ("Context", "context.json"),
+            ("Input", "input.json"),
+            ("Output", "output.json"),
+        ]
+        links = " ".join(
+            f"<a href='trace/{html.escape(base)}/{name}'>{html.escape(label)}</a>"
+            for label, name in files
+        )
+        previews = "".join(
+            _report_pre(label, _read_optional_text(self.trace_dir / base / name))
+            for label, name in files
+        )
+        return f"<details><summary>Task Details</summary><p>{links}</p>{previews}</details>"
 
     def _input_report_sections(self) -> str:
         sections: List[str] = []
@@ -1242,7 +1265,7 @@ def _write_live_report_shell(
   <h2>Task Executions</h2>
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
-    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th></tr></thead>
     <tbody id="task-rows"></tbody>
   </table>
   <h2>Task Inputs</h2>
@@ -1571,9 +1594,18 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
           <td>${escapeHtml(task.task_id || '')}</td>
           <td>${escapeHtml(task.status || '')}</td>
           <td>${escapeHtml(task.reason || '')}</td>
+          <td>${taskDetailsLinks(task)}</td>
         </tr>
       `).join('');
       applyTaskFilter();
+    }
+    function taskDetailsLinks(task) {
+      const dir = task.task_artifact_dir;
+      if (!dir) return '';
+      const links = [['Status', 'status.json'], ['Context', 'context.json'], ['Input', 'input.json'], ['Output', 'output.json']]
+        .map(([label, name]) => `<a href="${escapeHtml(dir)}/${name}">${escapeHtml(label)}</a>`)
+        .join(' ');
+      return `<details><summary>Task Details</summary>${links}</details>`;
     }
     async function renderInputs(inputs) {
       const target = document.getElementById('task-inputs');
