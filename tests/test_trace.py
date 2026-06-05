@@ -256,7 +256,9 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     report_data = json.loads((trace_dir / "report_data.json").read_text(encoding="utf-8"))
     assert status["status"] == "error"
     assert report_data["status"]["status"] == "error"
-    assert (tmp_path / "executor_scenario" / "error-run" / "report.html").exists()
+    report_text = (tmp_path / "executor_scenario" / "error-run" / "report.html").read_text(encoding="utf-8")
+    assert "ask_model" in report_text
+    assert "run_command" in report_text
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert [event["event"] for event in events] == [
         "run_initialized",

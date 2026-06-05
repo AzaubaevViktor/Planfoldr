@@ -1266,7 +1266,7 @@ def _write_live_report_shell(
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
     <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th></tr></thead>
-    <tbody id="task-rows"></tbody>
+    <tbody id="task-rows">{_status_work_rows_html(status)}</tbody>
   </table>
   <h2>Task Inputs</h2>
   <div id="task-inputs"><p class="muted">No task inputs captured yet.</p></div>
@@ -1487,6 +1487,22 @@ def _status_html(status: Dict[str, Any]) -> str:
     )
 
 
+def _status_work_rows_html(status: Dict[str, Any]) -> str:
+    rows = []
+    for item in status.get("work", []):
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(item.get('cycle_id') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('cycle_id') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('task_id') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('status') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('reason') or ''))}</td>"
+            "<td></td>"
+            "</tr>"
+        )
+    return "\n".join(rows)
+
+
 def _run_relative_path(trace_dir: Path, path: Optional[Path]) -> Optional[str]:
     if path is None:
         return None
@@ -1599,6 +1615,11 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
       `).join('');
       applyTaskFilter();
     }
+    function renderStatusWork(status) {
+      if (Array.isArray(status.work) && status.work.length > 0) {
+        renderTasks(status.work);
+      }
+    }
     function taskDetailsLinks(task) {
       const dir = task.task_artifact_dir;
       if (!dir) return '';
@@ -1657,12 +1678,23 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
       let report = null;
       try { report = await readJson(data.report_snapshot || 'trace/report_data.json'); } catch (error) {}
       try {
-        renderStatus(await readJson(data.status || 'trace/status.json'));
+        const status = await readJson(data.status || 'trace/status.json');
+        renderStatus(status);
+        if (!report || !Array.isArray(report.task_executions) || report.task_executions.length === 0) {
+          renderStatusWork(status);
+        }
       } catch (error) {
-        if (report?.status) renderStatus(report.status);
+        if (report?.status) {
+          renderStatus(report.status);
+          if (!Array.isArray(report.task_executions) || report.task_executions.length === 0) {
+            renderStatusWork(report.status);
+          }
+        }
       }
       if (report) {
-        renderTasks(report.task_executions || []);
+        if (Array.isArray(report.task_executions) && report.task_executions.length > 0) {
+          renderTasks(report.task_executions);
+        }
         await renderInputs(report.task_inputs || []);
         await renderModels(report.model_outputs || []);
       } else {
