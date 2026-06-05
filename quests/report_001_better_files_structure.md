@@ -83,4 +83,5 @@ Each run has a readable `report.html` and a structured `trace/` tree where scena
 - Current dependency order starts here, then `view_001`, `execution_001`, `model_001`, `orchestration_020`, and finally `scenario_018`.
 - Added shared trace JSON writing that extracts string fields longer than 1000 characters into adjacent typed artifacts such as `.txt`, `.md` or `.json`.
 - Extracted artifact references remain relative to `trace/`, are included in `artifacts.json`, and `replay_task` resolves extracted references back to text.
+- Added per-task execution directories under `trace/tasks/<task_type>/<execution_id>/` with `status.json`, `input.json`, `context.json` and `output.json`, while preserving compatibility files such as `trace/tasks/executions.json` and `trace/inputs/<execution_id>.json`.
 - Verified the slice with `.venv/bin/python -m pytest tests/test_trace.py -q`.

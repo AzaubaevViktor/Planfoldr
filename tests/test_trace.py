@@ -36,6 +36,11 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert (trace_dir / "artifacts.json").exists()
     assert (trace_dir / "report_data.json").exists()
     assert (trace_dir / "tasks" / "executions.json").exists()
+    assert list((trace_dir / "tasks" / "model").glob("*/status.json"))
+    assert list((trace_dir / "tasks" / "model").glob("*/input.json"))
+    assert list((trace_dir / "tasks" / "model").glob("*/context.json"))
+    assert list((trace_dir / "tasks" / "model").glob("*/output.json"))
+    assert list((trace_dir / "tasks" / "command").glob("*/status.json"))
     assert log_path.exists()
     assert list((trace_dir / "models").glob("*.json"))
     assert list((trace_dir / "commands").glob("*.json"))
@@ -54,6 +59,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert report_data["execution_log"] == "logs/execution.log"
     assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
     assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")
+    assert report_data["task_inputs"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
     assert report_data["model_outputs"][0]["stream"].startswith("trace/models/")
     report_text = report.read_text(encoding="utf-8")
     assert "Refresh Report Data" in report_text
