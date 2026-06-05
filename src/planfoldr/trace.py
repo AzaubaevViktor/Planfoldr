@@ -989,10 +989,26 @@ class TraceWriter:
         return (
             "<details><summary>Task Details</summary>"
             f"<p>{links}</p>"
+            f"{self._request_route_html(cycle, task)}"
             f"{_file_changes_html(task.output.get('file_changes'))}"
             f"{previews}"
             "</details>"
         )
+
+    def _request_route_html(self, cycle: CycleResult, task: TaskResult) -> str:
+        executor_dir = self._executor_artifact_dir(task)
+        route = {
+            "source": {
+                "cycle_id": cycle.cycle_id,
+                "cycle_path": cycle.cycle_path or cycle.cycle_id,
+                "task_id": task.task_id,
+            },
+            "destination": {
+                "executor": task.metadata.get("executor", "unknown"),
+                "artifact_dir": f"trace/{executor_dir}" if executor_dir else None,
+            },
+        }
+        return _report_pre("Source / Destination", json.dumps(route, indent=2, sort_keys=True))
 
     def _cycle_task_list_html(self, cycle: CycleResult) -> str:
         if not cycle.task_results:

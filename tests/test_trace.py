@@ -93,6 +93,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "renderModels" in report_text
     assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th>" in report_text
     assert "Task Details" in report_text
+    assert "Source / Destination" in report_text
     assert "trace/tasks/model/" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]

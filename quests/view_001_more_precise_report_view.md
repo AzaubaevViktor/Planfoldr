@@ -111,3 +111,4 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Report pages now show cycle structure directly, including queued live cycles and completed cycle task summaries.
 - Model sections now surface retry feedback as a readable report block when a successful retry followed a validation failure.
 - `write_files` tasks now expose file change events in report details with action, path and byte count.
+- Task details now include a readable Source / Destination block with cycle/task origin and executor artifact destination.
