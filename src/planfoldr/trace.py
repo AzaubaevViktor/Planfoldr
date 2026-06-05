@@ -13,6 +13,7 @@ from planfoldr.runtime import ScenarioResult, TaskResult, run_scenario
 
 
 TRACE_SCHEMA_VERSION = "0.1"
+LONG_JSON_STRING_THRESHOLD = 1000
 
 
 def run_and_trace(
@@ -599,9 +600,7 @@ class TraceWriter:
         }
 
     def _write_json(self, relative: str, value: Any) -> None:
-        target = self.trace_dir / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
+        _write_json_with_long_artifacts(self.trace_dir, relative, value)
 
     def _write_jsonl(self, relative: str, values: Iterable[Dict[str, Any]]) -> None:
         target = self.trace_dir / relative
@@ -736,11 +735,13 @@ class TraceWriter:
 
 
 def replay_task(trace_dir: str | Path, task_id: str) -> TaskResult:
-    executions = json.loads((Path(trace_dir) / "tasks" / "executions.json").read_text(encoding="utf-8"))
+    trace_path = Path(trace_dir)
+    executions = json.loads((trace_path / "tasks" / "executions.json").read_text(encoding="utf-8"))
     task_fields = set(TaskResult.__dataclass_fields__)
     for item in executions:
         if item["task_id"] == task_id:
-            return TaskResult(**{key: value for key, value in item.items() if key in task_fields})
+            resolved = _resolve_extracted_artifact_refs(item, trace_path)
+            return TaskResult(**{key: value for key, value in resolved.items() if key in task_fields})
     raise KeyError(f"No task execution found for '{task_id}'")
 
 
@@ -978,6 +979,115 @@ def _read_optional_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
+
+
+def _write_json_with_long_artifacts(
+    trace_dir: Path,
+    relative: str,
+    value: Any,
+    *,
+    threshold: int = LONG_JSON_STRING_THRESHOLD,
+) -> None:
+    target = trace_dir / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    prepared = _extract_long_json_strings(
+        value,
+        trace_dir=trace_dir,
+        json_target=target,
+        path=(),
+        threshold=threshold,
+    )
+    target.write_text(json.dumps(prepared, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _extract_long_json_strings(
+    value: Any,
+    *,
+    trace_dir: Path,
+    json_target: Path,
+    path: tuple[str, ...],
+    threshold: int,
+) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _extract_long_json_strings(
+                item,
+                trace_dir=trace_dir,
+                json_target=json_target,
+                path=(*path, str(key)),
+                threshold=threshold,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _extract_long_json_strings(
+                item,
+                trace_dir=trace_dir,
+                json_target=json_target,
+                path=(*path, str(index)),
+                threshold=threshold,
+            )
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, str) and len(value) > threshold:
+        artifact_path = _write_long_string_artifact(trace_dir, json_target, path, value)
+        return str(artifact_path.relative_to(trace_dir))
+    return value
+
+
+def _write_long_string_artifact(trace_dir: Path, json_target: Path, path: tuple[str, ...], text: str) -> Path:
+    field_path = ".".join(_safe_artifact_path_part(part) for part in path) or "value"
+    suffix, content = _long_string_artifact_payload(path, text)
+    artifact_path = json_target.with_name(f"{json_target.stem}.{field_path}{suffix}")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(content, encoding="utf-8")
+    return artifact_path
+
+
+def _long_string_artifact_payload(path: tuple[str, ...], text: str) -> tuple[str, str]:
+    field_name = path[-1].lower() if path else ""
+    if field_name.endswith("_md") or "markdown" in field_name:
+        return ".md", text
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return ".txt", text
+    if isinstance(parsed, (dict, list)):
+        return ".json", json.dumps(parsed, indent=2, sort_keys=True)
+    return ".txt", text
+
+
+def _safe_artifact_path_part(value: str) -> str:
+    cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value)
+    return cleaned.strip("_") or "field"
+
+
+def _resolve_extracted_artifact_refs(value: Any, trace_dir: Path) -> Any:
+    if isinstance(value, dict):
+        return {key: _resolve_extracted_artifact_refs(item, trace_dir) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_extracted_artifact_refs(item, trace_dir) for item in value]
+    if isinstance(value, str) and _looks_like_extracted_artifact_ref(value):
+        target = trace_dir / value
+        try:
+            target.relative_to(trace_dir)
+        except ValueError:
+            return value
+        try:
+            return target.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return value
+    return value
+
+
+def _looks_like_extracted_artifact_ref(value: str) -> bool:
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    if path.suffix not in {".json", ".md", ".txt"}:
+        return False
+    return len(path.name.split(".")) > 2
 
 
 def _read_json_optional(path: Path) -> Dict[str, Any]:

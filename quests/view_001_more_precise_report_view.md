@@ -105,4 +105,4 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 
 ## Implementation Notes
 
-Not started.
+- Depends on `report_001` so the UI can render stable persisted artifacts rather than process-memory state.

@@ -3,9 +3,9 @@ File name: `scenario_018_complex_repair_e2e_scenario.md`
 
 ## Status
 
-Current status: ready
-Blocked by: none
-Description: Ready to design and implement the nested repair e2e scenario.
+Current status: blocked
+Blocked by: report_001, view_001, execution_001, model_001, orchestration_020
+Description: The harder e2e scenario should come after the debugging, retry, tool-call and orchestration foundations it is meant to exercise.
 
 ## Goal
 
@@ -74,4 +74,4 @@ The e2e scenario demonstrates nested planning/execution cycles, completes only a
 
 ## Implementation Notes
 
-Not started.
+- Queue after the foundational introspection, retry, tool-call and ticket-tree work; this scenario should validate those pieces together.

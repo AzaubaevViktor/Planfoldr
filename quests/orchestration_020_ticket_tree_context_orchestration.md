@@ -3,9 +3,9 @@ File name: `orchestration_020_ticket_tree_context_orchestration.md`
 
 ## Status
 
-Current status: ready
-Blocked by: none
-Description: Ready to design persistent ticket-tree orchestration for larger scenario flows.
+Current status: blocked
+Blocked by: report_001, view_001, model_001
+Description: Larger ticket-tree orchestration should wait until introspection, report view and model tool-call handling make complex runs debuggable.
 
 ## Goal
 
@@ -93,4 +93,4 @@ The runtime can execute a scenario where the upper cycle maintains a persistent 
 
 ## Implementation Notes
 
-Not started.
+- Queue after the introspection/report layer and model tool-call syntax, because ticket-tree orchestration will create more nested state to inspect.

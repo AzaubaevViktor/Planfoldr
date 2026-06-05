@@ -3,9 +3,9 @@ File name: `execution_001_additional_retry.md`
 
 ## Status
 
-Current status: ready
-Blocked by: none
-Description: Ready to implement retry feedback for failed model attempts.
+Current status: blocked
+Blocked by: report_001
+Description: Retry feedback should be implemented after trace artifacts can persist the previous failure and retry prompt cleanly.
 
 ## Goal
 
@@ -51,4 +51,4 @@ When a retry happens, the model receives a concise explanation of what was wrong
 
 ## Implementation Notes
 
-Not started.
+- Queue after `report_001`; retry messages should be written as readable trace artifacts.

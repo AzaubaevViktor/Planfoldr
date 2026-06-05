@@ -134,6 +134,54 @@ def test_trace_writes_model_raw_response_as_separate_artifact(tmp_path: Path) ->
     assert '{"status": "success"}' not in (trace_dir / "report_data.json").read_text(encoding="utf-8")
 
 
+def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    long_stdout = "large output\n" * 120
+    task = make_task_result(
+        "run_command",
+        Outcome.SUCCESS.value,
+        execution_id="exec_large_stdout",
+        output={"status": "success", "stdout": long_stdout, "stderr": ""},
+        metadata={"executor": "command", "command": "python3 -c ...", "cwd": "."},
+    )
+    result = ScenarioResult(
+        scenario_id=loaded.document.id,
+        status=Outcome.SUCCESS.value,
+        cycle_results=[
+            CycleResult(
+                cycle_id=loaded.cycles[0].document.id,
+                cycle_path=loaded.cycles[0].document.id,
+                status=Outcome.SUCCESS.value,
+                task_results=[task],
+            )
+        ],
+    )
+
+    TraceWriter(
+        loaded,
+        result,
+        trace_dir=tmp_path / "large" / "trace",
+        report_path=tmp_path / "large" / "report.html",
+    ).write()
+
+    trace_dir = tmp_path / "large" / "trace"
+    task_records = json.loads((trace_dir / "tasks" / "executions.json").read_text(encoding="utf-8"))
+    command_metadata = json.loads((trace_dir / "commands" / "exec_large_stdout.json").read_text(encoding="utf-8"))
+
+    task_stdout_path = task_records[0]["output"]["stdout"]
+    command_stdout_path = command_metadata["output"]["stdout"]
+    assert task_stdout_path == "tasks/executions.0.output.stdout.txt"
+    assert command_stdout_path == "commands/exec_large_stdout.output.stdout.txt"
+    assert (trace_dir / task_stdout_path).read_text(encoding="utf-8") == long_stdout
+    assert (trace_dir / command_stdout_path).read_text(encoding="utf-8") == long_stdout
+    assert long_stdout not in (trace_dir / "tasks" / "executions.json").read_text(encoding="utf-8")
+    assert long_stdout not in (trace_dir / "commands" / "exec_large_stdout.json").read_text(encoding="utf-8")
+    assert replay_task(trace_dir, "run_command").output["stdout"] == long_stdout
+    artifacts = json.loads((trace_dir / "artifacts.json").read_text(encoding="utf-8"))["artifacts"]
+    assert {"kind": "task_execution", "path": f"trace/{task_stdout_path}"} in artifacts
+    assert {"kind": "command", "path": f"trace/{command_stdout_path}"} in artifacts
+
+
 def test_task_replay_restores_captured_result(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
     result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="replay-test")

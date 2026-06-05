@@ -3,9 +3,9 @@ File name: `report_001_better_files_structure.md`
 
 ## Status
 
-Current status: ready
+Current status: in_progress
 Blocked by: none
-Description: Ready to redesign report and trace artifact layout.
+Description: First priority because better run introspection makes all later model, retry, orchestration and scenario work faster to debug.
 
 ## Goal
 
@@ -79,4 +79,8 @@ Each run has a readable `report.html` and a structured `trace/` tree where scena
 
 ## Implementation Notes
 
-Not started.
+- Priority anchor for the current queue. Start with deterministic trace artifact writing and long-field extraction before broad report UI changes.
+- Current dependency order starts here, then `view_001`, `execution_001`, `model_001`, `orchestration_020`, and finally `scenario_018`.
+- Added shared trace JSON writing that extracts string fields longer than 1000 characters into adjacent typed artifacts such as `.txt`, `.md` or `.json`.
+- Extracted artifact references remain relative to `trace/`, are included in `artifacts.json`, and `replay_task` resolves extracted references back to text.
+- Verified the slice with `.venv/bin/python -m pytest tests/test_trace.py -q`.
