@@ -2,12 +2,12 @@ id: ollama_cli_todo_app_demo
 goal: Generate a Python CLI todo-list project with tests through local Ollama.
 
 inputs:
-  workspace_root: ./runs/ollama_cli_todo_app_demo/{{ runtime.run_id }}/workspace
-  repository_path: ./runs/ollama_cli_todo_app_demo/{{ runtime.run_id }}/workspace/project
+  workspace_root: "{{ runtime.workspace_dir }}"
+  repository_path: "{{ runtime.workspace_dir }}/project"
 
 outputs:
-  report_path: ./runs/ollama_cli_todo_app_demo/report.html
-  trace_path: ./runs/ollama_cli_todo_app_demo/trace
+  report_path: "{{ runtime.run_dir }}/report.html"
+  trace_path: "{{ runtime.run_dir }}/trace"
 
 required_conditions:
   - id: generated_tests_pass
@@ -24,9 +24,9 @@ constraints:
   filesystem:
     allow_read:
       - .
-      - ./runs/ollama_cli_todo_app_demo
+      - "{{ runtime.run_dir }}"
     allow_write:
-      - ./runs/ollama_cli_todo_app_demo
+      - "{{ runtime.run_dir }}"
 
 budgets:
   max_iterations: 12

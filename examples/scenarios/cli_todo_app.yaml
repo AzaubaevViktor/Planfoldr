@@ -2,12 +2,12 @@ id: cli_todo_app_demo
 goal: Create a simple CLI todo-list project with tests.
 
 inputs:
-  workspace_root: ./runs/cli_todo_app_demo/workspace
-  repository_path: ./runs/cli_todo_app_demo/workspace/project
+  workspace_root: "{{ runtime.workspace_dir }}"
+  repository_path: "{{ runtime.workspace_dir }}/project"
 
 outputs:
-  report_path: ./runs/cli_todo_app_demo/report.html
-  trace_path: ./runs/cli_todo_app_demo/trace.json
+  report_path: "{{ runtime.run_dir }}/report.html"
+  trace_path: "{{ runtime.run_dir }}/trace"
 
 required_conditions:
   - id: project_tests_pass
@@ -23,10 +23,10 @@ constraints:
       - write_files
   filesystem:
     allow_write:
-      - ./runs/cli_todo_app_demo
+      - "{{ runtime.run_dir }}"
     allow_read:
       - ./examples
-      - ./runs/cli_todo_app_demo
+      - "{{ runtime.run_dir }}"
 
 budgets:
   max_iterations: 8

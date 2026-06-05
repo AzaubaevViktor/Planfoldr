@@ -48,17 +48,17 @@ def _run(args: argparse.Namespace) -> int:
         _override_model_name(loaded, args.ollama_model)
 
     run_id = args.run_id or new_run_id()
-    loaded.document.inputs = _render_runtime_inputs(loaded.document.inputs, run_id=run_id)
+    runtime = apply_runtime_context(loaded, output_root=args.output_root, run_id=run_id)
     registry = ExecutorRegistry(
         permission_engine=PermissionEngine(loaded.document.constraints, base_dir=args.base_dir),
         budget_tracker=BudgetTracker(loaded.document.budgets),
         prompts=_collect_prompts(loaded),
         model_adapter=_select_model_adapter(loaded, timeout=args.ollama_timeout),
-        prompt_variables=_prompt_variables(loaded.document.inputs, run_id=run_id),
+        prompt_variables=_prompt_variables(loaded.document.inputs, runtime=runtime),
         invalid_output_retries=_invalid_output_retries(loaded),
     )
     result = run_and_trace(loaded, registry, output_root=args.output_root, run_id=run_id)
-    run_dir = args.output_root / loaded.document.id / run_id
+    run_dir = Path(runtime["run_dir"])
     print(f"scenario={loaded.document.id}")
     print(f"status={result.status}")
     print(f"run_dir={run_dir}")
@@ -98,25 +98,96 @@ def _invalid_output_retries(loaded) -> int:
     return defaults.retry.invalid_output
 
 
-def _prompt_variables(inputs: dict, *, run_id: str = "") -> dict:
+def apply_runtime_context(loaded, *, output_root: str | Path, run_id: str) -> dict:
+    runtime = _runtime_context(
+        scenario_id=loaded.document.id,
+        output_root=output_root,
+        run_id=run_id,
+    )
+    loaded.document.inputs = _render_runtime_inputs(loaded.document.inputs, runtime=runtime)
+    loaded.document.outputs = _render_runtime_inputs(loaded.document.outputs, runtime=runtime)
+    _render_runtime_constraints(loaded.document.constraints, runtime=runtime)
+    for cycle in loaded.cycles:
+        _render_runtime_cycle(cycle, runtime=runtime)
+    return runtime
+
+
+def _runtime_context(*, scenario_id: str, output_root: str | Path, run_id: str) -> dict:
+    run_dir = Path(output_root) / scenario_id / run_id
+    workspace_dir = run_dir / "workspace"
+    return {
+        "python": sys.executable,
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "workspace_dir": str(workspace_dir),
+    }
+
+
+def _prompt_variables(inputs: dict, *, runtime: Optional[dict] = None, run_id: str = "") -> dict:
+    runtime = runtime or {
+        "python": sys.executable,
+        "run_id": run_id,
+        "run_dir": "",
+        "workspace_dir": "",
+    }
     return {
         "inputs": inputs,
-        "runtime": {"python": sys.executable, "run_id": run_id},
-        "runtime.python": sys.executable,
-        "runtime.run_id": run_id,
+        "runtime": runtime,
+        "runtime.python": runtime["python"],
+        "runtime.run_id": runtime["run_id"],
+        "runtime.run_dir": runtime["run_dir"],
+        "runtime.workspace_dir": runtime["workspace_dir"],
         **{f"inputs.{key}": value for key, value in inputs.items()},
     }
 
 
-def _render_runtime_inputs(inputs: dict, *, run_id: str) -> dict:
+def _render_runtime_inputs(inputs: dict, *, runtime: Optional[dict] = None, run_id: str = "") -> dict:
+    runtime = runtime or {
+        "python": sys.executable,
+        "run_id": run_id,
+        "run_dir": "",
+        "workspace_dir": "",
+    }
     runtime_values = {
-        "{{ runtime.run_id }}": run_id,
-        "{{ runtime.python }}": sys.executable,
+        "{{ runtime.python }}": runtime["python"],
+        "{{ runtime.run_id }}": runtime["run_id"],
+        "{{ runtime.run_dir }}": runtime["run_dir"],
+        "{{ runtime.workspace_dir }}": runtime["workspace_dir"],
     }
     return {
         key: _replace_runtime_placeholders(value, runtime_values)
         for key, value in inputs.items()
     }
+
+
+def _render_runtime_constraints(constraints, *, runtime: dict) -> None:
+    if constraints is None or constraints.filesystem is None:
+        return
+    constraints.filesystem.allow_read = _render_runtime_list(constraints.filesystem.allow_read, runtime=runtime)
+    constraints.filesystem.allow_write = _render_runtime_list(constraints.filesystem.allow_write, runtime=runtime)
+
+
+def _render_runtime_cycle(cycle, *, runtime: dict) -> None:
+    _render_runtime_constraints(cycle.document.constraints, runtime=runtime)
+    for task in cycle.document.tasks:
+        _render_runtime_constraints(task.executor.constraints, runtime=runtime)
+    for nested in cycle.nested_cycles:
+        _render_runtime_cycle(nested, runtime=runtime)
+
+
+def _render_runtime_list(values: list[str], *, runtime: dict) -> list[str]:
+    return [
+        _replace_runtime_placeholders(
+            value,
+            {
+                "{{ runtime.python }}": runtime["python"],
+                "{{ runtime.run_id }}": runtime["run_id"],
+                "{{ runtime.run_dir }}": runtime["run_dir"],
+                "{{ runtime.workspace_dir }}": runtime["workspace_dir"],
+            },
+        )
+        for value in values
+    ]
 
 
 def _replace_runtime_placeholders(value, runtime_values: dict):

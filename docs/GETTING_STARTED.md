@@ -68,8 +68,11 @@ runs/<scenario_id>/
       scenario.json
       tasks/executions.json
       cycles/index.json
+    workspace/
     report.html
 ```
+
+Scenario YAML can use `{{ runtime.run_dir }}` and `{{ runtime.workspace_dir }}`. Generated projects should use `{{ runtime.workspace_dir }}/project`, so every run starts from a fresh workspace and older run logs stay inspectable.
 
 ## 5. Inspect A Run
 
@@ -127,7 +130,7 @@ Scenario:
 examples/scenarios/ollama_cli_todo_app.yaml
 ```
 
-The runtime still controls workflow. Ollama only supplies model task output. Generated work stays under `runs/`.
+The runtime still controls workflow. Ollama only supplies model task output. Generated work stays under `runs/<scenario_id>/<run_id>/workspace/`.
 
 ## 7. Common Failure Modes
 
