@@ -135,6 +135,27 @@ def set_ticket_status(
     return refresh_readiness(TicketTree(tickets=tickets))
 
 
+def assign_ticket(tree: TicketTree, ticket_id: str, owner: Mapping[str, Any]) -> TicketTree:
+    if not owner:
+        raise ValueError("Ticket owner must not be empty")
+    return set_ticket_status(tree, ticket_id, "running", owner=owner)
+
+
+def complete_ticket(
+    tree: TicketTree,
+    ticket_id: str,
+    *,
+    evidence: Optional[Iterable[Mapping[str, Any]]] = None,
+    decision: Optional[Mapping[str, Any]] = None,
+) -> TicketTree:
+    evidence_items = [dict(item) for item in evidence or []]
+    if decision is not None:
+        evidence_items.append({"kind": "decision", **dict(decision)})
+    if not evidence_items:
+        raise ValueError("Ticket completion requires verifier evidence or an explicit decision")
+    return set_ticket_status(tree, ticket_id, "done", evidence=evidence_items)
+
+
 def refresh_readiness(tree: TicketTree) -> TicketTree:
     tickets = dict(tree.tickets)
     for ticket_id, ticket in list(tickets.items()):

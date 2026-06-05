@@ -95,3 +95,4 @@ The runtime can execute a scenario where the upper cycle maintains a persistent 
 
 - Queue after the introspection/report layer and model tool-call syntax, because ticket-tree orchestration will create more nested state to inspect.
 - Added initial deterministic ticket-tree schema helpers with JSON roundtrip, dependency readiness and status transition tests.
+- Added ticket assignment and completion helpers; completion now requires verifier evidence or an explicit decision.

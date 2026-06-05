@@ -3,6 +3,8 @@ import pytest
 from planfoldr.tickets import (
     TicketTree,
     add_ticket,
+    assign_ticket,
+    complete_ticket,
     create_ticket,
     ready_ticket_ids,
     set_ticket_status,
@@ -32,6 +34,30 @@ def test_ticket_tree_tracks_dependency_readiness() -> None:
     tree = set_ticket_status(tree, "ticket_setup", "done", evidence=[{"kind": "test", "path": "trace/x"}])
     assert ready_ticket_ids(tree) == ["ticket_verify"]
     assert tree.tickets["ticket_setup"].evidence == [{"kind": "test", "path": "trace/x"}]
+
+
+def test_ticket_assignment_and_completion_require_evidence() -> None:
+    tree = add_ticket(
+        TicketTree(),
+        create_ticket(
+            ticket_id="ticket_code",
+            title="Write code",
+            description="Implement code.",
+            ticket_type="code",
+        ),
+    )
+
+    tree = assign_ticket(tree, "ticket_code", {"cycle_id": "cycle_a", "task_id": "task_a"})
+
+    assert tree.tickets["ticket_code"].status == "running"
+    assert tree.tickets["ticket_code"].owner == {"cycle_id": "cycle_a", "task_id": "task_a"}
+    with pytest.raises(ValueError, match="requires verifier evidence"):
+        complete_ticket(tree, "ticket_code")
+    tree = complete_ticket(tree, "ticket_code", decision={"decision_id": "human_approved"})
+    assert tree.tickets["ticket_code"].status == "done"
+    assert tree.tickets["ticket_code"].evidence == [
+        {"kind": "decision", "decision_id": "human_approved"}
+    ]
 
 
 def test_ticket_tree_round_trips_as_json_data() -> None:
