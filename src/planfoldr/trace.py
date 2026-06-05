@@ -351,6 +351,7 @@ class TraceWriter:
         self._write_json("scenario.json", self.loaded.document.model_dump(mode="json"))
         self._write_json("tasks/executions.json", self._task_execution_records())
         self._write_json("cycles/index.json", [cycle.to_dict() for cycle in self.result.cycle_results])
+        self._write_cycle_parts()
         self._write_task_parts()
         self._write_executor_parts()
         self._write_jsonl("audit.jsonl", self.audit_events)
@@ -375,7 +376,7 @@ class TraceWriter:
             "reason": self.result.reason,
             "inputs": self.loaded.document.inputs,
             "outputs": self.loaded.document.outputs,
-            "cycles": ["cycles/index.json"],
+            "cycles": ["cycles/index.json", *self._cycle_artifact_paths()],
             "task_executions": ["tasks/executions.json"],
             "audit_log": "audit.jsonl",
             "decision_log": "decisions.jsonl",
@@ -480,6 +481,35 @@ class TraceWriter:
                     },
                 )
 
+    def _write_cycle_parts(self) -> None:
+        for cycle in self.result.cycle_results:
+            cycle_path = cycle.cycle_path or cycle.cycle_id
+            task_summaries = []
+            for task in cycle.task_results:
+                task_summaries.append(
+                    {
+                        "task_id": task.task_id,
+                        "execution_id": task.execution_id,
+                        "task_type": self._task_type(cycle.cycle_id, task.task_id),
+                        "executor": task.metadata.get("executor", "unknown"),
+                        "status": task.status,
+                        "reason": task.reason,
+                        "artifact_dir": self._task_artifact_dir(cycle.cycle_id, task.task_id, task.execution_id),
+                    }
+                )
+            self._write_json(
+                self._cycle_artifact_path(cycle),
+                {
+                    "cycle_id": cycle.cycle_id,
+                    "cycle_path": cycle_path,
+                    "status": cycle.status,
+                    "reason": cycle.reason,
+                    "request": cycle.request,
+                    "task_count": len(cycle.task_results),
+                    "tasks": task_summaries,
+                },
+            )
+
     def _task_execution_records(self) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
         for cycle in self.result.cycle_results:
@@ -499,6 +529,13 @@ class TraceWriter:
 
     def _task_type(self, cycle_id: str, task_id: str) -> str:
         return self.task_types.get((cycle_id, task_id)) or self.task_types.get(("", task_id)) or "unknown"
+
+    def _cycle_artifact_paths(self) -> List[str]:
+        return [self._cycle_artifact_path(cycle) for cycle in self.result.cycle_results]
+
+    def _cycle_artifact_path(self, cycle: CycleResult) -> str:
+        cycle_path = cycle.cycle_path or cycle.cycle_id
+        return f"cycles/{_safe_trace_segment(cycle_path)}.json"
 
     def _task_input_artifact(self, task: TaskResult) -> Dict[str, Any]:
         executor = task.metadata.get("executor", "unknown")
@@ -630,6 +667,14 @@ class TraceWriter:
             "status": _read_json_optional(self.trace_dir / "status.json"),
             "artifacts": _read_json_optional(self.trace_dir / "artifacts.json").get("artifacts", []),
             "cycles": [cycle.to_dict() for cycle in self.result.cycle_results],
+            "cycle_artifacts": [
+                {
+                    "cycle_id": cycle.cycle_id,
+                    "cycle_path": cycle.cycle_path or cycle.cycle_id,
+                    "path": f"trace/{self._cycle_artifact_path(cycle)}",
+                }
+                for cycle in self.result.cycle_results
+            ],
             "task_executions": task_records,
             "task_inputs": [
                 {

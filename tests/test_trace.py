@@ -36,6 +36,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert (trace_dir / "artifacts.json").exists()
     assert (trace_dir / "report_data.json").exists()
     assert (trace_dir / "tasks" / "executions.json").exists()
+    assert (trace_dir / "cycles" / "executor_cycle.json").exists()
     assert list((trace_dir / "tasks" / "model").glob("*/status.json"))
     assert list((trace_dir / "tasks" / "model").glob("*/input.json"))
     assert list((trace_dir / "tasks" / "model").glob("*/context.json"))
@@ -52,11 +53,13 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     manifest = json.loads((trace_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["report_data"]["status"] == "trace/status.json"
     assert manifest["report_data"]["report_snapshot"] == "trace/report_data.json"
+    assert "cycles/executor_cycle.json" in manifest["cycles"]
     artifacts = json.loads((trace_dir / "artifacts.json").read_text(encoding="utf-8"))
     assert any(item["kind"] == "task_input" for item in artifacts["artifacts"])
     assert any(item["kind"] == "report_data" for item in artifacts["artifacts"])
     report_data = json.loads((trace_dir / "report_data.json").read_text(encoding="utf-8"))
     assert report_data["execution_log"] == "logs/execution.log"
+    assert report_data["cycle_artifacts"][0]["path"] == "trace/cycles/executor_cycle.json"
     assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
     assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")
     assert report_data["task_inputs"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
