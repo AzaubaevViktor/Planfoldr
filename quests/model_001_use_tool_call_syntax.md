@@ -4,7 +4,7 @@ File name: `model_001_use_tool_call_syntax.md`
 ## Status
 
 Current status: blocked
-Blocked by: report_001, execution_001
+Blocked by: execution_001
 Description: Tool-call parsing should follow better trace artifacts and retry feedback so malformed model syntax is easier to diagnose.
 
 ## Goal

@@ -4,7 +4,7 @@ File name: `scenario_018_complex_repair_e2e_scenario.md`
 ## Status
 
 Current status: blocked
-Blocked by: report_001, view_001, execution_001, model_001, orchestration_020
+Blocked by: view_001, execution_001, model_001, orchestration_020
 Description: The harder e2e scenario should come after the debugging, retry, tool-call and orchestration foundations it is meant to exercise.
 
 ## Goal

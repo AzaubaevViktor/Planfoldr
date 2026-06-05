@@ -3,9 +3,9 @@ File name: `view_001_more_precise_report_view.md`
 
 ## Status
 
-Current status: blocked
-Blocked by: report_001
-Description: Requires the structured report artifact layout from `report_001` before the detailed view can be implemented cleanly.
+Current status: ready
+Blocked by: none
+Description: Ready to build on the structured report artifact layout completed in `report_001`.
 
 ## Goal
 

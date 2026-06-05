@@ -3,9 +3,9 @@ File name: `execution_001_additional_retry.md`
 
 ## Status
 
-Current status: blocked
-Blocked by: report_001
-Description: Retry feedback should be implemented after trace artifacts can persist the previous failure and retry prompt cleanly.
+Current status: ready
+Blocked by: none
+Description: Ready to implement retry feedback now that trace artifacts can persist previous failure details and retry prompts cleanly.
 
 ## Goal
 

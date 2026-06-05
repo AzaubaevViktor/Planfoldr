@@ -3,9 +3,9 @@ File name: `report_001_better_files_structure.md`
 
 ## Status
 
-Current status: in_progress
+Current status: done
 Blocked by: none
-Description: First priority because better run introspection makes all later model, retry, orchestration and scenario work faster to debug.
+Description: Completed foundational report and trace artifact structure for run introspection.
 
 ## Goal
 
@@ -87,4 +87,5 @@ Each run has a readable `report.html` and a structured `trace/` tree where scena
 - Added per-cycle artifacts under `trace/cycles/<cycle_path>.json` and exposed them through `manifest.json` and `report_data.json`.
 - Added executor-specific directories under `trace/models/<model_name>/<execution_id>/`, `trace/tools/<tool_name>/<execution_id>/` and `trace/commands/<command>/<execution_id>/`, preserving old compatibility files and old model stream paths.
 - Changed `trace/scenario.json` into a scenario execution summary and moved the source scenario document to `trace/scenario_definition.json`; both are available during live runs.
+- Completed and moved to `quests/done/`.
 - Verified the slice with `.venv/bin/python -m pytest tests/test_trace.py -q`.
