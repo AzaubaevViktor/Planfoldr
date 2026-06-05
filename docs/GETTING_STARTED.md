@@ -95,6 +95,12 @@ Captured task results are stored in:
 runs/<scenario_id>/<run_id>/trace/tasks/executions.json
 ```
 
+The HTML report refreshes from:
+
+```text
+runs/<scenario_id>/<run_id>/trace/report_data.json
+```
+
 Open `runs/<scenario_id>/<run_id>/report.html` in a browser for the static report.
 
 ## 6. Optional Ollama Demo

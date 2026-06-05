@@ -46,6 +46,7 @@ def run_and_trace(
     except Exception as exc:
         logger.write("scenario_error", error_type=type(exc).__name__, reason=str(exc))
         status_writer.update("scenario_error", status="error", reason=str(exc), current_task_id=None)
+        _write_live_report_data(loaded, trace_dir=trace_dir, run_id=run_id, logger=logger)
         raise
     logger.write("scenario_finish", status=result.status, reason=result.reason)
     status_writer.update("scenario_finish", status=result.status, reason=result.reason, current_task_id=None)
@@ -353,6 +354,7 @@ class TraceWriter:
         self._write_jsonl("decisions.jsonl", self.decisions)
         self._write_final_status()
         self._write_json("artifacts.json", self._artifact_index())
+        self._write_json("report_data.json", self._report_data_snapshot())
         self._write_json("manifest.json", self._manifest())
         self._write_report()
 
@@ -377,10 +379,12 @@ class TraceWriter:
             "execution_log": self._execution_log_manifest_path(),
             "status_file": "status.json",
             "artifact_index": "artifacts.json",
+            "report_data_file": "report_data.json",
             "report_data": {
                 "manifest": "trace/manifest.json",
                 "status": "trace/status.json",
                 "artifacts": "trace/artifacts.json",
+                "report_snapshot": "trace/report_data.json",
                 "scenario": "trace/scenario.json",
                 "cycles": "trace/cycles/index.json",
                 "task_executions": "trace/tasks/executions.json",
@@ -530,11 +534,52 @@ class TraceWriter:
         for path in sorted(self.trace_dir.rglob("*")):
             if path.is_file():
                 artifacts.append({"kind": _artifact_kind(path), "path": str(path.relative_to(run_dir))})
+        report_data_path = "trace/report_data.json"
+        if not any(item["path"] == report_data_path for item in artifacts):
+            artifacts.append({"kind": "report_data", "path": report_data_path})
         return {
             "schema_version": TRACE_SCHEMA_VERSION,
             "generated_at": _timestamp(),
             "run_id": self.run_id,
             "artifacts": artifacts,
+        }
+
+    def _report_data_snapshot(self) -> Dict[str, Any]:
+        task_records = self._task_execution_records()
+        return {
+            "schema_version": TRACE_SCHEMA_VERSION,
+            "generated_at": _timestamp(),
+            "run_id": self.run_id,
+            "scenario_id": self.loaded.document.id,
+            "status": _read_json_optional(self.trace_dir / "status.json"),
+            "artifacts": _read_json_optional(self.trace_dir / "artifacts.json").get("artifacts", []),
+            "cycles": [cycle.to_dict() for cycle in self.result.cycle_results],
+            "task_executions": task_records,
+            "task_inputs": [
+                {
+                    "cycle_id": task.get("cycle_id"),
+                    "cycle_path": task.get("cycle_path"),
+                    "task_id": task.get("task_id"),
+                    "execution_id": task.get("execution_id"),
+                    "path": f"trace/inputs/{task.get('execution_id')}.json",
+                }
+                for task in task_records
+            ],
+            "model_outputs": [
+                {
+                    "cycle_id": task.get("cycle_id"),
+                    "cycle_path": task.get("cycle_path"),
+                    "task_id": task.get("task_id"),
+                    "execution_id": task.get("execution_id"),
+                    "stream": f"trace/models/{task.get('execution_id')}/stream.jsonl",
+                    "assembled": f"trace/models/{task.get('execution_id')}/assembled.txt",
+                    "content": f"trace/models/{task.get('execution_id')}/content.txt",
+                    "thinking": f"trace/models/{task.get('execution_id')}/thinking.txt",
+                }
+                for task in task_records
+                if task.get("metadata", {}).get("executor") == "model"
+            ],
+            "execution_log": _run_relative_path(self.trace_dir, self.execution_log_path),
         }
 
     def _write_json(self, relative: str, value: Any) -> None:
@@ -608,71 +653,16 @@ class TraceWriter:
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
     <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th></tr></thead>
-    <tbody>{rows}</tbody>
+    <tbody id="task-rows">{rows}</tbody>
   </table>
   <h2>Task Inputs</h2>
-  {input_sections}
+  <div id="task-inputs">{input_sections}</div>
   <h2>Model Text</h2>
-  {model_sections}
+  <div id="model-text">{model_sections}</div>
   <h2>Execution Log</h2>
   <pre id="execution-log">{html.escape(_read_optional_text(self.execution_log_path) if self.execution_log_path is not None else "")}</pre>
   <script id="report-snapshot" type="application/json">{html.escape(json.dumps({"manifest": manifest_snapshot, "status": status_snapshot}, sort_keys=True))}</script>
-  <script>
-    const snapshot = JSON.parse(document.getElementById('report-snapshot').textContent);
-    const filter = document.getElementById('task-filter');
-    filter.addEventListener('input', () => {{
-      const value = filter.value.toLowerCase();
-      document.querySelectorAll('#tasks tbody tr').forEach(row => {{
-        row.hidden = !row.textContent.toLowerCase().includes(value);
-      }});
-    }});
-    async function readJson(path) {{
-      const response = await fetch(path + '?t=' + Date.now());
-      if (!response.ok) throw new Error(response.statusText);
-      return await response.json();
-    }}
-    async function readText(path) {{
-      const response = await fetch(path + '?t=' + Date.now());
-      if (!response.ok) throw new Error(response.statusText);
-      return await response.text();
-    }}
-    function escapeHtml(value) {{
-      return String(value ?? '').replace(/[&<>"']/g, char => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
-    }}
-    function renderStatus(status) {{
-      const budget = status.budget || {{}};
-      const usage = budget.usage || {{}};
-      const remaining = budget.remaining || {{}};
-      document.getElementById('live-status').innerHTML = `
-        <div class="status-grid">
-          <div class="metric"><strong>Status</strong><br>${{escapeHtml(status.status)}}</div>
-          <div class="metric"><strong>Current Task</strong><br>${{escapeHtml(status.current_cycle_id || '')}} / ${{escapeHtml(status.current_task_id || '')}}</div>
-          <div class="metric"><strong>Attempt</strong><br>${{escapeHtml(status.current_attempt || '')}}</div>
-          <div class="metric"><strong>Last Event</strong><br>${{escapeHtml(status.last_event || '')}}<br><span class="muted">${{escapeHtml(status.last_event_at || '')}}</span></div>
-        </div>
-        <pre>${{escapeHtml(JSON.stringify({{usage, remaining}}, null, 2))}}</pre>
-      `;
-    }}
-    async function refreshReport() {{
-      let manifest = snapshot.manifest;
-      try {{ manifest = await readJson('trace/manifest.json'); }} catch (error) {{}}
-      const data = manifest.report_data || {{}};
-      try {{
-        const status = await readJson(data.status || 'trace/status.json');
-        renderStatus(status);
-        document.getElementById('snapshot-loaded-at').textContent = new Date().toISOString();
-      }} catch (error) {{}}
-      if (data.execution_log) {{
-        try {{
-          document.getElementById('execution-log').textContent = await readText(data.execution_log);
-        }} catch (error) {{}}
-      }}
-    }}
-    document.getElementById('refresh-report').addEventListener('click', refreshReport);
-    if ((snapshot.status || {{}}).status === 'running') {{
-      setInterval(refreshReport, 3000);
-    }}
-  </script>
+  {_report_refresh_script(auto_refresh_condition="(snapshot.status || {}).status === 'running'")}
 </body>
 </html>
 """
@@ -843,11 +833,13 @@ def _write_live_manifest(
         "outputs": loaded.document.outputs,
         "status_file": "status.json",
         "artifact_index": "artifacts.json",
+        "report_data_file": "report_data.json",
         "execution_log": _run_relative_path(trace_dir, logger.path),
         "report_data": {
             "manifest": "trace/manifest.json",
             "status": "trace/status.json",
             "artifacts": "trace/artifacts.json",
+            "report_snapshot": "trace/report_data.json",
             "scenario": "trace/scenario.json",
             "cycles": "trace/cycles/index.json",
             "task_executions": "trace/tasks/executions.json",
@@ -865,8 +857,39 @@ def _write_live_manifest(
                 "artifacts": [
                     {"kind": "manifest", "path": "trace/manifest.json"},
                     {"kind": "status", "path": "trace/status.json"},
+                    {"kind": "report_data", "path": "trace/report_data.json"},
                     {"kind": "execution_log", "path": _run_relative_path(trace_dir, logger.path)},
                 ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    _write_live_report_data(loaded, trace_dir=trace_dir, run_id=run_id, logger=logger)
+
+
+def _write_live_report_data(
+    loaded: LoadedScenario,
+    *,
+    trace_dir: Path,
+    run_id: str,
+    logger: ExecutionLogger,
+) -> None:
+    (trace_dir / "report_data.json").write_text(
+        json.dumps(
+            {
+                "schema_version": TRACE_SCHEMA_VERSION,
+                "generated_at": _timestamp(),
+                "run_id": run_id,
+                "scenario_id": loaded.document.id,
+                "status": _read_json_optional(trace_dir / "status.json"),
+                "artifacts": _read_json_optional(trace_dir / "artifacts.json").get("artifacts", []),
+                "cycles": [],
+                "task_executions": [],
+                "task_inputs": [],
+                "model_outputs": [],
+                "execution_log": _run_relative_path(trace_dir, logger.path),
             },
             indent=2,
             sort_keys=True,
@@ -891,6 +914,10 @@ def _write_live_report_shell(
   <title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
+    th, td {{ border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }}
+    th {{ background: #f3f4f6; }}
+    details {{ border: 1px solid #d1d5db; margin: 1rem 0; padding: 0.75rem; }}
     pre {{ background: #111827; color: #f9fafb; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }}
     .muted {{ color: #6b7280; }}
     .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; }}
@@ -903,48 +930,20 @@ def _write_live_report_shell(
   <p class="muted">This report is live. Final task, input and model sections appear as trace files are written.</p>
   <h2>Live Status</h2>
   <div id="live-status">{_status_html(status)}</div>
+  <h2>Task Executions</h2>
+  <label>Filter by task <input id="task-filter" type="search"></label>
+  <table id="tasks">
+    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th></tr></thead>
+    <tbody id="task-rows"></tbody>
+  </table>
+  <h2>Task Inputs</h2>
+  <div id="task-inputs"><p class="muted">No task inputs captured yet.</p></div>
+  <h2>Model Text</h2>
+  <div id="model-text"><p class="muted">No model text captured yet.</p></div>
   <h2>Execution Log</h2>
   <pre id="execution-log">{html.escape(_read_optional_text(execution_log_path))}</pre>
   <script id="report-snapshot" type="application/json">{_script_json({"manifest": manifest, "status": status})}</script>
-  <script>
-    const snapshot = JSON.parse(document.getElementById('report-snapshot').textContent);
-    async function readJson(path) {{
-      const response = await fetch(path + '?t=' + Date.now());
-      if (!response.ok) throw new Error(response.statusText);
-      return await response.json();
-    }}
-    async function readText(path) {{
-      const response = await fetch(path + '?t=' + Date.now());
-      if (!response.ok) throw new Error(response.statusText);
-      return await response.text();
-    }}
-    function escapeHtml(value) {{
-      return String(value ?? '').replace(/[&<>"']/g, char => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
-    }}
-    function renderStatus(status) {{
-      const budget = status.budget || {{}};
-      const usage = budget.usage || {{}};
-      const remaining = budget.remaining || {{}};
-      document.getElementById('live-status').innerHTML = `
-        <div class="status-grid">
-          <div class="metric"><strong>Status</strong><br>${{escapeHtml(status.status)}}</div>
-          <div class="metric"><strong>Current Task</strong><br>${{escapeHtml(status.current_cycle_id || '')}} / ${{escapeHtml(status.current_task_id || '')}}</div>
-          <div class="metric"><strong>Attempt</strong><br>${{escapeHtml(status.current_attempt || '')}}</div>
-          <div class="metric"><strong>Last Event</strong><br>${{escapeHtml(status.last_event || '')}}<br><span class="muted">${{escapeHtml(status.last_event_at || '')}}</span></div>
-        </div>
-        <pre>${{escapeHtml(JSON.stringify({{usage, remaining}}, null, 2))}}</pre>
-      `;
-    }}
-    async function refreshReport() {{
-      let manifest = snapshot.manifest;
-      try {{ manifest = await readJson('trace/manifest.json'); }} catch (error) {{}}
-      const data = (manifest || {{}}).report_data || {{}};
-      try {{ renderStatus(await readJson(data.status || 'trace/status.json')); }} catch (error) {{}}
-      try {{ document.getElementById('execution-log').textContent = await readText(data.execution_log || 'logs/execution.log'); }} catch (error) {{}}
-    }}
-    document.getElementById('refresh-report').addEventListener('click', refreshReport);
-    setInterval(refreshReport, 3000);
-  </script>
+  {_report_refresh_script(auto_refresh_condition="true")}
 </body>
 </html>
 """
@@ -1003,6 +1002,8 @@ def _artifact_kind(path: Path) -> str:
         return "status"
     if path.name == "manifest.json":
         return "manifest"
+    if path.name == "report_data.json":
+        return "report_data"
     if parent == "inputs":
         return "task_input"
     if parent == "models" or "models" in path.parts:
@@ -1034,3 +1035,125 @@ def _redact_secrets(value: Any) -> Any:
 
 def _script_json(value: Any) -> str:
     return html.escape(json.dumps(value, sort_keys=True).replace("</", "<\\/"))
+
+
+def _report_refresh_script(*, auto_refresh_condition: str) -> str:
+    script = r"""<script>
+    const snapshot = JSON.parse(document.getElementById('report-snapshot').textContent);
+    const filter = document.getElementById('task-filter');
+    if (filter) {
+      filter.addEventListener('input', applyTaskFilter);
+    }
+    async function readJson(path) {
+      const response = await fetch(path + '?t=' + Date.now());
+      if (!response.ok) throw new Error(response.statusText);
+      return await response.json();
+    }
+    async function readText(path) {
+      const response = await fetch(path + '?t=' + Date.now());
+      if (!response.ok) throw new Error(response.statusText);
+      return await response.text();
+    }
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    }
+    function applyTaskFilter() {
+      if (!filter) return;
+      const value = filter.value.toLowerCase();
+      document.querySelectorAll('#tasks tbody tr').forEach(row => {
+        row.hidden = !row.textContent.toLowerCase().includes(value);
+      });
+    }
+    function renderStatus(status) {
+      const budget = status.budget || {};
+      const usage = budget.usage || {};
+      const remaining = budget.remaining || {};
+      const target = document.getElementById('live-status');
+      if (!target) return;
+      target.innerHTML = `
+        <div class="status-grid">
+          <div class="metric"><strong>Status</strong><br>${escapeHtml(status.status)}</div>
+          <div class="metric"><strong>Current Task</strong><br>${escapeHtml(status.current_cycle_id || '')} / ${escapeHtml(status.current_task_id || '')}</div>
+          <div class="metric"><strong>Attempt</strong><br>${escapeHtml(status.current_attempt || '')}</div>
+          <div class="metric"><strong>Last Event</strong><br>${escapeHtml(status.last_event || '')}<br><span class="muted">${escapeHtml(status.last_event_at || '')}</span></div>
+        </div>
+        <pre>${escapeHtml(JSON.stringify({usage, remaining}, null, 2))}</pre>
+      `;
+    }
+    function renderTasks(tasks) {
+      const target = document.getElementById('task-rows');
+      if (!target || !Array.isArray(tasks) || tasks.length === 0) return;
+      target.innerHTML = tasks.map(task => `
+        <tr>
+          <td>${escapeHtml(task.cycle_path || task.cycle_id || '')}</td>
+          <td>${escapeHtml(task.cycle_id || '')}</td>
+          <td>${escapeHtml(task.task_id || '')}</td>
+          <td>${escapeHtml(task.status || '')}</td>
+          <td>${escapeHtml(task.reason || '')}</td>
+        </tr>
+      `).join('');
+      applyTaskFilter();
+    }
+    async function renderInputs(inputs) {
+      const target = document.getElementById('task-inputs');
+      if (!target || !Array.isArray(inputs) || inputs.length === 0) return;
+      const blocks = [];
+      for (const item of inputs) {
+        if (!item.path) continue;
+        try {
+          const text = await readText(item.path);
+          blocks.push(`<details><summary>${escapeHtml(item.cycle_path || item.cycle_id || '')} / ${escapeHtml(item.task_id || '')} - ${escapeHtml(item.execution_id || '')}</summary><h3>Input Artifact</h3><pre>${escapeHtml(text)}</pre></details>`);
+        } catch (error) {}
+      }
+      if (blocks.length > 0) target.innerHTML = blocks.join('');
+    }
+    async function renderModels(models) {
+      const target = document.getElementById('model-text');
+      if (!target || !Array.isArray(models) || models.length === 0) return;
+      const blocks = [];
+      for (const item of models) {
+        const parts = [];
+        for (const [title, key] of [['Content', 'content'], ['Thinking', 'thinking'], ['Assembled Stream', 'assembled']]) {
+          if (!item[key]) continue;
+          try {
+            const text = await readText(item[key]);
+            if (text) parts.push(`<h3>${escapeHtml(title)}</h3><pre>${escapeHtml(text)}</pre>`);
+          } catch (error) {}
+        }
+        if (parts.length > 0) {
+          blocks.push(`<details open><summary>${escapeHtml(item.cycle_path || item.cycle_id || '')} / ${escapeHtml(item.task_id || '')} - ${escapeHtml(item.execution_id || '')}</summary>${parts.join('')}</details>`);
+        }
+      }
+      if (blocks.length > 0) target.innerHTML = blocks.join('');
+    }
+    async function refreshReport() {
+      let manifest = snapshot.manifest || {};
+      try { manifest = await readJson('trace/manifest.json'); } catch (error) {}
+      const data = (manifest || {}).report_data || {};
+      let report = null;
+      try { report = await readJson(data.report_snapshot || 'trace/report_data.json'); } catch (error) {}
+      try {
+        renderStatus(await readJson(data.status || 'trace/status.json'));
+      } catch (error) {
+        if (report?.status) renderStatus(report.status);
+      }
+      if (report) {
+        renderTasks(report.task_executions || []);
+        await renderInputs(report.task_inputs || []);
+        await renderModels(report.model_outputs || []);
+      } else {
+        try { renderTasks(await readJson(data.task_executions || 'trace/tasks/executions.json')); } catch (error) {}
+      }
+      const logPath = (report && report.execution_log) || data.execution_log;
+      if (logPath) {
+        try { document.getElementById('execution-log').textContent = await readText(logPath); } catch (error) {}
+      }
+      const loadedAt = document.getElementById('snapshot-loaded-at');
+      if (loadedAt) loadedAt.textContent = new Date().toISOString();
+    }
+    document.getElementById('refresh-report').addEventListener('click', refreshReport);
+    if (__AUTO_REFRESH_CONDITION__) {
+      setInterval(refreshReport, 3000);
+    }
+  </script>"""
+    return script.replace("__AUTO_REFRESH_CONDITION__", auto_refresh_condition)

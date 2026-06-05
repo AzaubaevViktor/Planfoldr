@@ -33,6 +33,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert (trace_dir / "manifest.json").exists()
     assert (trace_dir / "status.json").exists()
     assert (trace_dir / "artifacts.json").exists()
+    assert (trace_dir / "report_data.json").exists()
     assert (trace_dir / "tasks" / "executions.json").exists()
     assert log_path.exists()
     assert list((trace_dir / "models").glob("*.json"))
@@ -44,13 +45,22 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert any(item["status"] == "succeeded" for item in status["work"])
     manifest = json.loads((trace_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["report_data"]["status"] == "trace/status.json"
+    assert manifest["report_data"]["report_snapshot"] == "trace/report_data.json"
     artifacts = json.loads((trace_dir / "artifacts.json").read_text(encoding="utf-8"))
     assert any(item["kind"] == "task_input" for item in artifacts["artifacts"])
+    assert any(item["kind"] == "report_data" for item in artifacts["artifacts"])
+    report_data = json.loads((trace_dir / "report_data.json").read_text(encoding="utf-8"))
+    assert report_data["execution_log"] == "logs/execution.log"
+    assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
+    assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")
+    assert report_data["model_outputs"][0]["stream"].startswith("trace/models/")
     report_text = report.read_text(encoding="utf-8")
     assert "Refresh Report Data" in report_text
     assert "Live Status" in report_text
     assert "Task Inputs" in report_text
     assert "Execution Log" in report_text
+    assert "trace/report_data.json" in report_text
+    assert "renderModels" in report_text
     assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th>" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
@@ -129,7 +139,13 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     with pytest.raises(RuntimeError):
         run_and_trace(loaded, failing_executor, output_root=tmp_path, run_id="error-run")
 
+    trace_dir = tmp_path / "executor_scenario" / "error-run" / "trace"
     log_path = tmp_path / "executor_scenario" / "error-run" / "logs" / "execution.log"
+    status = json.loads((trace_dir / "status.json").read_text(encoding="utf-8"))
+    report_data = json.loads((trace_dir / "report_data.json").read_text(encoding="utf-8"))
+    assert status["status"] == "error"
+    assert report_data["status"]["status"] == "error"
+    assert (tmp_path / "executor_scenario" / "error-run" / "report.html").exists()
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert [event["event"] for event in events] == [
         "run_initialized",
