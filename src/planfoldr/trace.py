@@ -348,7 +348,8 @@ class TraceWriter:
 
     def write(self) -> None:
         self._ensure_dirs()
-        self._write_json("scenario.json", self.loaded.document.model_dump(mode="json"))
+        self._write_json("scenario_definition.json", self.loaded.document.model_dump(mode="json"))
+        self._write_json("scenario.json", self._scenario_trace())
         self._write_json("tasks/executions.json", self._task_execution_records())
         self._write_json("cycles/index.json", [cycle.to_dict() for cycle in self.result.cycle_results])
         self._write_cycle_parts()
@@ -382,6 +383,7 @@ class TraceWriter:
             "decision_log": "decisions.jsonl",
             "execution_log": self._execution_log_manifest_path(),
             "status_file": "status.json",
+            "scenario_definition": "scenario_definition.json",
             "artifact_index": "artifacts.json",
             "report_data_file": "report_data.json",
             "report_data": {
@@ -390,6 +392,7 @@ class TraceWriter:
                 "artifacts": "trace/artifacts.json",
                 "report_snapshot": "trace/report_data.json",
                 "scenario": "trace/scenario.json",
+                "scenario_definition": "trace/scenario_definition.json",
                 "cycles": "trace/cycles/index.json",
                 "task_executions": "trace/tasks/executions.json",
                 "execution_log": _run_relative_path(self.trace_dir, self.execution_log_path),
@@ -407,6 +410,32 @@ class TraceWriter:
                 return str(self.execution_log_path.relative_to(self.trace_dir.parent))
             except ValueError:
                 return str(self.execution_log_path)
+
+    def _scenario_trace(self) -> Dict[str, Any]:
+        return {
+            "schema_version": TRACE_SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "scenario_id": self.loaded.document.id,
+            "goal": self.loaded.document.goal,
+            "status": self.result.status,
+            "reason": self.result.reason,
+            "cycle_count": len(self.result.cycle_results),
+            "task_count": len(self.result.task_results),
+            "cycles": [
+                {
+                    "cycle_id": cycle.cycle_id,
+                    "cycle_path": cycle.cycle_path or cycle.cycle_id,
+                    "status": cycle.status,
+                    "reason": cycle.reason,
+                    "artifact": self._cycle_artifact_path(cycle),
+                    "task_count": len(cycle.task_results),
+                }
+                for cycle in self.result.cycle_results
+            ],
+            "definition": "scenario_definition.json",
+            "status_file": "status.json",
+            "manifest": "manifest.json",
+        }
 
     def _write_executor_parts(self) -> None:
         for task in self.result.task_results:
@@ -740,6 +769,7 @@ class TraceWriter:
             "scenario_id": self.loaded.document.id,
             "status": _read_json_optional(self.trace_dir / "status.json"),
             "artifacts": _read_json_optional(self.trace_dir / "artifacts.json").get("artifacts", []),
+            "scenario": _read_json_optional(self.trace_dir / "scenario.json"),
             "cycles": [cycle.to_dict() for cycle in self.result.cycle_results],
             "cycle_artifacts": [
                 {
@@ -1063,6 +1093,41 @@ def _write_live_manifest(
     logger: ExecutionLogger,
 ) -> None:
     trace_dir.mkdir(parents=True, exist_ok=True)
+    (trace_dir / "scenario_definition.json").write_text(
+        json.dumps(loaded.document.model_dump(mode="json"), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (trace_dir / "scenario.json").write_text(
+        json.dumps(
+            {
+                "schema_version": TRACE_SCHEMA_VERSION,
+                "run_id": run_id,
+                "scenario_id": loaded.document.id,
+                "goal": loaded.document.goal,
+                "status": "running",
+                "reason": None,
+                "cycle_count": len(loaded.cycles),
+                "task_count": sum(len(cycle.document.tasks) for cycle in loaded.cycles),
+                "cycles": [
+                    {
+                        "cycle_id": cycle.document.id,
+                        "cycle_path": cycle.document.id,
+                        "status": "queued",
+                        "reason": None,
+                        "artifact": f"cycles/{_safe_trace_segment(cycle.document.id)}.json",
+                        "task_count": len(cycle.document.tasks),
+                    }
+                    for cycle in loaded.cycles
+                ],
+                "definition": "scenario_definition.json",
+                "status_file": "status.json",
+                "manifest": "manifest.json",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     manifest = {
         "schema_version": TRACE_SCHEMA_VERSION,
         "run_id": run_id,
@@ -1072,6 +1137,7 @@ def _write_live_manifest(
         "inputs": loaded.document.inputs,
         "outputs": loaded.document.outputs,
         "status_file": "status.json",
+        "scenario_definition": "scenario_definition.json",
         "artifact_index": "artifacts.json",
         "report_data_file": "report_data.json",
         "execution_log": _run_relative_path(trace_dir, logger.path),
@@ -1081,6 +1147,7 @@ def _write_live_manifest(
             "artifacts": "trace/artifacts.json",
             "report_snapshot": "trace/report_data.json",
             "scenario": "trace/scenario.json",
+            "scenario_definition": "trace/scenario_definition.json",
             "cycles": "trace/cycles/index.json",
             "task_executions": "trace/tasks/executions.json",
             "execution_log": _run_relative_path(trace_dir, logger.path),
@@ -1096,6 +1163,8 @@ def _write_live_manifest(
                 "run_id": run_id,
                 "artifacts": [
                     {"kind": "manifest", "path": "trace/manifest.json"},
+                    {"kind": "scenario", "path": "trace/scenario.json"},
+                    {"kind": "scenario_definition", "path": "trace/scenario_definition.json"},
                     {"kind": "status", "path": "trace/status.json"},
                     {"kind": "report_data", "path": "trace/report_data.json"},
                     {"kind": "execution_log", "path": _run_relative_path(trace_dir, logger.path)},
@@ -1410,6 +1479,10 @@ def _artifact_kind(path: Path) -> str:
         return "status"
     if path.name == "manifest.json":
         return "manifest"
+    if path.name == "scenario.json":
+        return "scenario"
+    if path.name == "scenario_definition.json":
+        return "scenario_definition"
     if path.name == "report_data.json":
         return "report_data"
     if parent == "inputs":

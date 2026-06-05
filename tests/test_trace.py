@@ -32,6 +32,8 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     log_path = tmp_path / "executor_scenario" / "trace-test" / "logs" / "execution.log"
     assert result.status == "success"
     assert (trace_dir / "manifest.json").exists()
+    assert (trace_dir / "scenario.json").exists()
+    assert (trace_dir / "scenario_definition.json").exists()
     assert (trace_dir / "status.json").exists()
     assert (trace_dir / "artifacts.json").exists()
     assert (trace_dir / "report_data.json").exists()
@@ -52,18 +54,26 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert list((trace_dir / "commands").glob("*/*/status.json"))
     assert list((trace_dir / "inputs").glob("*.json"))
     status = json.loads((trace_dir / "status.json").read_text(encoding="utf-8"))
+    scenario_trace = json.loads((trace_dir / "scenario.json").read_text(encoding="utf-8"))
+    scenario_definition = json.loads((trace_dir / "scenario_definition.json").read_text(encoding="utf-8"))
     assert status["status"] == "success"
+    assert scenario_trace["status"] == "success"
+    assert scenario_trace["definition"] == "scenario_definition.json"
+    assert scenario_trace["cycles"][0]["artifact"] == "cycles/executor_cycle.json"
+    assert scenario_definition["id"] == "executor_scenario"
     assert status["budget"]["remaining"]["max_model_calls"] == 2
     assert any(item["status"] == "succeeded" for item in status["work"])
     manifest = json.loads((trace_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["report_data"]["status"] == "trace/status.json"
     assert manifest["report_data"]["report_snapshot"] == "trace/report_data.json"
+    assert manifest["report_data"]["scenario_definition"] == "trace/scenario_definition.json"
     assert "cycles/executor_cycle.json" in manifest["cycles"]
     artifacts = json.loads((trace_dir / "artifacts.json").read_text(encoding="utf-8"))
     assert any(item["kind"] == "task_input" for item in artifacts["artifacts"])
     assert any(item["kind"] == "report_data" for item in artifacts["artifacts"])
     report_data = json.loads((trace_dir / "report_data.json").read_text(encoding="utf-8"))
     assert report_data["execution_log"] == "logs/execution.log"
+    assert report_data["scenario"]["status"] == "success"
     assert report_data["cycle_artifacts"][0]["path"] == "trace/cycles/executor_cycle.json"
     assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
     assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")

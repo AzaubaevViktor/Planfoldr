@@ -86,4 +86,5 @@ Each run has a readable `report.html` and a structured `trace/` tree where scena
 - Added per-task execution directories under `trace/tasks/<task_type>/<execution_id>/` with `status.json`, `input.json`, `context.json` and `output.json`, while preserving compatibility files such as `trace/tasks/executions.json` and `trace/inputs/<execution_id>.json`.
 - Added per-cycle artifacts under `trace/cycles/<cycle_path>.json` and exposed them through `manifest.json` and `report_data.json`.
 - Added executor-specific directories under `trace/models/<model_name>/<execution_id>/`, `trace/tools/<tool_name>/<execution_id>/` and `trace/commands/<command>/<execution_id>/`, preserving old compatibility files and old model stream paths.
+- Changed `trace/scenario.json` into a scenario execution summary and moved the source scenario document to `trace/scenario_definition.json`; both are available during live runs.
 - Verified the slice with `.venv/bin/python -m pytest tests/test_trace.py -q`.
