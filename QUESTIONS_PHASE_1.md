@@ -7,7 +7,7 @@ This file is no longer a questionnaire with candidate answers. It is the compact
 - `docs/phase_1/DECISIONS.md`
 - `docs/phase_1/MVP_SPEC.md`
 - `docs/phase_1/SCHEMA_DRAFT.md`
-- `tasks/`
+- `quests/`
 
 New implementation questions for Phase 2 live in `docs/phase_2/QUESTIONS.md`.
 
@@ -189,4 +189,4 @@ New implementation questions for Phase 2 live in `docs/phase_2/QUESTIONS.md`.
 
 ### 40. Что должно быть главным артефактом Phase 1?
 
-- Ответ: написать `ARCHITECTURE.md`, составить `tasks/<task_id>_short_name.md`, где расписаны цель, общая концепция, НУ, ограничения, список задач и зависимости между ними.
+- Ответ: написать `ARCHITECTURE.md`, составить `quests/<quest_id>_short_name.md`, где расписаны цель, общая концепция, НУ, ограничения, список задач и зависимости между ними.

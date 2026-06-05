@@ -50,7 +50,7 @@ The trace is the main observability artifact. The HTML report is a human view ov
 
 ## Dependencies
 
-- Depends on tasks 003, 004, 006 and 007.
+- Depends on quests 003, 004, 006 and 007.
 - Blocks task 009.
 
 ## Done

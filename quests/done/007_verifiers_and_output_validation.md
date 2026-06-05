@@ -44,7 +44,7 @@ Required conditions are verifier task chains. Model outputs must match declared 
 
 ## Dependencies
 
-- Depends on tasks 006 and 005.
+- Depends on quests 006 and 005.
 - Supports task 009.
 
 ## Done

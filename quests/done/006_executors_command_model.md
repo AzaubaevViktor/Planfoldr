@@ -47,9 +47,9 @@ Executors are adapters. They do work, but they do not decide workflow. The runti
 
 ## Dependencies
 
-- Depends on tasks 003 and 005.
+- Depends on quests 003 and 005.
 - Uses task 004 audit if available.
-- Blocks tasks 007 and 010.
+- Blocks quests 007 and 010.
 
 ## Done
 

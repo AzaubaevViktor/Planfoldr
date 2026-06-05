@@ -43,7 +43,7 @@ Every task has private context. Parent context is available only through declare
 ## Dependencies
 
 - Depends on task 003.
-- Supports tasks 005, 008 and 009.
+- Supports quests 005, 008 and 009.
 
 ## Done
 

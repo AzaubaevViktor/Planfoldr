@@ -1,6 +1,6 @@
 # Phase 2 Complete
 
-Phase 2 implementation tasks are complete as an MVP prototype.
+Phase 2 implementation quests are complete as an MVP prototype.
 
 ## What Was Implemented
 
@@ -37,7 +37,7 @@ The skipped test is the optional Ollama e2e demo. It runs only when `PLANFOLDR_R
 - Stub e2e tests: `tests/test_e2e_stub_scenarios.py`
 - Optional Ollama test: `tests/test_ollama_e2e.py`
 - Ollama scenario: `examples/scenarios/ollama_cli_todo_app.yaml`
-- Phase 2 tasks: `tasks/001_project_scaffold.md` through `tasks/010_ollama_e2e.md`
+- Phase 2 quests: `quests/done/001_project_scaffold.md` through `quests/done/010_ollama_e2e.md`
 
 ## Known MVP Boundaries
 
@@ -54,7 +54,7 @@ Future work can start from hardening the prototype:
 - broaden schema validation coverage;
 - add richer trace/report views;
 - improve model prompt robustness for the Ollama demo;
-- add streaming model progress and token accounting; see `tasks/011_streaming_model_progress.md`;
+- add streaming model progress and token accounting; see `quests/done/011_streaming_model_progress.md`;
 - add full scenario replay;
 - add real nested-cycle budget delegation;
 - add CI around the canonical pytest command.

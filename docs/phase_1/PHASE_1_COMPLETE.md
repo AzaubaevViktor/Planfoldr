@@ -10,14 +10,14 @@ Phase 1 is complete.
 - The MVP validates flow parts with stubbed model responses and prepares a local Ollama e2e scenario.
 - The MVP output is CLI logs, structured trace and static HTML report.
 - Scenario format is YAML with links to external YAML and prompt files.
-- Implementation starts from explicit tasks in `tasks/`.
+- Implementation starts from explicit quest files in `quests/`.
 
 ## Phase 2 Starts Here
 
 Start with:
 
 ```text
-tasks/001_project_scaffold.md
+quests/done/001_project_scaffold.md
 ```
 
 Then follow:

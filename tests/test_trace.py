@@ -31,16 +31,46 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     log_path = tmp_path / "executor_scenario" / "trace-test" / "logs" / "execution.log"
     assert result.status == "success"
     assert (trace_dir / "manifest.json").exists()
+    assert (trace_dir / "status.json").exists()
+    assert (trace_dir / "artifacts.json").exists()
     assert (trace_dir / "tasks" / "executions.json").exists()
     assert log_path.exists()
     assert list((trace_dir / "models").glob("*.json"))
     assert list((trace_dir / "commands").glob("*.json"))
+    assert list((trace_dir / "inputs").glob("*.json"))
+    status = json.loads((trace_dir / "status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "success"
+    assert status["budget"]["remaining"]["max_model_calls"] == 2
+    assert any(item["status"] == "succeeded" for item in status["work"])
+    manifest = json.loads((trace_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["report_data"]["status"] == "trace/status.json"
+    artifacts = json.loads((trace_dir / "artifacts.json").read_text(encoding="utf-8"))
+    assert any(item["kind"] == "task_input" for item in artifacts["artifacts"])
     report_text = report.read_text(encoding="utf-8")
+    assert "Refresh Report Data" in report_text
+    assert "Live Status" in report_text
+    assert "Task Inputs" in report_text
     assert "Execution Log" in report_text
     assert "<th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th>" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events
+
+
+def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+
+    run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="inputs-test")
+
+    trace_dir = tmp_path / "executor_scenario" / "inputs-test" / "trace"
+    input_artifacts = {
+        json.loads(path.read_text(encoding="utf-8"))["executor"]: json.loads(path.read_text(encoding="utf-8"))
+        for path in (trace_dir / "inputs").glob("*.json")
+    }
+    assert input_artifacts["model"]["messages"][0]["content"]
+    assert input_artifacts["model"]["config"]["prompt_id"] == "executor_prompt"
+    assert input_artifacts["command"]["command"] == "python3 -c \"print('executor ok')\""
+    assert input_artifacts["command"]["env"] == {"PATH": "<inherited>"}
 
 
 def test_task_replay_restores_captured_result(tmp_path: Path) -> None:

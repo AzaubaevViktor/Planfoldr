@@ -46,7 +46,7 @@ The runtime owns control flow. Tasks return enum outcomes, and links decide the 
 ## Dependencies
 
 - Depends on task 002.
-- Blocks tasks 004, 005 and 006.
+- Blocks quests 004, 005 and 006.
 
 ## Done
 

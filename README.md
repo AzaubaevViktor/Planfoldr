@@ -19,13 +19,13 @@ Primary decisions are captured in:
 - [docs/phase_1/SCHEMA_DRAFT.md](docs/phase_1/SCHEMA_DRAFT.md) — initial YAML and trace schema draft.
 - [docs/phase_2/QUESTIONS.md](docs/phase_2/QUESTIONS.md) — open implementation questions for Phase 2.
 - [docs/phase_2/DECISIONS.md](docs/phase_2/DECISIONS.md) — normalized Phase 2 implementation decisions.
-- [tasks](tasks) — implementation tasks for Phase 2.
+- [quests](quests) — implementation quests for Phase 2 and later follow-up work.
 
 The cleaned Phase 1 answer record remains in [QUESTIONS_PHASE_1.md](QUESTIONS_PHASE_1.md).
 
 ## Phase 2 Implementation
 
-Phase 2 was implemented from [tasks/001_project_scaffold.md](tasks/001_project_scaffold.md) through [tasks/010_ollama_e2e.md](tasks/010_ollama_e2e.md), following [docs/phase_1/IMPLEMENTATION_ORDER.md](docs/phase_1/IMPLEMENTATION_ORDER.md).
+Phase 2 was implemented from [quests/done/001_project_scaffold.md](quests/done/001_project_scaffold.md) through [quests/done/010_ollama_e2e.md](quests/done/010_ollama_e2e.md), following [docs/phase_1/IMPLEMENTATION_ORDER.md](docs/phase_1/IMPLEMENTATION_ORDER.md).
 
 ## Local Setup
 

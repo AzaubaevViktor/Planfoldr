@@ -115,7 +115,7 @@ Expected demo output:
 - The Ollama e2e scenario is implemented and ready to run locally.
 - The runtime produces a trace artifact for every run.
 - The HTML report renders from the trace artifact.
-- Agent-facing task docs in `tasks/` stay in sync with implementation boundaries.
+- Agent-facing quest docs in `quests/` stay in sync with implementation boundaries.
 
 ## Explicit Non-Goals
 
