@@ -1,4 +1,11 @@
-# Task <id>: <Title>
+# Task <module>_<id>: <Title>
+File name: `<module>_<id>_<title>.md`
+
+## Status
+
+Current status: blocked / need_info / in_progress / verification / done / ...
+Blocked by: <module>_<id>, ...
+Description: 
 
 ## Goal
 
@@ -26,9 +33,13 @@ Explain the current problem, the intended design direction and why this change m
 - Include tests, fixtures or documentation updates when they are part of completion.
 - Keep items deterministic enough that an agent can make progress without rereading the whole discussion history.
 
-## Done
+## Outcome
 
 Describe the final acceptance state in one paragraph. A future agent should be able to read this and know whether the quest can move to `quests/done/`.
+
+## Verification
+
+Self-check questions before deciding that task are done
 
 ## Implementation Notes
 
