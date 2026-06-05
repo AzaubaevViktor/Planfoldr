@@ -110,6 +110,30 @@ def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:
     assert input_artifacts["command"]["env"] == {"PATH": "<inherited>"}
 
 
+def test_trace_writes_model_raw_response_as_separate_artifact(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+
+    run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="raw-artifact")
+
+    trace_dir = tmp_path / "executor_scenario" / "raw-artifact" / "trace"
+    task_records = json.loads((trace_dir / "tasks" / "executions.json").read_text(encoding="utf-8"))
+    model_record = next(record for record in task_records if record["task_id"] == "ask_model")
+    execution_id = model_record["execution_id"]
+    raw_artifact = trace_dir / "models" / execution_id / "raw_response.txt"
+    model_metadata = json.loads((trace_dir / "models" / f"{execution_id}.json").read_text(encoding="utf-8"))
+    report_data = json.loads((trace_dir / "report_data.json").read_text(encoding="utf-8"))
+
+    assert raw_artifact.read_text(encoding="utf-8") == '{"status": "success"}'
+    assert "raw_response" not in model_record["metadata"]
+    assert "raw_response" not in model_metadata
+    assert model_metadata["raw_response_artifact"] == f"models/{execution_id}/raw_response.txt"
+    assert model_metadata["raw_response_chars"] == len('{"status": "success"}')
+    assert model_record["metadata"]["raw_response_artifact"] == f"models/{execution_id}/raw_response.txt"
+    assert report_data["model_outputs"][0]["raw_response"] == f"trace/models/{execution_id}/raw_response.txt"
+    assert '{"status": "success"}' not in (trace_dir / "tasks" / "executions.json").read_text(encoding="utf-8")
+    assert '{"status": "success"}' not in (trace_dir / "report_data.json").read_text(encoding="utf-8")
+
+
 def test_task_replay_restores_captured_result(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
     result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="replay-test")

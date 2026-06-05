@@ -409,6 +409,7 @@ class TraceWriter:
             self._write_json(f"inputs/{task.execution_id}.json", self._task_input_artifact(task))
             executor = task.metadata.get("executor")
             if executor == "model":
+                self._write_model_raw_response(task)
                 self._write_json(f"models/{task.execution_id}.json", self._model_metadata(task))
             elif executor == "command":
                 self._write_json(
@@ -427,6 +428,8 @@ class TraceWriter:
             cycle_path = cycle.cycle_path or cycle.cycle_id
             for task in cycle.task_results:
                 record = task.to_dict()
+                if task.metadata.get("executor") == "model":
+                    record["metadata"] = _model_metadata_without_raw_response(task)
                 record["cycle_id"] = cycle.cycle_id
                 record["cycle_path"] = cycle_path
                 records.append(record)
@@ -475,7 +478,7 @@ class TraceWriter:
         return _redact_secrets(artifact)
 
     def _model_metadata(self, task: TaskResult) -> Dict[str, Any]:
-        metadata = dict(task.metadata)
+        metadata = _model_metadata_without_raw_response(task)
         stream_dir = self.trace_dir / "models" / task.execution_id
         if (stream_dir / "manifest.json").exists():
             metadata["stream_artifacts"] = {
@@ -487,6 +490,14 @@ class TraceWriter:
                 "thinking": f"models/{task.execution_id}/thinking.txt",
             }
         return metadata
+
+    def _write_model_raw_response(self, task: TaskResult) -> None:
+        raw_response = task.metadata.get("raw_response")
+        if not isinstance(raw_response, str) or not raw_response:
+            return
+        target = self.trace_dir / _raw_response_artifact_path(task.execution_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(raw_response, encoding="utf-8")
 
     def _write_final_status(self) -> None:
         status_path = self.trace_dir / "status.json"
@@ -575,6 +586,11 @@ class TraceWriter:
                     "assembled": f"trace/models/{task.get('execution_id')}/assembled.txt",
                     "content": f"trace/models/{task.get('execution_id')}/content.txt",
                     "thinking": f"trace/models/{task.get('execution_id')}/thinking.txt",
+                    "raw_response": f"trace/{metadata.get('raw_response_artifact')}"
+                    if (metadata := task.get("metadata", {})).get("raw_response_artifact")
+                    else None,
+                    "raw_response_chars": metadata.get("raw_response_chars"),
+                    "raw_response_lines": metadata.get("raw_response_lines"),
                 }
                 for task in task_records
                 if task.get("metadata", {}).get("executor") == "model"
@@ -680,7 +696,10 @@ class TraceWriter:
             raw_response = (
                 ""
                 if any((content, thinking, assembled))
-                else _raw_response_report_text(str(task.metadata.get("raw_response", "")))
+                else _raw_response_report_text(
+                    _read_model_raw_response(self.trace_dir, task),
+                    artifact=f"trace/{_raw_response_artifact_path(task.execution_id)}",
+                )
             )
             if not any((content, thinking, assembled, raw_response)):
                 continue
@@ -974,7 +993,30 @@ def _report_pre(title: str, text: str) -> str:
     return f"<h3>{html.escape(title)}</h3><pre>{html.escape(text)}</pre>"
 
 
-def _raw_response_report_text(raw_response: str) -> str:
+def _model_metadata_without_raw_response(task: TaskResult) -> Dict[str, Any]:
+    metadata = dict(task.metadata)
+    raw_response = metadata.pop("raw_response", None)
+    if isinstance(raw_response, str) and raw_response:
+        metadata["raw_response_artifact"] = _raw_response_artifact_path(task.execution_id)
+        metadata["raw_response_chars"] = len(raw_response)
+        metadata["raw_response_bytes"] = len(raw_response.encode("utf-8"))
+        metadata["raw_response_lines"] = len(raw_response.splitlines())
+    return metadata
+
+
+def _raw_response_artifact_path(execution_id: str) -> str:
+    return f"models/{execution_id}/raw_response.txt"
+
+
+def _read_model_raw_response(trace_dir: Path, task: TaskResult) -> str:
+    raw_response = _read_optional_text(trace_dir / _raw_response_artifact_path(task.execution_id))
+    if raw_response:
+        return raw_response
+    value = task.metadata.get("raw_response", "")
+    return value if isinstance(value, str) else ""
+
+
+def _raw_response_report_text(raw_response: str, *, artifact: str = "the raw response artifact") -> str:
     if not raw_response:
         return ""
     lines = raw_response.splitlines()
@@ -987,7 +1029,7 @@ def _raw_response_report_text(raw_response: str) -> str:
     if len(raw_response) > 4000:
         return (
             "Raw response omitted from HTML because it is too large "
-            f"({len(raw_response)} character(s)). Inspect the model trace JSON for provider diagnostics."
+            f"({len(raw_response)} character(s)). Inspect {artifact} for provider diagnostics."
         )
     return raw_response
 
@@ -1155,6 +1197,17 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
             const text = await readText(item[key]);
             if (text) parts.push(`<h3>${escapeHtml(title)}</h3><pre>${escapeHtml(text)}</pre>`);
           } catch (error) {}
+        }
+        if (parts.length === 0 && item.raw_response) {
+          const chars = Number(item.raw_response_chars || 0);
+          if (chars > 4000) {
+            parts.push(`<h3>Raw Response</h3><pre>${escapeHtml(`Raw response omitted from HTML because it is too large (${chars} character(s)). Inspect ${item.raw_response} for provider diagnostics.`)}</pre>`);
+          } else {
+            try {
+              const text = await readText(item.raw_response);
+              if (text) parts.push(`<h3>Raw Response</h3><pre>${escapeHtml(text)}</pre>`);
+            } catch (error) {}
+          }
         }
         if (parts.length > 0) {
           blocks.push(`<details open><summary>${escapeHtml(item.cycle_path || item.cycle_id || '')} / ${escapeHtml(item.task_id || '')} - ${escapeHtml(item.execution_id || '')}</summary>${parts.join('')}</details>`);
