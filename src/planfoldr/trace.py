@@ -864,8 +864,12 @@ class TraceWriter:
             for task in cycle.task_results
         )
         cycles = "\n".join(
-            f"<li><button data-cycle='{html.escape(cycle.cycle_id)}'>{html.escape(cycle.cycle_path or cycle.cycle_id)}</button>"
-            f" <strong>{html.escape(cycle.status)}</strong></li>"
+            "<li>"
+            f"<details><summary>{html.escape(cycle.cycle_path or cycle.cycle_id)} "
+            f"<strong>{html.escape(cycle.status)}</strong></summary>"
+            f"{self._cycle_task_list_html(cycle)}"
+            "</details>"
+            "</li>"
             for cycle in self.result.cycle_results
         )
         model_sections = self._model_report_sections()
@@ -975,6 +979,19 @@ class TraceWriter:
             for label, name in files
         )
         return f"<details><summary>Task Details</summary><p>{links}</p>{previews}</details>"
+
+    def _cycle_task_list_html(self, cycle: CycleResult) -> str:
+        if not cycle.task_results:
+            return "<p class='muted'>No task executions captured.</p>"
+        items = "\n".join(
+            "<li>"
+            f"<code>{html.escape(task.task_id)}</code> "
+            f"<strong>{html.escape(task.status)}</strong> "
+            f"<span class='muted'>{html.escape(task.reason or '')}</span>"
+            "</li>"
+            for task in cycle.task_results
+        )
+        return f"<ul>{items}</ul>"
 
     def _input_report_sections(self) -> str:
         sections: List[str] = []
@@ -1262,6 +1279,8 @@ def _write_live_report_shell(
   <p class="muted">This report is live. Final task, input and model sections appear as trace files are written.</p>
   <h2>Live Status</h2>
   <div id="live-status">{_status_html(status)}</div>
+  <h2>Cycles</h2>
+  <ul id="cycle-list">{_live_cycle_list_html(loaded)}</ul>
   <h2>Task Executions</h2>
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
@@ -1501,6 +1520,26 @@ def _status_work_rows_html(status: Dict[str, Any]) -> str:
             "</tr>"
         )
     return "\n".join(rows)
+
+
+def _live_cycle_list_html(loaded: LoadedScenario) -> str:
+    items = []
+    for cycle in loaded.cycles:
+        tasks = "\n".join(
+            "<li>"
+            f"<code>{html.escape(task.id)}</code> "
+            f"<span class='muted'>{html.escape(task.type)}</span>"
+            "</li>"
+            for task in cycle.document.tasks
+        )
+        items.append(
+            "<li>"
+            f"<details><summary>{html.escape(cycle.document.id)} <strong>queued</strong></summary>"
+            f"<ul>{tasks}</ul>"
+            "</details>"
+            "</li>"
+        )
+    return "\n".join(items)
 
 
 def _run_relative_path(trace_dir: Path, path: Optional[Path]) -> Optional[str]:

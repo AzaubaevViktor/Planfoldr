@@ -108,3 +108,4 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Depends on `report_001` so the UI can render stable persisted artifacts rather than process-memory state.
 - Started with expandable task details in the task table, backed by per-task `status.json`, `context.json`, `input.json` and `output.json` artifacts.
 - Live report shell now renders queued/running work from `status.json`, so the task table is useful before the first model task completes.
+- Report pages now show cycle structure directly, including queued live cycles and completed cycle task summaries.

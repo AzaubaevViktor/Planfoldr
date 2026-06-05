@@ -85,6 +85,8 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     report_text = report.read_text(encoding="utf-8")
     assert "Refresh Report Data" in report_text
     assert "Live Status" in report_text
+    assert "Cycles" in report_text
+    assert "executor_cycle <strong>success</strong>" in report_text
     assert "Task Inputs" in report_text
     assert "Execution Log" in report_text
     assert "trace/report_data.json" in report_text
@@ -257,6 +259,7 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     assert status["status"] == "error"
     assert report_data["status"]["status"] == "error"
     report_text = (tmp_path / "executor_scenario" / "error-run" / "report.html").read_text(encoding="utf-8")
+    assert "executor_cycle <strong>queued</strong>" in report_text
     assert "ask_model" in report_text
     assert "run_command" in report_text
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
