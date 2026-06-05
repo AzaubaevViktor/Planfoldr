@@ -23,6 +23,8 @@ def test_scenario_runner_returns_success_for_linked_tasks() -> None:
     result = run_scenario(loaded, executor)
 
     assert result.status == "success"
+    assert result.cycle_results[0].cycle_path == "runtime_success_cycle"
+    assert result.cycle_results[0].to_dict()["cycle_path"] == "runtime_success_cycle"
     assert executor.calls == ["first", "second"]
     assert result.task_results[0].to_dict()["status"] == "success"
 

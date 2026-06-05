@@ -346,7 +346,7 @@ class TraceWriter:
     def write(self) -> None:
         self._ensure_dirs()
         self._write_json("scenario.json", self.loaded.document.model_dump(mode="json"))
-        self._write_json("tasks/executions.json", [task.to_dict() for task in self.result.task_results])
+        self._write_json("tasks/executions.json", self._task_execution_records())
         self._write_json("cycles/index.json", [cycle.to_dict() for cycle in self.result.cycle_results])
         self._write_executor_parts()
         self._write_jsonl("audit.jsonl", self.audit_events)
@@ -416,6 +416,17 @@ class TraceWriter:
                     f"tools/{task.execution_id}.json",
                     {"metadata": task.metadata, "output": task.output},
                 )
+
+    def _task_execution_records(self) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for cycle in self.result.cycle_results:
+            cycle_path = cycle.cycle_path or cycle.cycle_id
+            for task in cycle.task_results:
+                record = task.to_dict()
+                record["cycle_id"] = cycle.cycle_id
+                record["cycle_path"] = cycle_path
+                records.append(record)
+        return records
 
     def _task_input_artifact(self, task: TaskResult) -> Dict[str, Any]:
         executor = task.metadata.get("executor", "unknown")
@@ -541,6 +552,7 @@ class TraceWriter:
     def _write_report(self) -> None:
         rows = "\n".join(
             "<tr>"
+            f"<td>{html.escape(cycle.cycle_path or cycle.cycle_id)}</td>"
             f"<td>{html.escape(cycle.cycle_id)}</td>"
             f"<td>{html.escape(task.task_id)}</td>"
             f"<td>{html.escape(task.status)}</td>"
@@ -550,7 +562,7 @@ class TraceWriter:
             for task in cycle.task_results
         )
         cycles = "\n".join(
-            f"<li><button data-cycle='{html.escape(cycle.cycle_id)}'>{html.escape(cycle.cycle_id)}</button>"
+            f"<li><button data-cycle='{html.escape(cycle.cycle_id)}'>{html.escape(cycle.cycle_path or cycle.cycle_id)}</button>"
             f" <strong>{html.escape(cycle.status)}</strong></li>"
             for cycle in self.result.cycle_results
         )
@@ -595,7 +607,7 @@ class TraceWriter:
   <h2>Task Executions</h2>
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
-    <thead><tr><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th></tr></thead>
+    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
   <h2>Task Inputs</h2>
@@ -712,9 +724,10 @@ class TraceWriter:
 
 def replay_task(trace_dir: str | Path, task_id: str) -> TaskResult:
     executions = json.loads((Path(trace_dir) / "tasks" / "executions.json").read_text(encoding="utf-8"))
+    task_fields = set(TaskResult.__dataclass_fields__)
     for item in executions:
         if item["task_id"] == task_id:
-            return TaskResult(**item)
+            return TaskResult(**{key: value for key, value in item.items() if key in task_fields})
     raise KeyError(f"No task execution found for '{task_id}'")
 
 

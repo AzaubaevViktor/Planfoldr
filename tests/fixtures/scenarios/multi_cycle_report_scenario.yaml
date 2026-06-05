@@ -1,0 +1,18 @@
+id: multi_cycle_report_scenario
+goal: Validate cycle membership in reports.
+inputs: {}
+outputs: {}
+required_conditions: []
+constraints:
+  tools:
+    allow:
+      - noop
+budgets:
+  max_iterations: 4
+  max_tool_calls: 4
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+cycles:
+  - file: ./cycles/report_first_cycle.yaml
+  - file: ./cycles/report_second_cycle.yaml

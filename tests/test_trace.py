@@ -51,10 +51,36 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "Live Status" in report_text
     assert "Task Inputs" in report_text
     assert "Execution Log" in report_text
-    assert "<th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th>" in report_text
+    assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th>" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events
+
+
+def test_trace_records_cycle_membership_for_repeated_task_ids(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "multi_cycle_report_scenario.yaml")
+
+    run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="cycle-report")
+
+    trace_dir = tmp_path / "multi_cycle_report_scenario" / "cycle-report" / "trace"
+    task_records = json.loads((trace_dir / "tasks" / "executions.json").read_text(encoding="utf-8"))
+    assert [
+        (record["cycle_id"], record["cycle_path"], record["task_id"])
+        for record in task_records
+    ] == [
+        ("report_first_cycle", "report_first_cycle", "shared_task"),
+        ("report_second_cycle", "report_second_cycle", "shared_task"),
+    ]
+    cycle_records = json.loads((trace_dir / "cycles" / "index.json").read_text(encoding="utf-8"))
+    assert [record["cycle_path"] for record in cycle_records] == [
+        "report_first_cycle",
+        "report_second_cycle",
+    ]
+    report_text = (tmp_path / "multi_cycle_report_scenario" / "cycle-report" / "report.html").read_text(
+        encoding="utf-8"
+    )
+    assert "<td>report_first_cycle</td><td>report_first_cycle</td><td>shared_task</td>" in report_text
+    assert "<td>report_second_cycle</td><td>report_second_cycle</td><td>shared_task</td>" in report_text
 
 
 def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:

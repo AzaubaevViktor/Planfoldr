@@ -1,0 +1,26 @@
+id: report_first_cycle
+goal: Run the first report cycle.
+entrypoint: shared_task
+
+budgets:
+  max_iterations: 2
+  max_tool_calls: 2
+
+tasks:
+  - id: shared_task
+    type: tool
+    task: Run shared task in first cycle.
+    executor:
+      kind: tool
+      tool: noop
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+
+links:
+  shared_task:
+    success: success
+    failure: fail
+
+nested_cycles: []

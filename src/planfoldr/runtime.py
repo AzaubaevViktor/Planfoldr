@@ -73,12 +73,14 @@ class CycleResult:
     cycle_id: str
     status: str
     task_results: List[TaskResult]
+    cycle_path: Optional[str] = None
     reason: Optional[str] = None
     request: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "cycle_id": self.cycle_id,
+            "cycle_path": self.cycle_path or self.cycle_id,
             "status": self.status,
             "reason": self.reason,
             "request": self.request,
@@ -124,7 +126,7 @@ class MissingTaskError(RuntimeErrorBase):
 def run_scenario(loaded: LoadedScenario, executor: ExecutorFn) -> ScenarioResult:
     cycle_results: List[CycleResult] = []
     for cycle in loaded.cycles:
-        result = run_cycle(cycle, executor)
+        result = run_cycle(cycle, executor, cycle_path=cycle.document.id)
         cycle_results.append(result)
         if result.status != Outcome.SUCCESS.value:
             return ScenarioResult(
@@ -140,8 +142,9 @@ def run_scenario(loaded: LoadedScenario, executor: ExecutorFn) -> ScenarioResult
     )
 
 
-def run_cycle(loaded: LoadedCycle, executor: ExecutorFn) -> CycleResult:
+def run_cycle(loaded: LoadedCycle, executor: ExecutorFn, *, cycle_path: Optional[str] = None) -> CycleResult:
     cycle = loaded.document
+    cycle_path = cycle_path or cycle.id
     tasks_by_id = {task.id: task for task in cycle.tasks}
     current_id = cycle.entrypoint
     task_results: List[TaskResult] = []
@@ -160,10 +163,16 @@ def run_cycle(loaded: LoadedCycle, executor: ExecutorFn) -> CycleResult:
                 f"Task '{task.id}' outcome '{result.status}' has no link in cycle '{cycle.id}'"
             )
         if target == TERMINAL_SUCCESS:
-            return CycleResult(cycle_id=cycle.id, status=Outcome.SUCCESS.value, task_results=task_results)
+            return CycleResult(
+                cycle_id=cycle.id,
+                cycle_path=cycle_path,
+                status=Outcome.SUCCESS.value,
+                task_results=task_results,
+            )
         if target == TERMINAL_FAIL:
             return CycleResult(
                 cycle_id=cycle.id,
+                cycle_path=cycle_path,
                 status=Outcome.FAILURE.value,
                 reason=result.reason,
                 task_results=task_results,
@@ -171,6 +180,7 @@ def run_cycle(loaded: LoadedCycle, executor: ExecutorFn) -> CycleResult:
         if target == PARENT_TARGET:
             return CycleResult(
                 cycle_id=cycle.id,
+                cycle_path=cycle_path,
                 status=result.status,
                 reason=result.reason,
                 request=result.request,
