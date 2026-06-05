@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 
-MAX_DEMO_MODEL_GB = 30.0
-MAX_DEMO_MODEL_B = 30.0
+MAX_DEMO_MODEL_GB = 12.0
+MAX_DEMO_MODEL_B = 12.0
 
 
 @dataclass(frozen=True)
