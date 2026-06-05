@@ -859,6 +859,7 @@ class TraceWriter:
             f"<td>{html.escape(task.task_id)}</td>"
             f"<td>{html.escape(task.status)}</td>"
             f"<td>{html.escape(task.reason or '')}</td>"
+            f"<td>{_short_diff_summary_html(task.output.get('diff_summary'))}</td>"
             f"<td>{self._task_table_detail_html(cycle, task)}</td>"
             "</tr>"
             for cycle in self.result.cycle_results
@@ -914,7 +915,7 @@ class TraceWriter:
   <h2>Task Executions</h2>
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
-    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th></tr></thead>
+    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Diff</th><th>Details</th></tr></thead>
     <tbody id="task-rows">{rows}</tbody>
   </table>
   <h2>Task Inputs</h2>
@@ -1017,6 +1018,7 @@ class TraceWriter:
             "<li>"
             f"<code>{html.escape(task.task_id)}</code> "
             f"<strong>{html.escape(task.status)}</strong> "
+            f"{_short_diff_summary_html(task.output.get('diff_summary'))} "
             f"<span class='muted'>{html.escape(task.reason or '')}</span>"
             "</li>"
             for task in cycle.task_results
@@ -1492,6 +1494,23 @@ def _file_changes_html(value: Any, summary: Any = None) -> str:
     return f"<h3>File Changes</h3><p>{html.escape(summary_text)}</p><ul>{''.join(rows)}</ul>"
 
 
+def _short_diff_summary_html(summary: Any) -> str:
+    if not isinstance(summary, dict):
+        return ""
+    files_changed = int(summary.get("files_changed") or 0)
+    files_deleted = int(summary.get("files_deleted") or 0)
+    lines_added = int(summary.get("lines_added") or 0)
+    lines_removed = int(summary.get("lines_removed") or 0)
+    if files_changed == 0 and files_deleted == 0 and lines_added == 0 and lines_removed == 0:
+        return ""
+    return html.escape(
+        "short diff: "
+        f"{files_changed} files changed, "
+        f"{files_deleted} deleted, "
+        f"+{lines_added} -{lines_removed}"
+    )
+
+
 def _file_change_summary(value: List[Any]) -> Dict[str, int]:
     changes = [item for item in value if isinstance(item, dict)]
     return {
@@ -1584,6 +1603,7 @@ def _status_work_rows_html(status: Dict[str, Any]) -> str:
             f"<td>{html.escape(str(item.get('task_id') or ''))}</td>"
             f"<td>{html.escape(str(item.get('status') or ''))}</td>"
             f"<td>{html.escape(str(item.get('reason') or ''))}</td>"
+            "<td></td>"
             "<td></td>"
             "</tr>"
         )
@@ -1717,10 +1737,22 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
           <td>${escapeHtml(task.task_id || '')}</td>
           <td>${escapeHtml(task.status || '')}</td>
           <td>${escapeHtml(task.reason || '')}</td>
+          <td>${escapeHtml(diffSummaryText(task))}</td>
           <td>${taskDetailsLinks(task)}</td>
         </tr>
       `).join('');
       applyTaskFilter();
+    }
+    function diffSummaryText(task) {
+      const output = task.output || {};
+      const summary = output.diff_summary || task.diff_summary;
+      if (!summary || typeof summary !== 'object') return '';
+      const changed = Number(summary.files_changed || 0);
+      const deleted = Number(summary.files_deleted || 0);
+      const added = Number(summary.lines_added || 0);
+      const removed = Number(summary.lines_removed || 0);
+      if (changed === 0 && deleted === 0 && added === 0 && removed === 0) return '';
+      return `short diff: ${changed} files changed, ${deleted} deleted, +${added} -${removed}`;
     }
     function renderStatusWork(status) {
       if (Array.isArray(status.work) && status.work.length > 0) {

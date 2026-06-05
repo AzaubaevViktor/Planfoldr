@@ -91,10 +91,11 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "Execution Log" in report_text
     assert "trace/report_data.json" in report_text
     assert "renderModels" in report_text
-    assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th>" in report_text
+    assert "<th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Diff</th><th>Details</th>" in report_text
     assert "Task Details" in report_text
     assert "Source / Destination" in report_text
     assert "trace/tasks/model/" in report_text
+    assert "diffSummaryText" in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events
@@ -257,6 +258,7 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
     report_text = (tmp_path / "large" / "report.html").read_text(encoding="utf-8")
     assert "File Changes" in report_text
     assert "short diff: 1 files changed, 0 deleted, +1 -0" in report_text
+    assert "<td>short diff: 1 files changed, 0 deleted, +1 -0</td>" in report_text
     assert "demo.txt" in report_text
 
 

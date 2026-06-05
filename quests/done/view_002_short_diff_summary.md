@@ -98,6 +98,7 @@ cycle up/down to new_cycle_name
 Generated after `view_001` added basic file change events.
 - Added `write_files` diff summaries for created, modified and deleted files, including line additions/removals.
 - Report task details now show a compact `short diff` summary and expanded per-file action/path/+/- data.
+- Follow-up verification moved the compact `short diff` summary into the visible task flow/table, so it is readable without opening `Task Details`; expanded per-file action/path/+/- data remains collapsed.
 - Added minimal `write_files` delete support through file items with `delete: true`.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
