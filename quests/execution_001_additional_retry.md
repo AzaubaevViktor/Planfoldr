@@ -1,0 +1,1 @@
+If retry you need to tell model about whats wrong was in previous time
