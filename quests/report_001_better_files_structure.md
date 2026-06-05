@@ -1,19 +1,63 @@
-Нужна новая структура report-а:
+# Task report_001: Better Report File Structure
 
-report.html - файл с человекочитаемым красивым выводом
+## Goal
 
-trace/scenario.json - файл с тем, как шёл сценарий
-trace/cycles/cycle_name.json - файлы с тем, как шла работа внутри циклов
-trace/tasks/task_type/date_uid/ - информация о запуске таски
-trace/tool/tool_name/date_uid/ - информация о запуске тулы
-trace/model/model_name/date_uid/ - информация о запуске модели
-trace/X/X/X/status.json - текущий статус
-trace/X/X/X/context.json - доступный контекст
-trace/X/X/X/input.json - входные данные
-trace/X/X/X/stream.jsonl - потоковый вывод
-trace/X/X/X/assembled.txt - собранный потоковый вывод
-trace/X/X/X/content/content_type.txt - конкретный тип контента собранный воедино (например stdout/stderr, или thinking и output для модели)
-trace/X/X/X/output.json - то что отдаётся как output
+Redesign run reports around a predictable artifact structure that separates the human-readable report from trace data, execution state and large content files.
 
-Если текст внутри json-ки больше 1000 символов, внутри json-ки делай строку "$current_file_name_field_full_path.(md/json/txt/...)", и клади рядом артефакт с нужным расширением и типом (если ответ json, то надо класть json, если raw text, то raw_text)
+## Concept
 
+The run directory should make both humans and tools comfortable. `report.html` remains the entry point for reading the run, while structured trace files live under `trace/` in stable locations.
+
+Large values should not be repeatedly embedded in JSON files. When a JSON field would contain a long text value, the JSON should point to a sibling artifact file with the appropriate extension and content type. This keeps status and metadata fast to read while preserving full raw output for debugging.
+
+## Target Structure
+
+- `report.html`: human-readable report.
+- `trace/scenario.json`: scenario-level execution trace.
+- `trace/cycles/<cycle_name>.json`: cycle-level execution trace.
+- `trace/tasks/<task_type>/<date_uid>/`: task execution artifacts.
+- `trace/tools/<tool_name>/<date_uid>/`: tool execution artifacts.
+- `trace/models/<model_name>/<date_uid>/`: model execution artifacts.
+- `trace/**/status.json`: current execution status.
+- `trace/**/context.json`: context available to that execution.
+- `trace/**/input.json`: execution input.
+- `trace/**/stream.jsonl`: streaming output.
+- `trace/**/assembled.txt`: assembled stream output.
+- `trace/**/content/<content_type>.<ext>`: named assembled content such as `stdout`, `stderr`, `thinking` or `output`.
+- `trace/**/output.json`: deterministic output returned to the runtime.
+
+## Necessary Conditions
+
+- Every scenario run writes `report.html` at the run root.
+- Scenario, cycle, task, tool and model traces have stable paths under `trace/`.
+- Task, tool and model executions receive unique timestamp or uid based directories.
+- Each execution can persist status, context, input, stream, assembled content and output.
+- Report data can be refreshed from manifest-backed files without regenerating unrelated artifacts.
+- Large JSON string fields are extracted into adjacent artifact files.
+- Extracted long fields are replaced by a reference string to the artifact path.
+- Extracted artifacts use extensions that match their content, for example `.json`, `.txt` or `.md`.
+- Raw text values are stored as raw text artifacts rather than escaped JSON strings.
+
+## Constraints
+
+- Keep artifact paths relative to the run directory.
+- Do not store generated run artifacts outside `runs/`.
+- Do not inline large model, command or tool output repeatedly.
+- Preserve enough backward compatibility for existing tests and reports during migration.
+- Keep the structure deterministic and easy to inspect without a server.
+
+## Subtasks
+
+- Define the report/trace artifact layout in one place.
+- Add helpers for creating execution artifact directories.
+- Add helpers for writing JSON with long-field extraction.
+- Migrate scenario and cycle trace writers to the new structure.
+- Migrate task, tool and model artifact writers to the new structure.
+- Update report generation to read the new paths.
+- Add tests for generated path structure.
+- Add tests for long JSON field extraction and artifact references.
+- Update documentation or quest notes that mention the old report layout.
+
+## Done
+
+Each run has a readable `report.html` and a structured `trace/` tree where scenario, cycle, task, tool and model artifacts are stored consistently, with large JSON fields extracted into adjacent content files.
