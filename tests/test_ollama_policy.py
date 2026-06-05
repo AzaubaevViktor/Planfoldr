@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from planfoldr.cli import main
+from planfoldr.cli import _comparison_run_summary, main
 from planfoldr.ollama_policy import (
+    classify_ollama_model,
     eligible_ollama_models,
     infer_parameter_b,
     parse_ollama_list,
@@ -107,3 +109,40 @@ def test_compare_ollama_models_writes_summary_with_stubbed_runner(monkeypatch, t
     assert exit_code == 0
     assert (tmp_path / "ollama_cli_todo_app_demo" / "cmp" / "model_comparison.json").exists()
     assert "gemma3:12b" in capsys.readouterr().out
+
+
+def test_comparison_summary_counts_generated_files_without_local_artifacts(tmp_path: Path) -> None:
+    project = tmp_path / "run" / "workspace" / "project"
+    (project / ".git" / "hooks").mkdir(parents=True)
+    (project / "todo" / "tests").mkdir(parents=True)
+    (project / "todo" / "__pycache__").mkdir()
+    (project / ".git" / "hooks" / "pre-commit.sample").write_text("", encoding="utf-8")
+    (project / "todo" / "__pycache__" / "cached.pyc").write_text("", encoding="utf-8")
+    (project / "todo" / "AGENTS.md").write_text("", encoding="utf-8")
+    (project / "todo" / "ARCHITECTURE.md").write_text("", encoding="utf-8")
+    (project / "todo" / "tests" / "test_todo.py").write_text("", encoding="utf-8")
+    (project / "todo" / "cli.py").write_text("", encoding="utf-8")
+    result = SimpleNamespace(
+        status="success",
+        reason=None,
+        task_results=[
+            SimpleNamespace(
+                task_id="run_tests",
+                status="success",
+                reason=None,
+                budget_after={"usage": {"model_calls": 1}},
+            )
+        ],
+    )
+
+    summary = _comparison_run_summary(
+        classify_ollama_model("gemma3:12b", size="8.1 GB"),
+        run_id="run",
+        run_dir=tmp_path / "run",
+        result=result,
+    )
+
+    assert summary["generated_file_count"] == 4
+    assert summary["test_file_count"] == 1
+    assert summary["has_agents"] is True
+    assert summary["has_architecture"] is True

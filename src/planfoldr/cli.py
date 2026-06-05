@@ -374,6 +374,7 @@ def _run_model_comparison(
 
 def _comparison_run_summary(candidate, *, run_id: str, run_dir: Path, result) -> dict:
     generated = run_dir / "workspace" / "project"
+    generated_files = _generated_summary_files(generated)
     task_statuses = [
         {"task_id": task.task_id, "status": task.status, "reason": task.reason}
         for task in result.task_results
@@ -389,10 +390,10 @@ def _comparison_run_summary(candidate, *, run_id: str, run_dir: Path, result) ->
         "status": result.status,
         "reason": result.reason,
         "budget": budget,
-        "generated_file_count": len([path for path in generated.rglob("*") if path.is_file()]) if generated.exists() else 0,
-        "test_file_count": len(list((generated / "tests").glob("test_*.py"))) if (generated / "tests").exists() else 0,
-        "has_agents": (generated / "AGENTS.md").exists(),
-        "has_architecture": (generated / "ARCHITECTURE.md").exists(),
+        "generated_file_count": len(generated_files),
+        "test_file_count": len([path for path in generated_files if path.name.startswith("test_") and path.suffix == ".py"]),
+        "has_agents": any(path.name == "AGENTS.md" for path in generated_files),
+        "has_architecture": any(path.name == "ARCHITECTURE.md" for path in generated_files),
         "task_statuses": task_statuses,
     }
 
@@ -462,3 +463,14 @@ def _comparison_report_html(comparison: dict) -> str:
 
 def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-").lower()[:80]
+
+
+def _generated_summary_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    ignored_parts = {".git", ".pytest_cache", "__pycache__"}
+    return [
+        path
+        for path in root.rglob("*")
+        if path.is_file() and not any(part in ignored_parts for part in path.relative_to(root).parts)
+    ]
