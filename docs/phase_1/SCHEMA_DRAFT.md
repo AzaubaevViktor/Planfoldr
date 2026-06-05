@@ -50,7 +50,7 @@ context_policy:
 defaults:
   model:
     provider: ollama
-    name: llama3.1
+    name: carstenuhlig/omnicoder-9b:latest
   retry:
     invalid_output: 2
 
@@ -95,7 +95,7 @@ tasks:
       kind: model
       model:
         provider: ollama
-        name: llama3.1
+        name: carstenuhlig/omnicoder-9b:latest
       prompt:
         id: plan_cli_todo_app
         file: ../../prompts/plan_cli_todo_app.md

@@ -112,7 +112,7 @@ The Ollama demo is opt-in:
 
 ```bash
 ollama serve
-ollama pull llama3.1
+ollama pull carstenuhlig/omnicoder-9b:latest
 python -m planfoldr run examples/scenarios/ollama_cli_todo_app.yaml
 ```
 
@@ -131,6 +131,8 @@ examples/scenarios/ollama_cli_todo_app.yaml
 ```
 
 The runtime still controls workflow. Ollama only supplies model task output. Generated work stays under `runs/<scenario_id>/<run_id>/workspace/`.
+
+See `docs/OLLAMA_MODEL_NOTES.md` for the current <=12B model notes and the `raw_response` explanation.
 
 ## 7. Common Failure Modes
 

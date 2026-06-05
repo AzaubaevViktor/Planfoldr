@@ -41,7 +41,7 @@ context_policy:
 defaults:
   model:
     provider: ollama
-    name: llama3.1
+    name: carstenuhlig/omnicoder-9b:latest
   retry:
     invalid_output: 2
 

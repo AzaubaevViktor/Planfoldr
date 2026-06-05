@@ -677,7 +677,11 @@ class TraceWriter:
             content = _read_optional_text(stream_dir / "content.txt")
             thinking = _read_optional_text(stream_dir / "thinking.txt")
             assembled = _read_optional_text(stream_dir / "assembled.txt")
-            raw_response = "" if any((content, thinking, assembled)) else str(task.metadata.get("raw_response", ""))
+            raw_response = (
+                ""
+                if any((content, thinking, assembled))
+                else _raw_response_report_text(str(task.metadata.get("raw_response", "")))
+            )
             if not any((content, thinking, assembled, raw_response)):
                 continue
             sections.append(
@@ -968,6 +972,38 @@ def _report_pre(title: str, text: str) -> str:
     if not text:
         return ""
     return f"<h3>{html.escape(title)}</h3><pre>{html.escape(text)}</pre>"
+
+
+def _raw_response_report_text(raw_response: str) -> str:
+    if not raw_response:
+        return ""
+    lines = raw_response.splitlines()
+    if _looks_like_ollama_stream(raw_response):
+        return (
+            "Raw response omitted from HTML: this is Ollama provider streaming JSONL, "
+            f"not assembled model text ({len(lines)} line(s), {len(raw_response)} character(s)). "
+            "Inspect content.txt, thinking.txt, assembled.txt and stream.jsonl for human-readable output."
+        )
+    if len(raw_response) > 4000:
+        return (
+            "Raw response omitted from HTML because it is too large "
+            f"({len(raw_response)} character(s)). Inspect the model trace JSON for provider diagnostics."
+        )
+    return raw_response
+
+
+def _looks_like_ollama_stream(raw_response: str) -> bool:
+    for line in raw_response.splitlines()[:5]:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return False
+        if isinstance(payload, dict) and {"model", "message", "done"}.issubset(payload):
+            return True
+        return False
+    return False
 
 
 def _status_html(status: Dict[str, Any]) -> str:

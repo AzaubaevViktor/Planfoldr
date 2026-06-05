@@ -6,6 +6,7 @@ import pytest
 from planfoldr.executors import ExecutorRegistry, ModelResponse, StubModelAdapter
 from planfoldr.guards import BudgetTracker, PermissionEngine
 from planfoldr.loader import load_scenario
+from planfoldr.runtime import Outcome, ScenarioResult, CycleResult, make_task_result
 from planfoldr.trace import TraceWriter, replay_task, run_and_trace
 
 
@@ -237,6 +238,48 @@ def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:
 
     assert "audit_1" in (tmp_path / "manual" / "trace" / "audit.jsonl").read_text(encoding="utf-8")
     assert "decision_1" in (tmp_path / "manual" / "trace" / "decisions.jsonl").read_text(encoding="utf-8")
+
+
+def test_report_summarizes_ollama_raw_response_jsonl(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    task = make_task_result(
+        "ask_model",
+        Outcome.SUCCESS.value,
+        execution_id="exec_raw",
+        metadata={
+            "executor": "model",
+            "model": {"provider": "ollama", "name": "carstenuhlig/omnicoder-9b:latest"},
+            "raw_response": "\n".join(
+                [
+                    '{"model":"carstenuhlig/omnicoder-9b:latest","message":{"content":"{"},"done":false}',
+                    '{"model":"carstenuhlig/omnicoder-9b:latest","message":{"content":"}"},"done":true}',
+                ]
+            ),
+        },
+    )
+    result = ScenarioResult(
+        scenario_id=loaded.document.id,
+        status=Outcome.SUCCESS.value,
+        cycle_results=[
+            CycleResult(
+                cycle_id=loaded.cycles[0].document.id,
+                cycle_path=loaded.cycles[0].document.id,
+                status=Outcome.SUCCESS.value,
+                task_results=[task],
+            )
+        ],
+    )
+
+    TraceWriter(
+        loaded,
+        result,
+        trace_dir=tmp_path / "raw" / "trace",
+        report_path=tmp_path / "raw" / "report.html",
+    ).write()
+
+    report = (tmp_path / "raw" / "report.html").read_text(encoding="utf-8")
+    assert "Raw response omitted from HTML: this is Ollama provider streaming JSONL" in report
+    assert "&quot;message&quot;" not in report
 
 
 class FakeStreamingModelAdapter:

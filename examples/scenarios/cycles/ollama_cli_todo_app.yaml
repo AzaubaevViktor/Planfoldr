@@ -42,7 +42,7 @@ tasks:
       kind: model
       model:
         provider: ollama
-        name: llama3.1
+        name: carstenuhlig/omnicoder-9b:latest
       prompt:
         id: ollama_generate_cli_todo
         file: ../../prompts/ollama_generate_cli_todo.md
@@ -92,7 +92,7 @@ tasks:
       kind: model
       model:
         provider: ollama
-        name: llama3.1
+        name: carstenuhlig/omnicoder-9b:latest
       prompt:
         id: ollama_repair_cli_todo
         file: ../../prompts/ollama_repair_cli_todo.md
