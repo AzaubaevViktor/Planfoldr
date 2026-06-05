@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from planfoldr.executors import ExecutorRegistry, ModelResponse, StubModelAdapter
@@ -81,6 +82,10 @@ def test_write_files_uses_latest_model_output(tmp_path: Path) -> None:
     assert result.output["file_changes"][0]["bytes"] == len("# Generated\n".encode("utf-8"))
     assert result.output["file_changes"][0]["lines_added"] == 1
     assert result.output["file_changes"][0]["lines_removed"] == 0
+    assert result.output["file_changes"][0]["before_bytes"] == 0
+    assert result.output["file_changes"][0]["after_bytes"] == len("# Generated\n".encode("utf-8"))
+    assert result.output["file_changes"][0]["before_sha256"] is None
+    assert result.output["file_changes"][0]["after_sha256"] == _sha256("# Generated\n")
     assert result.output["diff_summary"] == {
         "files_changed": 1,
         "files_deleted": 0,
@@ -126,8 +131,16 @@ def test_write_files_reports_modified_and_deleted_diff_summary(tmp_path: Path) -
     assert [item["action"] for item in result.output["file_changes"]] == ["modified", "deleted"]
     assert result.output["file_changes"][0]["lines_added"] == 2
     assert result.output["file_changes"][0]["lines_removed"] == 1
+    assert result.output["file_changes"][0]["before_bytes"] == len("one\ntwo\nthree\n".encode("utf-8"))
+    assert result.output["file_changes"][0]["after_bytes"] == len("one\nTWO\nthree\nfour\n".encode("utf-8"))
+    assert result.output["file_changes"][0]["before_sha256"] == _sha256("one\ntwo\nthree\n")
+    assert result.output["file_changes"][0]["after_sha256"] == _sha256("one\nTWO\nthree\nfour\n")
     assert result.output["file_changes"][1]["lines_added"] == 0
     assert result.output["file_changes"][1]["lines_removed"] == 2
+    assert result.output["file_changes"][1]["before_bytes"] == len("remove me\nand me\n".encode("utf-8"))
+    assert result.output["file_changes"][1]["after_bytes"] == 0
+    assert result.output["file_changes"][1]["before_sha256"] == _sha256("remove me\nand me\n")
+    assert result.output["file_changes"][1]["after_sha256"] is None
     assert result.output["diff_summary"] == {
         "files_changed": 2,
         "files_deleted": 1,
@@ -194,6 +207,10 @@ def test_command_templates_can_read_previous_task_outputs() -> None:
 
     assert result.status == "success"
     assert result.output["stdout"] == "from prior task\n"
+
+
+def _sha256(value: str) -> str:
+    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def test_model_tool_call_syntax_returns_need_tool_call() -> None:

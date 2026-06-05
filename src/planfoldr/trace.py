@@ -853,17 +853,9 @@ class TraceWriter:
 
     def _write_report(self) -> None:
         rows = "\n".join(
-            "<tr>"
-            f"<td>{html.escape(cycle.cycle_path or cycle.cycle_id)}</td>"
-            f"<td>{html.escape(cycle.cycle_id)}</td>"
-            f"<td>{html.escape(task.task_id)}</td>"
-            f"<td>{html.escape(task.status)}</td>"
-            f"<td>{html.escape(task.reason or '')}</td>"
-            f"<td>{_short_diff_summary_html(task.output.get('diff_summary'))}</td>"
-            f"<td>{self._task_table_detail_html(cycle, task)}</td>"
-            "</tr>"
+            self._task_table_row_html(cycle, task, index)
             for cycle in self.result.cycle_results
-            for task in cycle.task_results
+            for index, task in enumerate(cycle.task_results)
         )
         cycles = "\n".join(
             "<li>"
@@ -915,7 +907,7 @@ class TraceWriter:
   <h2>Task Executions</h2>
   <label>Filter by task <input id="task-filter" type="search"></label>
   <table id="tasks">
-    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Diff</th><th>Details</th></tr></thead>
+    <thead><tr><th>Flow</th><th>Cycle</th><th>Task</th><th>Summary</th><th>Status</th><th>Reason</th><th>Diff</th><th>Details</th></tr></thead>
     <tbody id="task-rows">{rows}</tbody>
   </table>
   <h2>Task Inputs</h2>
@@ -930,6 +922,20 @@ class TraceWriter:
 </html>
 """
         self.report_path.write_text(document, encoding="utf-8")
+
+    def _task_table_row_html(self, cycle: CycleResult, task: TaskResult, index: int) -> str:
+        return (
+            "<tr>"
+            f"<td>{html.escape(_task_flow_text(cycle, index))}</td>"
+            f"<td>{html.escape(cycle.cycle_id)}</td>"
+            f"<td>{html.escape(task.task_id)}</td>"
+            f"<td>{html.escape(_task_summary_text(task))}</td>"
+            f"<td>{html.escape(task.status)}</td>"
+            f"<td>{html.escape(task.reason or '')}</td>"
+            f"<td>{_short_diff_summary_html(task.output.get('diff_summary'))}</td>"
+            f"<td>{self._task_table_detail_html(cycle, task)}</td>"
+            "</tr>"
+        )
 
     def _model_report_sections(self) -> str:
         sections: List[str] = []
@@ -1056,6 +1062,35 @@ def replay_task(trace_dir: str | Path, task_id: str) -> TaskResult:
 
 def _without_stream_text(fields: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in fields.items() if key != "text"}
+
+
+def _task_flow_text(cycle: CycleResult, index: int) -> str:
+    tasks = cycle.task_results
+    previous_task = tasks[index - 1].task_id if index > 0 else "start"
+    current_task = tasks[index].task_id if 0 <= index < len(tasks) else "unknown"
+    next_task = tasks[index + 1].task_id if index + 1 < len(tasks) else "finish"
+    return f"{cycle.cycle_path or cycle.cycle_id}: {previous_task} -> [{current_task}] -> {next_task}"
+
+
+def _task_summary_text(task: TaskResult) -> str:
+    executor = task.metadata.get("executor")
+    if executor == "command":
+        command = str(task.metadata.get("command") or "")
+        cwd = str(task.metadata.get("cwd") or ".")
+        return f"command: {command} in {cwd}"
+    if executor == "model":
+        model = task.metadata.get("model", {})
+        model_name = str(model.get("name") or "unknown_model") if isinstance(model, dict) else "unknown_model"
+        prompt = task.metadata.get("prompt", {})
+        prompt_id = str(prompt.get("prompt_id") or task.task_id) if isinstance(prompt, dict) else task.task_id
+        retry_feedback = task.metadata.get("retry_feedback")
+        retry = ""
+        if isinstance(retry_feedback, dict):
+            retry = f" retry {retry_feedback.get('failed_attempt')}/{retry_feedback.get('max_attempts')}"
+        return f"model: {model_name} goal {prompt_id}{retry}"
+    if executor == "tool":
+        return f"tool: {task.metadata.get('tool') or 'unknown_tool'}"
+    return f"task: {task.task_id}"
 
 
 def _timestamp() -> str:
@@ -1475,12 +1510,16 @@ def _file_changes_html(value: Any, summary: Any = None) -> str:
             continue
         lines_added = int(item.get("lines_added") or 0)
         lines_removed = int(item.get("lines_removed") or 0)
+        before_sha = str(item.get("before_sha256") or "none")
+        after_sha = str(item.get("after_sha256") or "none")
+        byte_span = f"{int(item.get('before_bytes') or 0)}->{int(item.get('after_bytes') or item.get('bytes') or 0)} byte(s)"
         rows.append(
             "<li>"
             f"<strong>{html.escape(str(item.get('action') or 'changed'))}</strong> "
             f"<code>{html.escape(str(item.get('path') or ''))}</code> "
             f"<span class='muted'>{html.escape(str(item.get('bytes') or 0))} byte(s), "
-            f"+{lines_added} -{lines_removed}</span>"
+            f"+{lines_added} -{lines_removed}, {html.escape(byte_span)}, "
+            f"{html.escape(before_sha)} -> {html.escape(after_sha)}</span>"
             "</li>"
         )
     if not rows:
@@ -1595,12 +1634,18 @@ def _status_html(status: Dict[str, Any]) -> str:
 
 def _status_work_rows_html(status: Dict[str, Any]) -> str:
     rows = []
-    for item in status.get("work", []):
+    work = status.get("work", [])
+    for index, item in enumerate(work):
+        previous_task = work[index - 1].get("task_id") if index > 0 and isinstance(work[index - 1], dict) else "start"
+        next_task = work[index + 1].get("task_id") if index + 1 < len(work) and isinstance(work[index + 1], dict) else "finish"
+        current_task = item.get("task_id") or "unknown"
+        cycle_id = item.get("cycle_id") or "unknown"
         rows.append(
             "<tr>"
-            f"<td>{html.escape(str(item.get('cycle_id') or ''))}</td>"
+            f"<td>{html.escape(str(cycle_id))}: {html.escape(str(previous_task))} -&gt; [{html.escape(str(current_task))}] -&gt; {html.escape(str(next_task))}</td>"
             f"<td>{html.escape(str(item.get('cycle_id') or ''))}</td>"
             f"<td>{html.escape(str(item.get('task_id') or ''))}</td>"
+            f"<td>{html.escape(str(item.get('executor_kind') or item.get('task_type') or ''))}: {html.escape(str(item.get('task_id') or ''))}</td>"
             f"<td>{html.escape(str(item.get('status') or ''))}</td>"
             f"<td>{html.escape(str(item.get('reason') or ''))}</td>"
             "<td></td>"
@@ -1730,11 +1775,12 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
     function renderTasks(tasks) {
       const target = document.getElementById('task-rows');
       if (!target || !Array.isArray(tasks) || tasks.length === 0) return;
-      target.innerHTML = tasks.map(task => `
+      target.innerHTML = tasks.map((task, index) => `
         <tr>
-          <td>${escapeHtml(task.cycle_path || task.cycle_id || '')}</td>
+          <td>${escapeHtml(taskFlowText(tasks, index))}</td>
           <td>${escapeHtml(task.cycle_id || '')}</td>
           <td>${escapeHtml(task.task_id || '')}</td>
+          <td>${escapeHtml(taskSummaryText(task))}</td>
           <td>${escapeHtml(task.status || '')}</td>
           <td>${escapeHtml(task.reason || '')}</td>
           <td>${escapeHtml(diffSummaryText(task))}</td>
@@ -1742,6 +1788,28 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
         </tr>
       `).join('');
       applyTaskFilter();
+    }
+    function taskFlowText(tasks, index) {
+      const task = tasks[index] || {};
+      const prev = index > 0 ? (tasks[index - 1].task_id || 'unknown') : 'start';
+      const next = index + 1 < tasks.length ? (tasks[index + 1].task_id || 'unknown') : 'finish';
+      const cycle = task.cycle_path || task.cycle_id || 'unknown';
+      return `${cycle}: ${prev} -> [${task.task_id || 'unknown'}] -> ${next}`;
+    }
+    function taskSummaryText(task) {
+      const metadata = task.metadata || {};
+      const executor = metadata.executor || task.executor_kind || task.task_type || '';
+      if (executor === 'command') {
+        return `command: ${metadata.command || ''} in ${metadata.cwd || '.'}`;
+      }
+      if (executor === 'model') {
+        const model = metadata.model || {};
+        const prompt = metadata.prompt || {};
+        const retry = metadata.retry_feedback ? ` retry ${metadata.retry_feedback.failed_attempt}/${metadata.retry_feedback.max_attempts}` : '';
+        return `model: ${model.name || 'unknown_model'} goal ${prompt.prompt_id || task.task_id || 'unknown'}${retry}`;
+      }
+      if (executor === 'tool') return `tool: ${metadata.tool || task.executor_kind || 'unknown_tool'}`;
+      return `${executor || 'task'}: ${task.task_id || ''}`;
     }
     function diffSummaryText(task) {
       const output = task.output || {};

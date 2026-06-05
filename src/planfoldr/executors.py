@@ -422,6 +422,8 @@ class ExecutorRegistry:
             target = self.permission_engine.check_write_path(_render_text(item["path"], self._template_variables()))
             existed = target.exists()
             before = target.read_text(encoding="utf-8") if existed else ""
+            before_bytes = len(before.encode("utf-8"))
+            before_sha256 = _text_sha256(before) if existed else None
             if item.get("delete"):
                 if existed:
                     target.unlink()
@@ -433,10 +435,15 @@ class ExecutorRegistry:
                         "bytes": 0,
                         "lines_added": lines_added,
                         "lines_removed": lines_removed,
+                        "before_bytes": before_bytes,
+                        "after_bytes": 0,
+                        "before_sha256": before_sha256,
+                        "after_sha256": None,
                     }
                 )
                 continue
             content = str(item.get("content", ""))
+            content_bytes = len(content.encode("utf-8"))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
             written.append(str(target))
@@ -445,9 +452,13 @@ class ExecutorRegistry:
                 {
                     "path": str(target),
                     "action": "modified" if existed else "created",
-                    "bytes": len(content.encode("utf-8")),
+                    "bytes": content_bytes,
                     "lines_added": lines_added,
                     "lines_removed": lines_removed,
+                    "before_bytes": before_bytes,
+                    "after_bytes": content_bytes,
+                    "before_sha256": before_sha256,
+                    "after_sha256": _text_sha256(content),
                 }
             )
         return make_task_result(
@@ -587,6 +598,10 @@ def _line_change_counts(before: str, after: str) -> tuple[int, int]:
         if tag in {"replace", "insert"}:
             added += j2 - j1
     return added, removed
+
+
+def _text_sha256(value: str) -> str:
+    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def _diff_summary(file_changes: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
