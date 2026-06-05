@@ -3,9 +3,9 @@ File name: `orchestration_020_ticket_tree_context_orchestration.md`
 
 ## Status
 
-Current status: ready
+Current status: in_progress
 Blocked by: none
-Description: Ready to design persistent ticket-tree orchestration now that introspection, report view and model tool-call handling are in place.
+Description: Building persistent ticket-tree orchestration now that introspection, report view and model tool-call handling are in place.
 
 ## Goal
 
@@ -94,3 +94,4 @@ The runtime can execute a scenario where the upper cycle maintains a persistent 
 ## Implementation Notes
 
 - Queue after the introspection/report layer and model tool-call syntax, because ticket-tree orchestration will create more nested state to inspect.
+- Added initial deterministic ticket-tree schema helpers with JSON roundtrip, dependency readiness and status transition tests.
