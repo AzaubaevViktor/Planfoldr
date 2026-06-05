@@ -141,6 +141,26 @@ def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:
     assert input_artifacts["command"]["env"] == {"PATH": "<inherited>"}
 
 
+def test_trace_persists_model_retry_feedback_in_task_input(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "validation_scenario.yaml")
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        prompts=loaded.cycles[0].prompts,
+        model_adapter=StubModelAdapter({"validate_model:validation_prompt": [{"oops": True}, {"status": "success"}]}),
+        invalid_output_retries=1,
+    )
+
+    run_and_trace(loaded, registry, output_root=tmp_path, run_id="retry-feedback")
+
+    trace_dir = tmp_path / "validation_scenario" / "retry-feedback" / "trace"
+    input_path = next((trace_dir / "tasks" / "model").glob("*/input.json"))
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+    assert payload["prompt"]["retry_feedback"]["category"] == "output_validation"
+    assert payload["prompt"]["retry_feedback"]["path"] == "$.status"
+    assert "Previous attempt failed" in payload["messages"][0]["content"]
+
+
 def test_trace_writes_model_raw_response_as_separate_artifact(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
 

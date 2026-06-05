@@ -38,14 +38,18 @@ class PromptMetadata:
     hash: str
     variables: Dict[str, Any]
     rendered_prompt: str
+    retry_feedback: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "prompt_id": self.prompt_id,
             "hash": self.hash,
             "variables": self.variables,
             "rendered_prompt": self.rendered_prompt,
         }
+        if self.retry_feedback is not None:
+            payload["retry_feedback"] = self.retry_feedback
+        return payload
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,7 @@ class StubModelAdapter(ModelAdapter):
             for key, value in responses.items()
         }
         self.calls: List[str] = []
+        self.requests: List[Dict[str, Any]] = []
 
     def generate(
         self,
@@ -93,6 +98,15 @@ class StubModelAdapter(ModelAdapter):
         prompt_id = str(config.get("prompt_id", ""))
         key = self._select_key(task.id, prompt_id)
         self.calls.append(key)
+        self.requests.append(
+            {
+                "task_id": task.id,
+                "prompt_id": prompt_id,
+                "messages": messages,
+                "config": dict(config),
+                "tools": list(tools),
+            }
+        )
         values = self.responses[key]
         value = values.pop(0) if len(values) > 1 else values[0]
         return ModelResponse(output=dict(value), raw=json.dumps(value), metadata={"adapter": "stub"})
@@ -292,13 +306,15 @@ class ExecutorRegistry:
     def _execute_model(self, task: Task) -> TaskResult:
         attempts = self.invalid_output_retries + 1
         last_error: Optional[OutputValidationError] = None
+        retry_feedback: Optional[Dict[str, Any]] = None
         for attempt in range(1, attempts + 1):
-            result = self._execute_model_once(task, attempt=attempt)
+            result = self._execute_model_once(task, attempt=attempt, retry_feedback=retry_feedback)
             try:
                 validate_task_output(result.output, task.output_schema)
             except OutputValidationError as exc:
                 last_error = exc
                 if attempt < attempts:
+                    retry_feedback = _validation_retry_feedback(exc, attempt=attempt, max_attempts=attempts)
                     continue
                 return make_task_result(
                     task.id,
@@ -322,10 +338,16 @@ class ExecutorRegistry:
             return result
         raise AssertionError(f"unreachable model retry state: {last_error}")
 
-    def _execute_model_once(self, task: Task, *, attempt: int) -> TaskResult:
+    def _execute_model_once(
+        self,
+        task: Task,
+        *,
+        attempt: int,
+        retry_feedback: Optional[Dict[str, Any]] = None,
+    ) -> TaskResult:
         self.budget_tracker.consume_model_call()
         execution_id = new_execution_id()
-        prompt_meta = self._render_prompt(task)
+        prompt_meta = self._render_prompt(task, retry_feedback=retry_feedback)
         model = task.executor.model or ModelConfig(provider="stub", name="deterministic")
         self._emit_model_progress(
             "model_stream_start",
@@ -368,6 +390,7 @@ class ExecutorRegistry:
                 "prompt": prompt_meta.to_dict(),
                 "response": response.metadata,
                 "raw_response": response.raw,
+                "retry_feedback": retry_feedback,
             },
         )
 
@@ -414,7 +437,7 @@ class ExecutorRegistry:
                 return output
         return {}
 
-    def _render_prompt(self, task: Task) -> PromptMetadata:
+    def _render_prompt(self, task: Task, *, retry_feedback: Optional[Dict[str, Any]] = None) -> PromptMetadata:
         prompt_ref = task.executor.prompt
         if prompt_ref is None:
             rendered = task.task
@@ -425,12 +448,15 @@ class ExecutorRegistry:
             prompt_id = prompt_ref.id
         variables = self._template_variables()
         rendered = _render_text(rendered, variables)
+        if retry_feedback is not None:
+            rendered = f"{rendered}\n\n{_retry_feedback_message(retry_feedback)}"
         digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         return PromptMetadata(
             prompt_id=prompt_id,
             hash=f"sha256:{digest}",
             variables=variables,
             rendered_prompt=rendered,
+            retry_feedback=retry_feedback,
         )
 
     def _template_variables(self) -> Dict[str, Any]:
@@ -516,6 +542,38 @@ def _provider_tokens(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "prompt": payload.get("prompt_eval_count"),
         "source": "provider",
     }
+
+
+def _validation_retry_feedback(
+    error: OutputValidationError,
+    *,
+    attempt: int,
+    max_attempts: int,
+) -> Dict[str, Any]:
+    return {
+        "category": "output_validation",
+        "failed_attempt": attempt,
+        "max_attempts": max_attempts,
+        "message": str(error),
+        "path": error.path,
+        "expected": error.expected,
+        "actual": repr(error.actual),
+    }
+
+
+def _retry_feedback_message(feedback: Mapping[str, Any]) -> str:
+    return "\n".join(
+        [
+            "Previous attempt failed. Correct the next response using this feedback.",
+            f"Failure category: {feedback.get('category', 'unknown')}",
+            f"Failed attempt: {feedback.get('failed_attempt')} of {feedback.get('max_attempts')}",
+            f"Error: {feedback.get('message', '')}",
+            f"Path: {feedback.get('path', '')}",
+            f"Expected: {feedback.get('expected', '')}",
+            f"Actual: {feedback.get('actual', '')}",
+            "Return only output that satisfies the declared schema.",
+        ]
+    )
 
 
 def _render_text(template: str, variables: Mapping[str, Any]) -> str:

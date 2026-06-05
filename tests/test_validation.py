@@ -38,16 +38,24 @@ def test_validate_task_output_rejects_missing_status() -> None:
 
 def test_model_output_retries_until_valid() -> None:
     loaded = load_scenario(FIXTURES / "validation_scenario.yaml")
+    adapter = StubModelAdapter({"validate_model:validation_prompt": [{"oops": True}, {"status": "success"}]})
     registry = _registry(
         loaded,
-        {"validate_model:validation_prompt": [{"oops": True}, {"status": "success"}]},
+        {},
         retries=1,
     )
+    registry.model_adapter = adapter
 
     result = run_scenario(loaded, registry)
 
     assert result.status == "success"
     assert registry.budget_tracker.usage.model_calls == 2
+    retry_prompt = adapter.requests[1]["messages"][0]["content"]
+    assert "Previous attempt failed" in retry_prompt
+    assert "Failure category: output_validation" in retry_prompt
+    assert "Path: $.status" in retry_prompt
+    assert result.task_results[0].metadata["retry_feedback"]["category"] == "output_validation"
+    assert result.task_results[0].metadata["prompt"]["retry_feedback"]["failed_attempt"] == 1
 
 
 def test_model_output_returns_retry_exceeded() -> None:
