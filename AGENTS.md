@@ -43,6 +43,14 @@ NEVER EVER REMOVE MY PRETTY EXAMPLES
 .venv/bin/python -m pytest -q
 ```
 
+- Follow this verification protocol before claiming a quest or fix is done:
+  1. Re-read the relevant quest, examples and acceptance/verification bullets; preserve every example unless the user explicitly asks to change it.
+  2. Write down the concrete observable behavior that must be true, including what should be visible in generated reports or artifacts.
+  3. Add or update focused tests that fail for the exact bug or missing behavior, not only for nearby implementation details.
+  4. For report, trace or UI work, inspect the generated HTML/data shape itself and verify important information is visible in the intended default view, not only present somewhere in collapsed JSON or hidden details.
+  5. Run focused tests first, then the full default suite with `.venv/bin/python -m pytest -q`.
+  6. If any verification step cannot be run, document exactly what was not run and why before committing.
+  7. Commit only after the implementation, quest notes and verification evidence agree with the examples and acceptance conditions.
 - Optional Ollama coverage is opt-in and may require a local model plus explicit environment variables. Do not run it as part of the default suite unless the user asks or the quest requires it.
 - When the user asks for Ollama/model tests or a quest requires them, it is acceptable to run local Ollama models up to and including 12 GB from `ollama list` without trying to conserve GPU, wall-clock time, or token usage. This is a local machine; resource usage for those eligible models is allowed to be effectively unbounded for verification.
 - If `compileall` is useful, keep pycache output inside an allowed temp path, for example:
