@@ -3,9 +3,9 @@ File name: `view_001_more_precise_report_view.md`
 
 ## Status
 
-Current status: in_progress
+Current status: done
 Blocked by: none
-Description: Building the readable report view on top of the structured artifact layout completed in `report_001`.
+Description: Completed the first readable report debugging view on top of the structured artifact layout.
 
 ## Goal
 
@@ -112,3 +112,6 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Model sections now surface retry feedback as a readable report block when a successful retry followed a validation failure.
 - `write_files` tasks now expose file change events in report details with action, path and byte count.
 - Task details now include a readable Source / Destination block with cycle/task origin and executor artifact destination.
+- Deeper line-level diff summaries are split into `view_002`.
+- Completed and moved to `quests/done/`.
+- Verified with `.venv/bin/python -m pytest -q`.

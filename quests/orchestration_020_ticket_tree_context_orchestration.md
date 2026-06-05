@@ -3,9 +3,9 @@ File name: `orchestration_020_ticket_tree_context_orchestration.md`
 
 ## Status
 
-Current status: blocked
-Blocked by: view_001
-Description: Larger ticket-tree orchestration should wait until introspection, report view and model tool-call handling make complex runs debuggable.
+Current status: ready
+Blocked by: none
+Description: Ready to design persistent ticket-tree orchestration now that introspection, report view and model tool-call handling are in place.
 
 ## Goal
 
