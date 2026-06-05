@@ -45,6 +45,11 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert log_path.exists()
     assert list((trace_dir / "models").glob("*.json"))
     assert list((trace_dir / "commands").glob("*.json"))
+    assert list((trace_dir / "models" / "deterministic").glob("*/status.json"))
+    assert list((trace_dir / "models" / "deterministic").glob("*/input.json"))
+    assert list((trace_dir / "models" / "deterministic").glob("*/context.json"))
+    assert list((trace_dir / "models" / "deterministic").glob("*/output.json"))
+    assert list((trace_dir / "commands").glob("*/*/status.json"))
     assert list((trace_dir / "inputs").glob("*.json"))
     status = json.loads((trace_dir / "status.json").read_text(encoding="utf-8"))
     assert status["status"] == "success"
@@ -63,6 +68,8 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
     assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")
     assert report_data["task_inputs"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
+    assert report_data["task_inputs"][0]["executor_artifact_dir"].startswith("trace/models/deterministic/")
+    assert report_data["model_outputs"][0]["model_artifact_dir"].startswith("trace/models/deterministic/")
     assert report_data["model_outputs"][0]["stream"].startswith("trace/models/")
     report_text = report.read_text(encoding="utf-8")
     assert "Refresh Report Data" in report_text
@@ -153,6 +160,13 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
         output={"status": "success", "stdout": long_stdout, "stderr": ""},
         metadata={"executor": "command", "command": "python3 -c ...", "cwd": "."},
     )
+    tool_task = make_task_result(
+        "write_files",
+        Outcome.SUCCESS.value,
+        execution_id="exec_tool",
+        output={"status": "success", "files": ["demo.txt"]},
+        metadata={"executor": "tool", "tool": "write_files"},
+    )
     result = ScenarioResult(
         scenario_id=loaded.document.id,
         status=Outcome.SUCCESS.value,
@@ -161,7 +175,7 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
                 cycle_id=loaded.cycles[0].document.id,
                 cycle_path=loaded.cycles[0].document.id,
                 status=Outcome.SUCCESS.value,
-                task_results=[task],
+                task_results=[task, tool_task],
             )
         ],
     )
@@ -189,6 +203,8 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
     artifacts = json.loads((trace_dir / "artifacts.json").read_text(encoding="utf-8"))["artifacts"]
     assert {"kind": "task_execution", "path": f"trace/{task_stdout_path}"} in artifacts
     assert {"kind": "command", "path": f"trace/{command_stdout_path}"} in artifacts
+    assert (trace_dir / "tools" / "write_files" / "exec_tool" / "status.json").exists()
+    assert (trace_dir / "tools" / "write_files" / "exec_tool" / "output.json").exists()
 
 
 def test_task_replay_restores_captured_result(tmp_path: Path) -> None:

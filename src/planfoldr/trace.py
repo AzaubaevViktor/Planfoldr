@@ -415,16 +415,76 @@ class TraceWriter:
             if executor == "model":
                 self._write_model_raw_response(task)
                 self._write_json(f"models/{task.execution_id}.json", self._model_metadata(task))
+                self._write_executor_directory_parts(task)
             elif executor == "command":
                 self._write_json(
                     f"commands/{task.execution_id}.json",
                     {"metadata": task.metadata, "output": task.output},
                 )
+                self._write_executor_directory_parts(task)
             elif executor == "tool":
                 self._write_json(
                     f"tools/{task.execution_id}.json",
                     {"metadata": task.metadata, "output": task.output},
                 )
+                self._write_executor_directory_parts(task)
+
+    def _write_executor_directory_parts(self, task: TaskResult) -> None:
+        base = self._executor_artifact_dir(task)
+        if base is None:
+            return
+        self._write_json(
+            f"{base}/status.json",
+            {
+                "task_id": task.task_id,
+                "execution_id": task.execution_id,
+                "executor": task.metadata.get("executor", "unknown"),
+                "status": task.status,
+                "reason": task.reason,
+                "started_at": task.started_at,
+                "finished_at": task.finished_at,
+                "budget_before": task.budget_before,
+                "budget_after": task.budget_after,
+            },
+        )
+        self._write_json(f"{base}/input.json", self._task_input_artifact(task))
+        self._write_json(
+            f"{base}/context.json",
+            _redact_secrets(
+                {
+                    "task_id": task.task_id,
+                    "execution_id": task.execution_id,
+                    "request": task.request,
+                    "metadata": _model_metadata_without_raw_response(task)
+                    if task.metadata.get("executor") == "model"
+                    else task.metadata,
+                    "artifacts": task.artifacts,
+                    "evidence": task.evidence,
+                }
+            ),
+        )
+        self._write_json(
+            f"{base}/output.json",
+            {
+                "task_id": task.task_id,
+                "execution_id": task.execution_id,
+                "status": task.status,
+                "reason": task.reason,
+                "output": task.output,
+            },
+        )
+        if task.metadata.get("executor") == "model":
+            self._copy_model_text_artifacts(task, base)
+
+    def _copy_model_text_artifacts(self, task: TaskResult, base: str) -> None:
+        legacy_dir = self.trace_dir / "models" / task.execution_id
+        target_dir = self.trace_dir / base
+        for name in ("stream.jsonl", "assembled.txt", "content.txt", "thinking.txt", "raw_response.txt"):
+            text = _read_optional_text(legacy_dir / name)
+            if text:
+                target = target_dir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
 
     def _write_task_parts(self) -> None:
         for cycle in self.result.cycle_results:
@@ -526,6 +586,20 @@ class TraceWriter:
     def _task_artifact_dir(self, cycle_id: str, task_id: str, execution_id: str) -> str:
         task_type = self._task_type(cycle_id, task_id)
         return f"tasks/{_safe_trace_segment(task_type)}/{execution_id}"
+
+    def _executor_artifact_dir(self, task: TaskResult) -> Optional[str]:
+        executor = task.metadata.get("executor")
+        if executor == "model":
+            model = task.metadata.get("model", {})
+            model_name = str(model.get("name") or "unknown_model") if isinstance(model, dict) else "unknown_model"
+            return f"models/{_safe_trace_segment(model_name)}/{task.execution_id}"
+        if executor == "tool":
+            tool_name = str(task.metadata.get("tool") or "unknown_tool")
+            return f"tools/{_safe_trace_segment(tool_name)}/{task.execution_id}"
+        if executor == "command":
+            command = str(task.metadata.get("command") or "unknown_command")
+            return f"commands/{_safe_trace_segment(command[:80])}/{task.execution_id}"
+        return None
 
     def _task_type(self, cycle_id: str, task_id: str) -> str:
         return self.task_types.get((cycle_id, task_id)) or self.task_types.get(("", task_id)) or "unknown"
@@ -688,6 +762,9 @@ class TraceWriter:
                         str(task.get("task_id")),
                         str(task.get("execution_id")),
                     ),
+                    "executor_artifact_dir": (
+                        f"trace/{executor_dir}" if (executor_dir := self._executor_artifact_dir_from_record(task)) else None
+                    ),
                     "path": f"trace/inputs/{task.get('execution_id')}.json",
                 }
                 for task in task_records
@@ -698,6 +775,9 @@ class TraceWriter:
                     "cycle_path": task.get("cycle_path"),
                     "task_id": task.get("task_id"),
                     "execution_id": task.get("execution_id"),
+                    "model_artifact_dir": (
+                        f"trace/{executor_dir}" if (executor_dir := self._executor_artifact_dir_from_record(task)) else None
+                    ),
                     "stream": f"trace/models/{task.get('execution_id')}/stream.jsonl",
                     "assembled": f"trace/models/{task.get('execution_id')}/assembled.txt",
                     "content": f"trace/models/{task.get('execution_id')}/content.txt",
@@ -713,6 +793,18 @@ class TraceWriter:
             ],
             "execution_log": _run_relative_path(self.trace_dir, self.execution_log_path),
         }
+
+    def _executor_artifact_dir_from_record(self, task: Dict[str, Any]) -> Optional[str]:
+        metadata = task.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return None
+        pseudo_task = TaskResult(
+            task_id=str(task.get("task_id") or ""),
+            execution_id=str(task.get("execution_id") or ""),
+            status=str(task.get("status") or ""),
+            metadata=metadata,
+        )
+        return self._executor_artifact_dir(pseudo_task)
 
     def _write_json(self, relative: str, value: Any) -> None:
         _write_json_with_long_artifacts(self.trace_dir, relative, value)

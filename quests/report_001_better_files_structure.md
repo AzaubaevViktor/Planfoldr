@@ -85,4 +85,5 @@ Each run has a readable `report.html` and a structured `trace/` tree where scena
 - Extracted artifact references remain relative to `trace/`, are included in `artifacts.json`, and `replay_task` resolves extracted references back to text.
 - Added per-task execution directories under `trace/tasks/<task_type>/<execution_id>/` with `status.json`, `input.json`, `context.json` and `output.json`, while preserving compatibility files such as `trace/tasks/executions.json` and `trace/inputs/<execution_id>.json`.
 - Added per-cycle artifacts under `trace/cycles/<cycle_path>.json` and exposed them through `manifest.json` and `report_data.json`.
+- Added executor-specific directories under `trace/models/<model_name>/<execution_id>/`, `trace/tools/<tool_name>/<execution_id>/` and `trace/commands/<command>/<execution_id>/`, preserving old compatibility files and old model stream paths.
 - Verified the slice with `.venv/bin/python -m pytest tests/test_trace.py -q`.
