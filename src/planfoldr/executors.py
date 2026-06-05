@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -419,22 +420,45 @@ class ExecutorRegistry:
         file_changes: List[Dict[str, Any]] = []
         for item in files:
             target = self.permission_engine.check_write_path(_render_text(item["path"], self._template_variables()))
-            content = str(item.get("content", ""))
             existed = target.exists()
+            before = target.read_text(encoding="utf-8") if existed else ""
+            if item.get("delete"):
+                if existed:
+                    target.unlink()
+                lines_added, lines_removed = _line_change_counts(before, "")
+                file_changes.append(
+                    {
+                        "path": str(target),
+                        "action": "deleted",
+                        "bytes": 0,
+                        "lines_added": lines_added,
+                        "lines_removed": lines_removed,
+                    }
+                )
+                continue
+            content = str(item.get("content", ""))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
             written.append(str(target))
+            lines_added, lines_removed = _line_change_counts(before, content)
             file_changes.append(
                 {
                     "path": str(target),
                     "action": "modified" if existed else "created",
                     "bytes": len(content.encode("utf-8")),
+                    "lines_added": lines_added,
+                    "lines_removed": lines_removed,
                 }
             )
         return make_task_result(
             task.id,
             Outcome.SUCCESS.value,
-            output={"status": Outcome.SUCCESS.value, "files": written, "file_changes": file_changes},
+            output={
+                "status": Outcome.SUCCESS.value,
+                "files": written,
+                "file_changes": file_changes,
+                "diff_summary": _diff_summary(file_changes),
+            },
             evidence=_verifier_evidence(task, Outcome.SUCCESS.value, f"Wrote {len(written)} file(s)"),
             metadata={"executor": "tool", "tool": "write_files"},
         )
@@ -550,6 +574,29 @@ def _provider_tokens(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "generated": payload.get("eval_count"),
         "prompt": payload.get("prompt_eval_count"),
         "source": "provider",
+    }
+
+
+def _line_change_counts(before: str, after: str) -> tuple[int, int]:
+    matcher = difflib.SequenceMatcher(a=before.splitlines(), b=after.splitlines())
+    added = 0
+    removed = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in {"replace", "delete"}:
+            removed += i2 - i1
+        if tag in {"replace", "insert"}:
+            added += j2 - j1
+    return added, removed
+
+
+def _diff_summary(file_changes: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
+    changes = list(file_changes)
+    deleted = [item for item in changes if item.get("action") == "deleted"]
+    return {
+        "files_changed": len(changes),
+        "files_deleted": len(deleted),
+        "lines_added": sum(int(item.get("lines_added") or 0) for item in changes),
+        "lines_removed": sum(int(item.get("lines_removed") or 0) for item in changes),
     }
 
 

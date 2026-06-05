@@ -990,7 +990,7 @@ class TraceWriter:
             "<details><summary>Task Details</summary>"
             f"<p>{links}</p>"
             f"{self._request_route_html(cycle, task)}"
-            f"{_file_changes_html(task.output.get('file_changes'))}"
+            f"{_file_changes_html(task.output.get('file_changes'), task.output.get('diff_summary'))}"
             f"{previews}"
             "</details>"
         )
@@ -1464,23 +1464,42 @@ def _report_pre(title: str, text: str) -> str:
     return f"<h3>{html.escape(title)}</h3><pre>{html.escape(text)}</pre>"
 
 
-def _file_changes_html(value: Any) -> str:
+def _file_changes_html(value: Any, summary: Any = None) -> str:
     if not isinstance(value, list) or not value:
         return ""
     rows = []
     for item in value:
         if not isinstance(item, dict):
             continue
+        lines_added = int(item.get("lines_added") or 0)
+        lines_removed = int(item.get("lines_removed") or 0)
         rows.append(
             "<li>"
             f"<strong>{html.escape(str(item.get('action') or 'changed'))}</strong> "
             f"<code>{html.escape(str(item.get('path') or ''))}</code> "
-            f"<span class='muted'>{html.escape(str(item.get('bytes') or 0))} byte(s)</span>"
+            f"<span class='muted'>{html.escape(str(item.get('bytes') or 0))} byte(s), "
+            f"+{lines_added} -{lines_removed}</span>"
             "</li>"
         )
     if not rows:
         return ""
-    return f"<h3>File Changes</h3><ul>{''.join(rows)}</ul>"
+    summary = summary if isinstance(summary, dict) else _file_change_summary(value)
+    summary_text = (
+        f"short diff: {int(summary.get('files_changed') or 0)} files changed, "
+        f"{int(summary.get('files_deleted') or 0)} deleted, "
+        f"+{int(summary.get('lines_added') or 0)} -{int(summary.get('lines_removed') or 0)}"
+    )
+    return f"<h3>File Changes</h3><p>{html.escape(summary_text)}</p><ul>{''.join(rows)}</ul>"
+
+
+def _file_change_summary(value: List[Any]) -> Dict[str, int]:
+    changes = [item for item in value if isinstance(item, dict)]
+    return {
+        "files_changed": len(changes),
+        "files_deleted": sum(1 for item in changes if item.get("action") == "deleted"),
+        "lines_added": sum(int(item.get("lines_added") or 0) for item in changes),
+        "lines_removed": sum(int(item.get("lines_removed") or 0) for item in changes),
+    }
 
 
 def _model_metadata_without_raw_response(task: TaskResult) -> Dict[str, Any]:

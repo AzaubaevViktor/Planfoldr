@@ -206,7 +206,13 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
         output={
             "status": "success",
             "files": ["demo.txt"],
-            "file_changes": [{"path": "demo.txt", "action": "created", "bytes": 12}],
+            "file_changes": [{"path": "demo.txt", "action": "created", "bytes": 12, "lines_added": 1, "lines_removed": 0}],
+            "diff_summary": {
+                "files_changed": 1,
+                "files_deleted": 0,
+                "lines_added": 1,
+                "lines_removed": 0,
+            },
         },
         metadata={"executor": "tool", "tool": "write_files"},
     )
@@ -250,6 +256,7 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
     assert (trace_dir / "tools" / "write_files" / "exec_tool" / "output.json").exists()
     report_text = (tmp_path / "large" / "report.html").read_text(encoding="utf-8")
     assert "File Changes" in report_text
+    assert "short diff: 1 files changed, 0 deleted, +1 -0" in report_text
     assert "demo.txt" in report_text
 
 

@@ -3,9 +3,9 @@ File name: `view_002_short_diff_summary.md`
 
 ## Status
 
-Current status: ready
+Current status: done
 Blocked by: none
-Description: Follow-up for richer file-change reporting after `view_001` adds basic file change events.
+Description: Completed richer file-change reporting after `view_001` added basic file change events.
 
 ## Goal
 
@@ -96,3 +96,8 @@ cycle up/down to new_cycle_name
 ## Implementation Notes
 
 Generated after `view_001` added basic file change events.
+- Added `write_files` diff summaries for created, modified and deleted files, including line additions/removals.
+- Report task details now show a compact `short diff` summary and expanded per-file action/path/+/- data.
+- Added minimal `write_files` delete support through file items with `delete: true`.
+- Completed and moved to `quests/done/`.
+- Verified with `.venv/bin/python -m pytest -q`.

@@ -79,6 +79,61 @@ def test_write_files_uses_latest_model_output(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "# Generated\n"
     assert result.output["file_changes"][0]["action"] == "created"
     assert result.output["file_changes"][0]["bytes"] == len("# Generated\n".encode("utf-8"))
+    assert result.output["file_changes"][0]["lines_added"] == 1
+    assert result.output["file_changes"][0]["lines_removed"] == 0
+    assert result.output["diff_summary"] == {
+        "files_changed": 1,
+        "files_deleted": 0,
+        "lines_added": 1,
+        "lines_removed": 0,
+    }
+
+
+def test_write_files_reports_modified_and_deleted_diff_summary(tmp_path: Path) -> None:
+    modified = tmp_path / "project" / "modified.txt"
+    deleted = tmp_path / "project" / "deleted.txt"
+    modified.parent.mkdir(parents=True)
+    modified.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    deleted.write_text("remove me\nand me\n", encoding="utf-8")
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    constraints = loaded.document.constraints.model_copy(deep=True)
+    constraints.filesystem.allow_write.append(str(tmp_path))
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(constraints, base_dir=tmp_path),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        task_inputs={
+            "update_files": {
+                "files": [
+                    {"path": str(modified), "content": "one\nTWO\nthree\nfour\n"},
+                    {"path": str(deleted), "delete": True},
+                ]
+            }
+        },
+    )
+    task = Task(
+        id="update_files",
+        type="tool",
+        task="Update files.",
+        executor=Executor(kind="tool", tool="write_files"),
+        input_schema={"type": "object"},
+        output_schema={"type": "object", "required": ["status"]},
+    )
+
+    result = registry(task)
+
+    assert modified.read_text(encoding="utf-8") == "one\nTWO\nthree\nfour\n"
+    assert not deleted.exists()
+    assert [item["action"] for item in result.output["file_changes"]] == ["modified", "deleted"]
+    assert result.output["file_changes"][0]["lines_added"] == 2
+    assert result.output["file_changes"][0]["lines_removed"] == 1
+    assert result.output["file_changes"][1]["lines_added"] == 0
+    assert result.output["file_changes"][1]["lines_removed"] == 2
+    assert result.output["diff_summary"] == {
+        "files_changed": 2,
+        "files_deleted": 1,
+        "lines_added": 2,
+        "lines_removed": 3,
+    }
 
 
 def test_write_files_ignores_tool_file_lists_when_finding_latest_model_output(tmp_path: Path) -> None:
