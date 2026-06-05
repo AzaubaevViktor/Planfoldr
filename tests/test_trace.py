@@ -137,8 +137,33 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
 
     execution_id = next(event["execution_id"] for event in events if event["event"] == "model_stream_start")
     stream_dir = tmp_path / "executor_scenario" / "stream-run" / "trace" / "models" / execution_id
-    assert (stream_dir / "chunks" / "000001.thinking.txt").read_text(encoding="utf-8") == "thinking "
-    assert (stream_dir / "chunks" / "000002.content.txt").read_text(encoding="utf-8") == "partial content"
+    stream_rows = [
+        json.loads(line)
+        for line in (stream_dir / "stream.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert stream_rows == [
+        {
+            "chars": 9,
+            "content_chars": 0,
+            "cumulative_chars": 9,
+            "kind": "thinking",
+            "sequence": 1,
+            "text": "thinking ",
+            "thinking_chars": 9,
+            "tokens": None,
+        },
+        {
+            "chars": 15,
+            "content_chars": 15,
+            "cumulative_chars": 24,
+            "kind": "content",
+            "sequence": 2,
+            "text": "partial content",
+            "thinking_chars": 9,
+            "tokens": None,
+        },
+    ]
+    assert not (stream_dir / "chunks").exists()
     assert (stream_dir / "assembled.txt").read_text(encoding="utf-8") == "thinking partial content"
     assert (stream_dir / "content.txt").read_text(encoding="utf-8") == "partial content"
     report_text = (tmp_path / "executor_scenario" / "stream-run" / "report.html").read_text(encoding="utf-8")
@@ -151,6 +176,7 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
         )
     )
     assert model_metadata["stream_artifacts"]["content"] == f"models/{execution_id}/content.txt"
+    assert model_metadata["stream_artifacts"]["stream"] == f"models/{execution_id}/stream.jsonl"
 
 
 def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:

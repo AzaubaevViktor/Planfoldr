@@ -244,24 +244,22 @@ class LoggingExecutor:
             return
         kind = str(fields.get("kind", "content"))
         state["sequence"] += 1
-        filename = f"{state['sequence']:06d}.{kind}.txt"
-        chunk_path = state["chunks_dir"] / filename
-        chunk_path.write_text(text, encoding="utf-8")
         state["stream_parts"].append(text)
         if kind == "content":
             state["content_parts"].append(text)
         elif kind == "thinking":
             state["thinking_parts"].append(text)
-        self._append_chunk_index(
+        self._append_stream_row(
             state,
             {
                 "sequence": state["sequence"],
                 "kind": kind,
-                "path": f"chunks/{filename}",
+                "text": text,
                 "chars": len(text),
                 "cumulative_chars": fields.get("chars"),
                 "content_chars": fields.get("content_chars"),
                 "thinking_chars": fields.get("thinking_chars"),
+                "tokens": fields.get("tokens"),
             },
         )
 
@@ -285,7 +283,7 @@ class LoggingExecutor:
             "thinking_chars": fields.get("thinking_chars"),
             "tokens": fields.get("tokens"),
             "files": {
-                "chunks_index": "chunks/index.jsonl",
+                "stream": "stream.jsonl",
                 "assembled": "assembled.txt",
                 "content": "content.txt",
                 "thinking": "thinking.txt",
@@ -303,8 +301,7 @@ class LoggingExecutor:
         key = str(execution_id)
         if key not in self._streams:
             stream_dir = self.trace_dir / "models" / key
-            chunks_dir = stream_dir / "chunks"
-            chunks_dir.mkdir(parents=True, exist_ok=True)
+            stream_dir.mkdir(parents=True, exist_ok=True)
             self._streams[key] = {
                 "execution_id": key,
                 "task_id": fields.get("task_id"),
@@ -312,7 +309,6 @@ class LoggingExecutor:
                 "model": fields.get("model"),
                 "provider": fields.get("provider"),
                 "dir": stream_dir,
-                "chunks_dir": chunks_dir,
                 "sequence": 0,
                 "stream_parts": [],
                 "content_parts": [],
@@ -320,8 +316,8 @@ class LoggingExecutor:
             }
         return self._streams[key]
 
-    def _append_chunk_index(self, state: Dict[str, Any], row: Dict[str, Any]) -> None:
-        with (state["chunks_dir"] / "index.jsonl").open("a", encoding="utf-8") as stream:
+    def _append_stream_row(self, state: Dict[str, Any], row: Dict[str, Any]) -> None:
+        with (state["dir"] / "stream.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(row, sort_keys=True) + "\n")
 
 
@@ -470,7 +466,7 @@ class TraceWriter:
             metadata["stream_artifacts"] = {
                 "directory": f"models/{task.execution_id}",
                 "manifest": f"models/{task.execution_id}/manifest.json",
-                "chunks_index": f"models/{task.execution_id}/chunks/index.jsonl",
+                "stream": f"models/{task.execution_id}/stream.jsonl",
                 "assembled": f"models/{task.execution_id}/assembled.txt",
                 "content": f"models/{task.execution_id}/content.txt",
                 "thinking": f"models/{task.execution_id}/thinking.txt",
