@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from planfoldr.executors import ExecutorRegistry, StubModelAdapter
+from planfoldr.executors import ExecutorRegistry, ModelResponse, StubModelAdapter
 from planfoldr.guards import BudgetTracker, PermissionEngine
 from planfoldr.loader import load_scenario
 from planfoldr.runtime import run_scenario
@@ -137,3 +137,72 @@ def test_command_templates_can_read_previous_task_outputs() -> None:
 
     assert result.status == "success"
     assert result.output["stdout"] == "from prior task\n"
+
+
+def test_model_tool_call_syntax_returns_need_tool_call() -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        model_adapter=RawTextModelAdapter(
+            '<tool_call>{"name":"write_files","arguments":{"files":[{"path":"demo.txt"}]}}</tool_call>'
+        ),
+    )
+    task = Task(
+        id="call_tool",
+        type="model",
+        task="Ask for a tool call.",
+        executor=Executor(kind="model"),
+        input_schema={"type": "object"},
+        output_schema={
+            "type": "object",
+            "required": ["status", "tool_call"],
+            "properties": {"status": {"enum": ["need_tool_call"]}},
+        },
+    )
+
+    result = registry(task)
+
+    assert result.status == "need_tool_call"
+    assert result.output["tool_call"]["name"] == "write_files"
+    assert result.output["tool_call"]["arguments"]["files"][0]["path"] == "demo.txt"
+    assert result.metadata["raw_response"].startswith("<tool_call>")
+
+
+def test_malformed_model_tool_call_syntax_returns_diagnostic_failure() -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        model_adapter=RawTextModelAdapter("<tool_call>{not json}</tool_call>"),
+    )
+    task = Task(
+        id="bad_tool_call",
+        type="model",
+        task="Ask for a bad tool call.",
+        executor=Executor(kind="model"),
+        input_schema={"type": "object"},
+        output_schema={
+            "type": "object",
+            "required": ["status", "reason"],
+            "properties": {"status": {"enum": ["failure"]}},
+        },
+    )
+
+    result = registry(task)
+
+    assert result.status == "failure"
+    assert "Malformed <tool_call> JSON" in result.reason
+    assert result.output["tool_call_error"]["category"] == "malformed_tool_call"
+
+
+class RawTextModelAdapter:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def generate(self, *, task, model, messages, config, tools, progress_callback=None):
+        return ModelResponse(
+            output={"status": "failure", "reason": "raw text"},
+            raw=self.text,
+            metadata={"adapter": "raw-text"},
+        )

@@ -22,6 +22,7 @@ class Outcome(str, Enum):
     NEED_INNER_CYCLE = "need_inner_cycle"
     NEED_PERMISSION = "need_permission"
     NEED_TOOL = "need_tool"
+    NEED_TOOL_CALL = "need_tool_call"
     RETRY_EXCEEDED = "retry_exceeded"
 
 

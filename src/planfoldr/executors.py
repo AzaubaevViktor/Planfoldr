@@ -216,10 +216,7 @@ class OllamaModelAdapter(ModelAdapter):
             )
 
         content = "".join(content_parts)
-        try:
-            output = json.loads(content)
-        except json.JSONDecodeError:
-            output = {"status": Outcome.FAILURE.value, "reason": "Ollama returned non-JSON content"}
+        output = _classify_model_text_output(content)
         return ModelResponse(
             output=output,
             raw="\n".join(raw_lines),
@@ -227,6 +224,7 @@ class OllamaModelAdapter(ModelAdapter):
                 "adapter": "ollama",
                 "available": True,
                 "model": model.name,
+                "content": content,
                 "streaming": True,
                 "chars": stream_chars,
                 "content_chars": len(content),
@@ -375,13 +373,14 @@ class ExecutorRegistry:
         )
         if response.budget_cost:
             self.budget_tracker.consume_model_budget(response.budget_cost)
-        status = str(response.output.get("status", Outcome.FAILURE.value))
+        output = _classify_model_response_output(response)
+        status = str(output.get("status", Outcome.FAILURE.value))
         return make_task_result(
             task.id,
             status,
             execution_id=execution_id,
-            reason=response.output.get("reason"),
-            output=response.output,
+            reason=output.get("reason"),
+            output=output,
             evidence=_verifier_evidence(task, status, "Model output matched declared schema"),
             metadata={
                 "executor": "model",
@@ -574,6 +573,80 @@ def _retry_feedback_message(feedback: Mapping[str, Any]) -> str:
             "Return only output that satisfies the declared schema.",
         ]
     )
+
+
+def _classify_model_response_output(response: ModelResponse) -> Dict[str, Any]:
+    output = dict(response.output)
+    if output.get("status") != Outcome.FAILURE.value:
+        return output
+    for candidate in (
+        response.metadata.get("content"),
+        response.metadata.get("assembled"),
+        response.raw,
+    ):
+        if isinstance(candidate, str) and "<tool_call" in candidate:
+            return _classify_model_text_output(candidate)
+    return output
+
+
+def _classify_model_text_output(text: str) -> Dict[str, Any]:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    tool_call = _parse_tool_call_syntax(text)
+    if tool_call is None:
+        return {"status": Outcome.FAILURE.value, "reason": "Model returned non-JSON content"}
+    return tool_call
+
+
+def _parse_tool_call_syntax(text: str) -> Optional[Dict[str, Any]]:
+    match = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", text, flags=re.DOTALL)
+    if match is None:
+        return None
+    raw_payload = match.group(1).strip()
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError as exc:
+        return {
+            "status": Outcome.FAILURE.value,
+            "reason": f"Malformed <tool_call> JSON: {exc.msg}",
+            "tool_call_error": {
+                "category": "malformed_tool_call",
+                "line": exc.lineno,
+                "column": exc.colno,
+            },
+        }
+    if not isinstance(payload, dict):
+        return {
+            "status": Outcome.FAILURE.value,
+            "reason": "Malformed <tool_call>: payload must be a JSON object",
+            "tool_call_error": {"category": "malformed_tool_call"},
+        }
+    name = payload.get("name") or payload.get("tool")
+    arguments = payload.get("arguments", payload.get("parameters", {}))
+    function = payload.get("function")
+    if isinstance(function, dict):
+        name = name or function.get("name")
+        arguments = function.get("arguments", arguments)
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            pass
+    if not isinstance(name, str) or not name.strip():
+        return {
+            "status": Outcome.FAILURE.value,
+            "reason": "Malformed <tool_call>: missing tool name",
+            "tool_call_error": {"category": "malformed_tool_call"},
+        }
+    return {
+        "status": Outcome.NEED_TOOL_CALL.value,
+        "tool_call": {
+            "name": name.strip(),
+            "arguments": arguments if isinstance(arguments, dict) else {"value": arguments},
+        },
+    }
 
 
 def _render_text(template: str, variables: Mapping[str, Any]) -> str:
