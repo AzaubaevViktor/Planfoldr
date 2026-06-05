@@ -13,6 +13,7 @@ The JSON must match this shape:
 
 Requirements:
 - include multiple files;
+- include a CLI entry point with add, list, and done commands;
 - include tests that run with `python3 -m pytest`;
 - include AGENTS.md;
 - include ARCHITECTURE.md;
