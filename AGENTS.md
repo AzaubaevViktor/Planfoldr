@@ -20,6 +20,8 @@ NEVER EVER REMOVE MY PRETTY EXAMPLES
 - Active implementation work lives in `quests/`; completed quest files move to `quests/done/` in the same commit that finishes the work.
 - Follow quest order by default. If the user names a specific quest, do that quest first and keep the change scoped to it.
 - When finishing a quest, update its implementation notes or handoff section so the next agent can resume without rereading the whole session history.
+- Do not add line-by-line audit sections that merely repeat quest text with `[x]` or "checked and complete"; verification notes must name concrete tests, generated artifacts, inspected files, and observable strings/fields.
+- If a previous audit line is found false, do not silently preserve or re-check it. Mark it as a corrected false audit and replace it with concrete current evidence.
 - Prefer small, deterministic MVP slices over broad rewrites. Keep models as task executors; the deterministic runtime should own control flow, budgets, permissions, validation, tracing, and reports.
 
 ## Local Environment

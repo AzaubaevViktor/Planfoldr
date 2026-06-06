@@ -117,6 +117,16 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
 
+## Audit Correction
+
+The original line-by-line audit below is historical and was too broad: it repeated quest lines as `[x] ... checked and complete` without concrete evidence for every visible behavior.
+
+False prior audit: Line 34, Line 56, Line 64 and Line 89 claimed live/generated model text was checked, but the live `report.html` did not actually show in-progress model text while the run was active. Current evidence after the follow-up fix:
+
+- `tests/test_trace.py::test_live_report_shows_streaming_output_before_model_finishes` reads `report.html` inside the model streaming callback before the model finishes.
+- The test asserts visible `streaming output is updating`, `live partial content`, `result: running`, and the current task `executor_cycle / ask_model`.
+- The full default suite passed with `.venv/bin/python -m pytest -q`.
+
 ## Line-by-Line Verification Audit
 
 Audit source: `nl -ba quests/done/view_001_more_precise_report_view.md` before this section was appended; prior `Completion Audit` is summarized separately below.
@@ -154,7 +164,7 @@ Audit source: `nl -ba quests/done/view_001_more_precise_report_view.md` before t
 - [x] Line 31: `- The report shows remaining budget at each relevant step.` checked and complete.
 - [x] Line 32: `- File creation and modification events are visible with requester information.` checked and complete.
 - [x] Line 33: `- Command tasks show command, arguments and working directory.` checked and complete.
-- [x] Line 34: `- Model tasks show goal, budget, retry information and currently generated text when available.` checked and complete.
+- [x] Line 34: `- Model tasks show goal, budget, retry information and currently generated text when available.` corrected after a false prior audit; current evidence is `tests/test_trace.py::test_live_report_shows_streaming_output_before_model_finishes`, which reads `report.html` before model completion and checks visible streamed text.
 - [x] Line 35: `- Results show success or failure with a human-readable reason.` checked and complete.
 - [x] Line 36: `- File changes include a short diff summary such as changed file count and line counts.` checked and complete.
 - [x] Line 37: `- Additional raw detail remains available without overwhelming the default view.` checked and complete.
@@ -176,7 +186,7 @@ Audit source: `nl -ba quests/done/view_001_more_precise_report_view.md` before t
 - [x] Line 53: blank separator preserved.
 - [x] Line 54: `cycle_name: previous_task -> [active_task] -> next_task` checked and complete.
 - [x] Line 55: `model: <goal> with <budget>` checked and complete.
-- [x] Line 56: `  details: generated text while streaming` checked and complete.
+- [x] Line 56: `  details: generated text while streaming` corrected after a false prior audit; current evidence is `tests/test_trace.py::test_live_report_shows_streaming_output_before_model_finishes`, which inspects `report.html` during model streaming before completion.
 - [x] Line 57: `result: failure (wrong format)` checked and complete.
 - [x] Line 58: blank separator preserved.
 - [x] Line 59: `retry 1/3 with additional message to model` checked and complete.
@@ -184,7 +194,7 @@ Audit source: `nl -ba quests/done/view_001_more_precise_report_view.md` before t
 - [x] Line 61: blank separator preserved.
 - [x] Line 62: `cycle_name: previous_task -> [active_task] -> next_task` checked and complete.
 - [x] Line 63: `model: <goal> with <budget> (retry 1/3)` checked and complete.
-- [x] Line 64: `  details: generated text while streaming` checked and complete.
+- [x] Line 64: `  details: generated text while streaming` corrected after a false prior audit; current evidence is `tests/test_trace.py::test_live_report_shows_streaming_output_before_model_finishes`, which checks visible streaming output in the running task block.
 - [x] Line 65: `result: success` checked and complete.
 - [x] Line 66: blank separator preserved.
 - [x] Line 67: `cycle down from current_cycle_name to new_cycle_name` checked and complete.
@@ -209,7 +219,7 @@ Audit source: `nl -ba quests/done/view_001_more_precise_report_view.md` before t
 - [x] Line 86: `- Render cycle structure in the report.` checked and complete.
 - [x] Line 87: `- Render task context, input and output as readable expandable sections.` checked and complete.
 - [x] Line 88: `- Render command and model tasks with specialized summaries.` checked and complete.
-- [x] Line 89: `- Render live model streaming progress when available.` checked and complete.
+- [x] Line 89: `- Render live model streaming progress when available.` corrected after a false prior audit; current evidence is `tests/test_trace.py::test_live_report_shows_streaming_output_before_model_finishes` plus inspection of generated `report.html`.
 - [x] Line 90: `- Render retry attempts and retry messages.` checked and complete.
 - [x] Line 91: `- Add tests or fixtures for active, successful, failed and retried runs.` checked and complete.
 - [x] Line 92: `- Verify the report remains readable from \`file://\`.` checked and complete.
