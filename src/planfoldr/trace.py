@@ -1316,12 +1316,12 @@ def _write_live_report_shell(
     execution_log_path: Path,
 ) -> None:
     status = _read_json_optional(trace_dir / "status.json")
-    live_refresh = '<meta http-equiv="refresh" content="1">\n  ' if status.get("status") == "running" else ""
+    live_refresh = _live_report_refresh_script(status)
     document = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  {live_refresh}<title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
+  <title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }}
     code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; }}
@@ -1340,16 +1340,100 @@ def _write_live_report_shell(
 <body>
   <main class="flow">
     <h1>Starting <code>{html.escape(loaded.document.id)}</code></h1>
-    <details open>
+    <details open data-live-summary>
       <summary>cut with additional human-readable info</summary>
       <div id="live-status">{_status_html(status)}</div>
     </details>
     <section id="execution-flow">{_status_work_flow_html(status, trace_dir=trace_dir)}</section>
+    {live_refresh}
   </main>
 </body>
 </html>
 """
     report_path.write_text(document, encoding="utf-8")
+
+
+def _live_report_refresh_script(status: Dict[str, Any]) -> str:
+    if status.get("status") != "running":
+        return ""
+    return """<script>
+(function () {
+  var pauseKey = "planfoldr-live-pause-until";
+  var detailsKey = "planfoldr-live-open-details";
+  var scrollKey = "planfoldr-live-scroll-y";
+  var pauseMs = 10 * 60 * 1000;
+
+  function detailsList() {
+    return Array.prototype.slice.call(document.querySelectorAll("details"));
+  }
+
+  function saveOpenDetails() {
+    var open = [];
+    detailsList().forEach(function (detail, index) {
+      if (detail.open) {
+        open.push(index);
+      }
+    });
+    sessionStorage.setItem(detailsKey, JSON.stringify(open));
+  }
+
+  function restoreOpenDetails() {
+    try {
+      var open = JSON.parse(sessionStorage.getItem(detailsKey) || "[]");
+      detailsList().forEach(function (detail, index) {
+        if (open.indexOf(index) !== -1) {
+          detail.open = true;
+        }
+      });
+    } catch (error) {
+      return;
+    }
+  }
+
+  function pauseRefresh() {
+    sessionStorage.setItem(pauseKey, String(Date.now() + pauseMs));
+    saveOpenDetails();
+    sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
+  }
+
+  function restoreScroll() {
+    var saved = Number(sessionStorage.getItem(scrollKey) || "0");
+    if (saved > 0) {
+      window.scrollTo(0, saved);
+    }
+  }
+
+  restoreOpenDetails();
+  restoreScroll();
+
+  document.addEventListener("toggle", function (event) {
+    if (event.target && event.target.tagName === "DETAILS" && !event.target.hasAttribute("data-live-summary")) {
+      pauseRefresh();
+    }
+  }, true);
+
+  window.addEventListener("scroll", function () {
+    if ((window.scrollY || 0) > 20) {
+      pauseRefresh();
+    }
+  }, { passive: true });
+
+  window.addEventListener("beforeunload", function () {
+    saveOpenDetails();
+    sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
+  });
+
+  if (Number(sessionStorage.getItem(pauseKey) || "0") > Date.now()) {
+    return;
+  }
+
+  window.setTimeout(function () {
+    saveOpenDetails();
+    sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
+    window.location.reload();
+  }, 1500);
+}());
+</script>"""
 
 
 def _read_optional_text(path: Path) -> str:

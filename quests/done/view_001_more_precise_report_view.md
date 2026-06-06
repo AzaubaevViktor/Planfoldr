@@ -114,6 +114,7 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - Task details now include a readable Source / Destination block with cycle/task origin and executor artifact destination.
 - Deeper line-level diff summaries are split into `view_002`.
 - Follow-up live-report fix rewrites `report.html` on status updates, adds file-friendly refresh while running, and shows current model stream text from `stream.jsonl` in the running task block.
+- Follow-up refresh fix replaced disruptive meta refresh with a pause-aware live script: opening `details` or scrolling pauses reloads and preserves expanded blocks/scroll position.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
 

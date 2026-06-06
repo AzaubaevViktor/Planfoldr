@@ -458,7 +458,10 @@ def test_live_report_shows_streaming_output_before_model_finishes(tmp_path: Path
 
     assert adapter.live_report_snapshots
     live_report = adapter.live_report_snapshots[0]
-    assert '<meta http-equiv="refresh" content="1">' in live_report
+    assert '<meta http-equiv="refresh"' not in live_report
+    assert "planfoldr-live-pause-until" in live_report
+    assert "window.location.reload()" in live_report
+    assert "data-live-summary" in live_report
     assert "executor_cycle / ask_model" in live_report
     assert "streaming output is updating" in live_report
     assert "live partial content" in live_report
