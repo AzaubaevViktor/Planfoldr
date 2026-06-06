@@ -1362,6 +1362,7 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
   var detailsKey = "planfoldr-live-open-details";
   var scrollKey = "planfoldr-live-scroll-y";
   var pauseMs = 10 * 60 * 1000;
+  var reloadTimer = null;
 
   function detailsList() {
     return Array.prototype.slice.call(document.querySelectorAll("details"));
@@ -1391,6 +1392,10 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
   }
 
   function pauseRefresh() {
+    if (reloadTimer !== null) {
+      window.clearTimeout(reloadTimer);
+      reloadTimer = null;
+    }
     sessionStorage.setItem(pauseKey, String(Date.now() + pauseMs));
     saveOpenDetails();
     sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
@@ -1407,7 +1412,7 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
   restoreScroll();
 
   document.addEventListener("toggle", function (event) {
-    if (event.target && event.target.tagName === "DETAILS" && !event.target.hasAttribute("data-live-summary")) {
+    if (event.target && event.target.tagName === "DETAILS") {
       pauseRefresh();
     }
   }, true);
@@ -1427,7 +1432,7 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
     return;
   }
 
-  window.setTimeout(function () {
+  reloadTimer = window.setTimeout(function () {
     saveOpenDetails();
     sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
     window.location.reload();
