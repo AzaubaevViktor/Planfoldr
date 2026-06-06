@@ -74,7 +74,7 @@ model: goal with X НУ with retry info
 cut with additional human readable info about model message (if it works now, with generated part of text)
 result: success
 
-cycle up/down to new_cycle_name
+cycle down from current_cycle_name to new_cycle_name
 
 ...
 

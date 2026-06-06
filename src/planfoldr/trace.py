@@ -899,7 +899,7 @@ class TraceWriter:
             if previous_cycle is not None and previous_cycle != cycle_path:
                 blocks.append(
                     "<p class='line muted'>"
-                    f"cycle up/down to {html.escape(cycle_path)}"
+                    f"{html.escape(_cycle_transition_text(previous_cycle, cycle_path))}"
                     "</p>"
                 )
             previous_cycle = cycle_path
@@ -1038,6 +1038,14 @@ def _task_flow_text(cycle: CycleResult, index: int) -> str:
     current_task = tasks[index].task_id if 0 <= index < len(tasks) else "unknown"
     next_task = tasks[index + 1].task_id if index + 1 < len(tasks) else "finish"
     return f"{cycle.cycle_path or cycle.cycle_id}: {previous_task} -> [{current_task}] -> {next_task}"
+
+
+def _cycle_transition_text(previous_cycle: str, cycle_path: str) -> str:
+    if cycle_path.startswith(f"{previous_cycle}/"):
+        return f"cycle down from {previous_cycle} to {cycle_path}"
+    if previous_cycle.startswith(f"{cycle_path}/"):
+        return f"cycle up from {previous_cycle} to {cycle_path}"
+    return f"cycle down from {previous_cycle} to {cycle_path}"
 
 
 def _task_summary_text(task: TaskResult) -> str:

@@ -14,6 +14,7 @@ NEVER EVER REMOVE MY PRETTY EXAMPLES
 
 - Read the relevant quest, docs, and nearby tests before editing code.
 - Treat quest examples as behavioral and layout contracts, not decorative hints. If an example shows a page, report, trace, CLI output, or artifact shape, make the default output match that shape directly.
+- Treat slash-separated wording in examples, such as `up/down`, as a list of alternatives to choose from, not literal text to copy into output.
 - Do not satisfy a flow-shaped example by adding fields to an unrelated existing structure. For report/UI work, if the example is chronological prose or block flow, the primary view must be chronological prose or block flow; tables may only remain as secondary/debug views unless the quest asks for a table.
 - When existing implementation notes conflict with a quest example, prefer the example and call out the conflict in implementation notes instead of preserving the old shape by inertia.
 - Active implementation work lives in `quests/`; completed quest files move to `quests/done/` in the same commit that finishes the work.

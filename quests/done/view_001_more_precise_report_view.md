@@ -64,7 +64,7 @@ model: <goal> with <budget> (retry 1/3)
   details: generated text while streaming
 result: success
 
-cycle up/down to new_cycle_name
+cycle down from current_cycle_name to new_cycle_name
 ```
 
 ## Constraints
@@ -186,7 +186,7 @@ Audit source: `nl -ba quests/done/view_001_more_precise_report_view.md` before t
 - [x] Line 64: `  details: generated text while streaming` checked and complete.
 - [x] Line 65: `result: success` checked and complete.
 - [x] Line 66: blank separator preserved.
-- [x] Line 67: `cycle up/down to new_cycle_name` checked and complete.
+- [x] Line 67: `cycle down from current_cycle_name to new_cycle_name` checked and complete.
 - [x] Line 68: `\`\`\`` checked and complete.
 - [x] Line 69: blank separator preserved.
 - [x] Line 70: `## Constraints` checked and complete.

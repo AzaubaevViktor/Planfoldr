@@ -50,7 +50,7 @@ def test_complex_notes_stub_scenario_repairs_mixed_case_regression(tmp_path: Pat
     report = tmp_path / loaded.document.id / "notes-stub" / "report.html"
     report_text = report.read_text(encoding="utf-8")
     assert "ollama_notes_plan: start -&gt; [plan_notes_project] -&gt; finish" in report_text
-    assert "cycle up/down to ollama_notes_repair" in report_text
+    assert "cycle down from ollama_notes_plan to ollama_notes_repair" in report_text
     assert "ollama_notes_repair: record_test_inventory -&gt; [run_regression_tests] -&gt; repair_notes_project" in report_text
     assert "result: failure (Command exited 1)" in report_text
     assert "verify_test_inventory" in report_text

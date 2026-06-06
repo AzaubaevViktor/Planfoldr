@@ -127,7 +127,48 @@ def test_trace_records_cycle_membership_for_repeated_task_ids(tmp_path: Path) ->
         encoding="utf-8"
     )
     assert "report_first_cycle: start -&gt; [shared_task] -&gt; finish" in report_text
+    assert "cycle down from report_first_cycle to report_second_cycle" in report_text
     assert "report_second_cycle: start -&gt; [shared_task] -&gt; finish" in report_text
+
+
+def test_report_labels_cycle_down_and_cycle_up_transitions(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "multi_cycle_report_scenario.yaml")
+    result = ScenarioResult(
+        scenario_id=loaded.document.id,
+        status=Outcome.SUCCESS.value,
+        cycle_results=[
+            CycleResult(
+                cycle_id="parent",
+                cycle_path="parent",
+                status=Outcome.SUCCESS.value,
+                task_results=[make_task_result("root_task", Outcome.SUCCESS.value)],
+            ),
+            CycleResult(
+                cycle_id="child",
+                cycle_path="parent/child",
+                status=Outcome.SUCCESS.value,
+                task_results=[make_task_result("child_task", Outcome.SUCCESS.value)],
+            ),
+            CycleResult(
+                cycle_id="parent",
+                cycle_path="parent",
+                status=Outcome.SUCCESS.value,
+                task_results=[make_task_result("return_task", Outcome.SUCCESS.value)],
+            ),
+        ],
+    )
+
+    TraceWriter(
+        loaded,
+        result,
+        trace_dir=tmp_path / "cycle-direction" / "trace",
+        report_path=tmp_path / "cycle-direction" / "report.html",
+    ).write()
+
+    report_text = (tmp_path / "cycle-direction" / "report.html").read_text(encoding="utf-8")
+    assert "cycle down from parent to parent/child" in report_text
+    assert "cycle up from parent/child to parent" in report_text
+    assert "cycle up/down" not in report_text
 
 
 def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:
