@@ -231,7 +231,9 @@ class OllamaModelAdapter(ModelAdapter):
                 "content_chars": len(content),
                 "thinking_chars": sum(len(part) for part in thinking_parts),
                 "tokens": _provider_tokens(final_payload),
+                "cost_usd": 0.0,
             },
+            budget_cost=0.0,
         )
 
 
@@ -253,6 +255,7 @@ class ExecutorRegistry:
     def __call__(self, task: Task) -> TaskResult:
         before = self.budget_tracker.snapshot()
         try:
+            self.budget_tracker.consume_iteration()
             if task.executor.kind == "command":
                 result = self._execute_command(task)
             elif task.executor.kind == "model":
@@ -372,8 +375,10 @@ class ExecutorRegistry:
                 **fields,
             ),
         )
-        if response.budget_cost:
-            self.budget_tracker.consume_model_budget(response.budget_cost)
+        self.budget_tracker.consume_model_usage(
+            tokens=_model_response_tokens(response),
+            cost_usd=_model_response_cost_usd(response),
+        )
         output = _classify_model_response_output(response)
         status = str(output.get("status", Outcome.FAILURE.value))
         return make_task_result(
@@ -586,6 +591,20 @@ def _provider_tokens(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "prompt": payload.get("prompt_eval_count"),
         "source": "provider",
     }
+
+
+def _model_response_tokens(response: ModelResponse) -> Optional[Mapping[str, Any]]:
+    tokens = response.metadata.get("tokens")
+    return tokens if isinstance(tokens, Mapping) else None
+
+
+def _model_response_cost_usd(response: ModelResponse) -> float:
+    metadata_cost = response.metadata.get("cost_usd")
+    if isinstance(metadata_cost, bool):
+        return response.budget_cost
+    if isinstance(metadata_cost, (int, float)):
+        return float(metadata_cost)
+    return response.budget_cost
 
 
 def _line_change_counts(before: str, after: str) -> tuple[int, int]:

@@ -61,6 +61,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert scenario_trace["definition"] == "scenario_definition.json"
     assert scenario_trace["cycles"][0]["artifact"] == "cycles/executor_cycle.json"
     assert scenario_definition["id"] == "executor_scenario"
+    assert status["budget"]["usage"]["iterations"] == 2
     assert status["budget"]["remaining"]["max_model_calls"] == 2
     assert any(item["status"] == "succeeded" for item in status["work"])
     manifest = json.loads((trace_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -76,6 +77,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert report_data["scenario"]["status"] == "success"
     assert report_data["cycle_artifacts"][0]["path"] == "trace/cycles/executor_cycle.json"
     assert report_data["task_executions"][0]["cycle_id"] == "executor_cycle"
+    assert report_data["task_executions"][0]["budget_after"]["usage"]["iterations"] == 1
     assert report_data["task_executions"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
     assert report_data["task_inputs"][0]["path"].startswith("trace/inputs/")
     assert report_data["task_inputs"][0]["task_artifact_dir"].startswith("trace/tasks/model/")
@@ -92,6 +94,9 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "result: success" in report_text
     assert "cut with additional human-readable info about execution process" in report_text
     assert "Source / Destination" in report_text
+    assert "&quot;iterations&quot;" in report_text
+    assert "&quot;model_tokens&quot;" in report_text
+    assert "&quot;model_cost_usd&quot;" in report_text
     assert "trace/tasks/model/" in report_text
     assert "<table" not in report_text
     assert "Task Executions" not in report_text

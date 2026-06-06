@@ -44,6 +44,26 @@ def test_model_budget_and_call_limits_are_tracked() -> None:
     assert tracker.usage.model_calls == 2
 
 
+def test_model_tokens_and_dollar_cost_are_tracked_separately() -> None:
+    tracker = BudgetTracker(Budgets(max_model_tokens=10, max_model_cost_usd=0.05))
+
+    tracker.consume_model_usage(
+        tokens={"prompt": 3, "generated": 4, "source": "provider"},
+        cost_usd=0.02,
+    )
+
+    assert tracker.snapshot()["usage"]["model_tokens"] == 7
+    assert tracker.snapshot()["usage"]["model_cost_usd"] == 0.02
+
+    with pytest.raises(BudgetExceeded) as exc_info:
+        tracker.consume_model_usage(
+            tokens={"prompt": 2, "generated": 2, "source": "provider"},
+            cost_usd=0.0,
+        )
+
+    assert exc_info.value.report.limit == "max_model_tokens"
+
+
 def test_tool_allowlist_and_deny_rules_are_enforced() -> None:
     engine = PermissionEngine(
         constraints=Constraints(tools=ToolsConstraint(allow=["pytest", "git"], deny=["git push"])),

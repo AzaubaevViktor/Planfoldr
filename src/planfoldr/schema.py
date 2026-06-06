@@ -35,6 +35,8 @@ class Budgets(StrictModel):
     max_tool_calls: Optional[int] = None
     max_model_calls: Optional[int] = None
     max_model_budget: Optional[float] = None
+    max_model_tokens: Optional[int] = None
+    max_model_cost_usd: Optional[float] = None
     max_cpu_time: Optional[int] = None
     max_ram: Optional[int] = None
 

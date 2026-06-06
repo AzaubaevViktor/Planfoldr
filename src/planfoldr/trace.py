@@ -1137,6 +1137,8 @@ def _initial_status(loaded: LoadedScenario, run_id: str) -> Dict[str, Any]:
                     "tool_calls": 0,
                     "model_calls": 0,
                     "model_budget": 0.0,
+                    "model_tokens": 0,
+                    "model_cost_usd": 0.0,
                     "cpu_time": 0.0,
                 },
                 "ram_enforcement": "unsupported" if loaded.document.budgets.max_ram is not None else None,
@@ -1155,6 +1157,8 @@ def _budget_with_remaining(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "max_tool_calls": "tool_calls",
         "max_model_calls": "model_calls",
         "max_model_budget": "model_budget",
+        "max_model_tokens": "model_tokens",
+        "max_model_cost_usd": "model_cost_usd",
         "max_cpu_time": "cpu_time",
     }
     for limit, used_key in pairs.items():

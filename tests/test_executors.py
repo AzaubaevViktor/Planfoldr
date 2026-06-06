@@ -27,6 +27,28 @@ def test_stub_model_and_command_run_through_runtime_path() -> None:
     assert [task.task_id for task in result.task_results] == ["ask_model", "run_command"]
     assert result.task_results[0].metadata["prompt"]["hash"].startswith("sha256:")
     assert result.task_results[1].output["stdout"] == "executor ok\n"
+    assert result.task_results[0].budget_after["usage"]["iterations"] == 1
+    assert result.task_results[1].budget_after["usage"]["iterations"] == 2
+
+
+def test_model_response_token_and_cost_usage_hits_budget_snapshot() -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    task = loaded.cycles[0].document.tasks[0]
+    budgets = loaded.document.budgets.model_copy(update={"max_model_tokens": 20, "max_model_cost_usd": 0.10})
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(budgets),
+        prompts=loaded.cycles[0].prompts,
+        model_adapter=UsageModelAdapter(),
+    )
+
+    result = registry(task)
+
+    assert result.status == "success"
+    assert result.budget_after["usage"]["model_tokens"] == 12
+    assert result.budget_after["usage"]["model_cost_usd"] == 0.03
+    assert result.budget_after["remaining"]["max_model_tokens"] == 8
+    assert result.budget_after["remaining"]["max_model_cost_usd"] == 0.07
 
 
 def test_disallowed_command_returns_need_permission() -> None:
@@ -279,4 +301,17 @@ class RawTextModelAdapter:
             output={"status": "failure", "reason": "raw text"},
             raw=self.text,
             metadata={"adapter": "raw-text"},
+        )
+
+
+class UsageModelAdapter:
+    def generate(self, *, task, model, messages, config, tools, progress_callback=None):
+        return ModelResponse(
+            output={"status": "success"},
+            raw='{"status":"success"}',
+            metadata={
+                "adapter": "usage",
+                "tokens": {"prompt": 5, "generated": 7, "source": "provider"},
+                "cost_usd": 0.03,
+            },
         )

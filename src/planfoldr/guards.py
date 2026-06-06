@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from planfoldr.runtime import Outcome, TaskResult, make_task_result
 from planfoldr.schema import Budgets, Constraints
@@ -47,6 +47,8 @@ class BudgetUsage:
     tool_calls: int = 0
     model_calls: int = 0
     model_budget: float = 0.0
+    model_tokens: int = 0
+    model_cost_usd: float = 0.0
     cpu_time: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -55,6 +57,8 @@ class BudgetUsage:
             "tool_calls": self.tool_calls,
             "model_calls": self.model_calls,
             "model_budget": self.model_budget,
+            "model_tokens": self.model_tokens,
+            "model_cost_usd": self.model_cost_usd,
             "cpu_time": self.cpu_time,
         }
 
@@ -65,9 +69,12 @@ class BudgetTracker:
     usage: BudgetUsage = field(default_factory=BudgetUsage)
 
     def snapshot(self) -> Dict[str, Any]:
+        configured = self.configured.model_dump(mode="json")
+        usage = self.usage.to_dict()
         return {
-            "configured": self.configured.model_dump(mode="json"),
-            "usage": self.usage.to_dict(),
+            "configured": configured,
+            "usage": usage,
+            "remaining": _budget_remaining(configured, usage),
             "ram_enforcement": "unsupported" if self.configured.max_ram is not None else None,
         }
 
@@ -81,23 +88,39 @@ class BudgetTracker:
 
     def consume_model_call(self, *, budget_cost: float = 0.0) -> None:
         self._ensure_available("max_model_calls", self.usage.model_calls, 1, self.configured.max_model_calls)
-        self._ensure_available(
-            "max_model_budget",
-            self.usage.model_budget,
-            budget_cost,
-            self.configured.max_model_budget,
-        )
+        self._ensure_model_cost_available(budget_cost)
         self.usage.model_calls += 1
-        self.usage.model_budget += budget_cost
+        self._add_model_cost(budget_cost)
 
     def consume_model_budget(self, budget_cost: float) -> None:
+        self._ensure_model_cost_available(budget_cost)
+        self._add_model_cost(budget_cost)
+
+    def consume_model_tokens(self, tokens: int) -> None:
         self._ensure_available(
-            "max_model_budget",
-            self.usage.model_budget,
-            budget_cost,
-            self.configured.max_model_budget,
+            "max_model_tokens",
+            self.usage.model_tokens,
+            tokens,
+            self.configured.max_model_tokens,
         )
-        self.usage.model_budget += budget_cost
+        self.usage.model_tokens += tokens
+
+    def consume_model_usage(
+        self,
+        *,
+        tokens: Optional[Mapping[str, Any]] = None,
+        cost_usd: float = 0.0,
+    ) -> None:
+        token_count = _token_total(tokens)
+        self._ensure_available(
+            "max_model_tokens",
+            self.usage.model_tokens,
+            token_count,
+            self.configured.max_model_tokens,
+        )
+        self._ensure_model_cost_available(cost_usd)
+        self.usage.model_tokens += token_count
+        self._add_model_cost(cost_usd)
 
     def consume_cpu_time(self, seconds: float) -> None:
         self._ensure_available("max_cpu_time", self.usage.cpu_time, seconds, self.configured.max_cpu_time)
@@ -114,6 +137,57 @@ class BudgetTracker:
                     reason=f"{limit} exhausted: used {used}, attempted {attempted}, maximum {maximum}",
                 )
             )
+
+    def _ensure_model_cost_available(self, cost_usd: float) -> None:
+        self._ensure_available(
+            "max_model_budget",
+            self.usage.model_budget,
+            cost_usd,
+            self.configured.max_model_budget,
+        )
+        self._ensure_available(
+            "max_model_cost_usd",
+            self.usage.model_cost_usd,
+            cost_usd,
+            self.configured.max_model_cost_usd,
+        )
+
+    def _add_model_cost(self, cost_usd: float) -> None:
+        self.usage.model_budget += cost_usd
+        self.usage.model_cost_usd += cost_usd
+
+
+def _token_total(tokens: Optional[Mapping[str, Any]]) -> int:
+    if not isinstance(tokens, Mapping):
+        return 0
+    total = 0
+    for key in ("prompt", "generated"):
+        value = tokens.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            total += value
+        elif isinstance(value, float) and value.is_integer():
+            total += int(value)
+    return total
+
+
+def _budget_remaining(configured: Mapping[str, Any], usage: Mapping[str, Any]) -> Dict[str, Any]:
+    pairs = {
+        "max_iterations": "iterations",
+        "max_tool_calls": "tool_calls",
+        "max_model_calls": "model_calls",
+        "max_model_budget": "model_budget",
+        "max_model_tokens": "model_tokens",
+        "max_model_cost_usd": "model_cost_usd",
+        "max_cpu_time": "cpu_time",
+    }
+    remaining: Dict[str, Any] = {}
+    for limit, used_key in pairs.items():
+        maximum = configured.get(limit)
+        used = usage.get(used_key, 0)
+        remaining[limit] = None if maximum is None else max(0, maximum - used)
+    return remaining
 
 
 @dataclass(frozen=True)
