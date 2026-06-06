@@ -102,6 +102,7 @@ Generated after `view_001` added basic file change events.
 - Line-by-line audit added visible flow blocks for cycle/task context, command summaries and model summaries matching the example flow.
 - Line-by-line audit added `before_bytes`, `after_bytes`, `before_sha256` and `after_sha256` to file change records, with expanded report details showing byte/hash transitions.
 - Added minimal `write_files` delete support through file items with `delete: true`.
+- Follow-up strict-shape check removed extra visible top/bottom report controls and sections; generated report bodies now end immediately after the example-style flow.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
 
@@ -156,10 +157,12 @@ Audit source: `nl -ba quests/done/view_002_short_diff_summary.md` before this se
 - [x] Line 91: Task type is persisted in trace data and visible in task details/status artifacts.
 - [x] Lines 92-94: `report.html` has both current status from `status.json` and the main execution flow with extra info.
 - [x] Line 96: `Implementation Notes` section remains present.
-- [x] Lines 98-104: Implementation notes remain accurate after replacing the old table with example-style flow blocks.
+- [x] Lines 98-104: Implementation notes remain accurate after replacing the old table with example-style flow blocks and removing extra report top/bottom sections.
 - [x] Verification command: `tests/test_trace.py` passed with `12 passed`.
 - [x] Verification command: focused flow/diff/error/stream tests passed with `5 passed`.
 - [x] Verification command: full default suite passed with `64 passed, 1 skipped`.
+- [x] Follow-up verification command: `tests/test_trace.py` passed with `12 passed` after enforcing no table, no refresh button, no execution-log section and no script tail.
+- [x] Follow-up verification command: full default suite passed with `64 passed, 1 skipped`; inspected generated reports only matched `</main>` after flow, with no table/script/log/button tail.
 
 ## Completion Audit
 
