@@ -2010,11 +2010,9 @@ def _status_work_flow_html(status: Dict[str, Any], *, trace_dir: Optional[Path] 
     active_cycle_id = status.get("current_cycle_id")
     active_task_id = status.get("current_task_id")
     blocks = []
-    for index, item in enumerate(work):
-        if item.get("status") == "queued":
-            continue
-        previous_task = _adjacent_work_task_id(work, index, direction=-1, default="start")
-        next_task = _adjacent_work_task_id(work, index, direction=1, default="finish")
+    for index, item in enumerate(visible_work):
+        previous_task = _adjacent_work_task_id(visible_work, index, direction=-1, default="start")
+        next_task = _adjacent_work_task_id(visible_work, index, direction=1, default="finish")
         current_task = item.get("task_id") or "unknown"
         cycle_id = item.get("cycle_id") or "unknown"
         executor = item.get("executor_kind") or item.get("task_type") or "task"

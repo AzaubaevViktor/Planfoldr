@@ -185,8 +185,9 @@ def test_live_work_flow_marks_active_cycle_level_and_task() -> None:
     ) in report_text
     assert (
         "<p class='line task-level-current'>ollama_notes_repair: setup_workspace -&gt; "
-        "[<strong>setup_repo</strong>] -&gt; generate_notes_project</p>"
+        "[<strong>setup_repo</strong>] -&gt; finish</p>"
     ) in report_text
+    assert "generate_notes_project" not in report_text
     assert "result: queued" not in report_text
     assert "ollama_notes_plan: plan_notes_project -&gt; [setup_workspace]" not in report_text
 
@@ -436,7 +437,8 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     report_text = (tmp_path / "executor_scenario" / "error-run" / "report.html").read_text(encoding="utf-8")
     assert "Starting <code>executor_scenario</code>" in report_text
     assert "Status</strong><br>error" in report_text
-    assert "executor_cycle: start -&gt; [ask_model] -&gt; run_command" in report_text
+    assert "executor_cycle: start -&gt; [ask_model] -&gt; finish" in report_text
+    assert "run_command" not in report_text
     assert "result: failed (boom in ask_model)" in report_text
     assert "<table" not in report_text
     assert "Refresh Report Data" not in report_text
@@ -546,10 +548,8 @@ def test_live_report_shows_streaming_output_before_model_finishes(tmp_path: Path
     assert "Generation" in live_report
     assert "live partial content" in live_report
     assert "result: running" in live_report
-    assert (
-        "executor_cycle: start -&gt; [<strong>ask_model</strong>] -&gt; run_command"
-        in live_report
-    )
+    assert "executor_cycle: start -&gt; [<strong>ask_model</strong>] -&gt; finish" in live_report
+    assert "run_command" not in live_report
     assert "queued" not in live_report
 
 
