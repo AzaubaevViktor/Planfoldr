@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python -m pytest -q)",
+      "Bash(sed -n '90,110p' /Users/v-korovin/Projects/Planfoldr/tests/test_trace.py)",
+      "Bash(sed -n '500,570p' /Users/v-korovin/Projects/Planfoldr/tests/test_trace.py)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
