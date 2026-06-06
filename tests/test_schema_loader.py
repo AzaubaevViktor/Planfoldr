@@ -26,6 +26,18 @@ def test_loads_documented_example_scenario() -> None:
     assert "plan_cli_todo_app" in loaded.cycles[0].prompts
 
 
+def test_loads_complex_notes_ollama_example_scenario() -> None:
+    loaded = load_scenario(EXAMPLES / "ollama_notes_app.yaml")
+
+    assert loaded.document.id == "ollama_notes_app_demo"
+    assert [cycle.document.id for cycle in loaded.cycles] == ["ollama_notes_plan", "ollama_notes_repair"]
+    assert loaded.cycles[0].document.entrypoint == "plan_notes_project"
+    assert loaded.cycles[1].document.entrypoint == "setup_workspace"
+    assert "ollama_plan_notes_app" in loaded.cycles[0].prompts
+    assert "ollama_generate_notes_app" in loaded.cycles[1].prompts
+    assert "ollama_repair_notes_app" in loaded.cycles[1].prompts
+
+
 def test_validation_error_names_file_yaml_path_expected_and_actual() -> None:
     with pytest.raises(SchemaLoadError) as exc_info:
         load_scenario(FIXTURES / "invalid_missing_goal.yaml")

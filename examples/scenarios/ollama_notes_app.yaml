@@ -1,0 +1,53 @@
+id: ollama_notes_app_demo
+goal: Generate, regress, repair and verify a Python notes knowledge-base project through local Ollama.
+
+inputs:
+  workspace_root: "{{ runtime.workspace_dir }}"
+  repository_path: "{{ runtime.workspace_dir }}/project"
+  test_inventory_path: "{{ runtime.run_dir }}/test_inventory.json"
+
+outputs:
+  report_path: "{{ runtime.run_dir }}/report.html"
+  trace_path: "{{ runtime.run_dir }}/trace"
+
+required_conditions:
+  - id: repaired_tests_pass
+    verifier_task: verify_repaired
+  - id: test_inventory_preserved
+    verifier_task: verify_test_inventory
+
+constraints:
+  tools:
+    allow:
+      - git
+      - python
+      - write_files
+    deny:
+      - git push
+  filesystem:
+    allow_read:
+      - .
+      - "{{ runtime.run_dir }}"
+    allow_write:
+      - "{{ runtime.run_dir }}"
+
+budgets:
+  max_iterations: 20
+  max_tool_calls: 18
+  max_model_calls: 9
+  max_cpu_time: 90
+
+context_policy:
+  default_task_parent_read: true
+  default_task_parent_write: false
+
+defaults:
+  model:
+    provider: ollama
+    name: carstenuhlig/omnicoder-9b:latest
+  retry:
+    invalid_output: 2
+
+cycles:
+  - file: ./cycles/ollama_notes_plan.yaml
+  - file: ./cycles/ollama_notes_repair.yaml

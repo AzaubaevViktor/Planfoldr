@@ -1,0 +1,247 @@
+id: ollama_notes_repair
+goal: Generate a notes project, prove a regression, repair it and verify test inventory.
+entrypoint: setup_workspace
+
+budgets:
+  max_iterations: 18
+  max_tool_calls: 18
+  max_model_calls: 6
+  max_cpu_time: 90
+
+tasks:
+  - id: setup_workspace
+    type: command
+    task: Create the generated project workspace.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} -c \"from pathlib import Path; Path('{{ inputs.repository_path }}').mkdir(parents=True, exist_ok=True)\""
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: setup_repo
+    type: command
+    task: Create a generated git repository.
+    executor:
+      kind: command
+      command: git init {{ inputs.repository_path }}
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: generate_notes_project
+    type: model
+    task: Generate the notes knowledge-base project files.
+    executor:
+      kind: model
+      model:
+        provider: ollama
+        name: carstenuhlig/omnicoder-9b:latest
+      prompt:
+        id: ollama_generate_notes_app
+        file: ../../prompts/ollama_generate_notes_app.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+        - files
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+        files:
+          type: array
+  - id: create_files
+    type: tool
+    task: Materialize generated files.
+    executor:
+      kind: tool
+      tool: write_files
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: run_initial_tests
+    type: verify
+    task: Run generated project tests before injecting the regression test.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} -m pytest"
+      cwd: "{{ inputs.repository_path }}"
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: inject_regression_test
+    type: command
+    task: Add a deterministic mixed-case tag regression test.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} examples/scripts/inject_notes_regression_test.py {{ inputs.repository_path }}"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: record_test_inventory
+    type: command
+    task: Record test files that must survive repair.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} examples/scripts/notes_test_inventory.py record {{ inputs.repository_path }} {{ inputs.test_inventory_path }}"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: run_regression_tests
+    type: verify
+    task: Confirm the injected mixed-case tag regression fails before repair.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} -m pytest"
+      cwd: "{{ inputs.repository_path }}"
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: repair_notes_project
+    type: model
+    task: Repair the notes project after the mixed-case tag regression.
+    executor:
+      kind: model
+      model:
+        provider: ollama
+        name: carstenuhlig/omnicoder-9b:latest
+      prompt:
+        id: ollama_repair_notes_app
+        file: ../../prompts/ollama_repair_notes_app.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+        - files
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+        files:
+          type: array
+  - id: apply_repair
+    type: tool
+    task: Apply repaired files.
+    executor:
+      kind: tool
+      tool: write_files
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: verify_repaired
+    type: verify
+    task: Run the full suite after repair.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} -m pytest"
+      cwd: "{{ inputs.repository_path }}"
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+  - id: verify_test_inventory
+    type: verify
+    task: Ensure tests were not deleted to make the suite pass.
+    executor:
+      kind: command
+      command: "{{ runtime.python }} examples/scripts/notes_test_inventory.py verify {{ inputs.repository_path }} {{ inputs.test_inventory_path }}"
+      cwd: .
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+
+links:
+  setup_workspace:
+    success: setup_repo
+    failure: fail
+    need_permission: fail
+  setup_repo:
+    success: generate_notes_project
+    failure: fail
+    need_permission: fail
+  generate_notes_project:
+    success: create_files
+    failure: fail
+    retry_exceeded: fail
+    budget_exceeded: fail
+  create_files:
+    success: run_initial_tests
+    failure: fail
+    need_permission: fail
+  run_initial_tests:
+    success: inject_regression_test
+    failure: repair_notes_project
+    budget_exceeded: fail
+    need_permission: fail
+  inject_regression_test:
+    success: record_test_inventory
+    failure: fail
+    need_permission: fail
+  record_test_inventory:
+    success: run_regression_tests
+    failure: fail
+    need_permission: fail
+  run_regression_tests:
+    success: repair_notes_project
+    failure: repair_notes_project
+    budget_exceeded: fail
+    need_permission: fail
+  repair_notes_project:
+    success: apply_repair
+    failure: fail
+    retry_exceeded: fail
+    budget_exceeded: fail
+  apply_repair:
+    success: verify_repaired
+    failure: fail
+    need_permission: fail
+  verify_repaired:
+    success: verify_test_inventory
+    failure: repair_notes_project
+    budget_exceeded: fail
+    need_permission: fail
+  verify_test_inventory:
+    success: success
+    failure: fail
+    budget_exceeded: fail
+    need_permission: fail
+
+nested_cycles: []

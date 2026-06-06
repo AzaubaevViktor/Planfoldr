@@ -131,3 +131,10 @@ Checked: 2026-06-06.
 ## Implementation Notes
 
 - Queue after the foundational introspection, retry, tool-call and ticket-tree work; this scenario should validate those pieces together.
+- Partial MVP added before `orchestration_020` is complete: `examples/scenarios/ollama_notes_app.yaml` runs two sequential cycles, `ollama_notes_plan` and `ollama_notes_repair`, so it exercises supervision-plan output plus execution/repair evidence within the current runtime.
+- The new notes scenario asks a local model to create a multi-file dependency-free `notes_app` package with CLI, tests, `AGENTS.md` and `ARCHITECTURE.md`, then injects a deterministic mixed-case tag regression test, records test inventory, confirms the regression, repairs, reruns the full suite and verifies the recorded test files still exist.
+- Added helper scripts `examples/scripts/inject_notes_regression_test.py` and `examples/scripts/notes_test_inventory.py` for deterministic regression and inventory checks.
+- Added default-suite coverage for scenario loading, hidden notes-project contract behavior and a stubbed fail-before-repair loop in `tests/test_ollama_notes_e2e.py`; optional real Ollama coverage is gated by `PLANFOLDR_RUN_OLLAMA_COMPLEX_E2E=1`.
+- Verification run: `.venv/bin/python -m pytest tests/test_schema_loader.py::test_loads_complex_notes_ollama_example_scenario tests/test_ollama_notes_e2e.py::test_hidden_notes_contract_accepts_reference_project tests/test_ollama_notes_e2e.py::test_complex_notes_stub_scenario_repairs_mixed_case_regression -q` passed with `3 passed`.
+- Verification run: `.venv/bin/python -m pytest -q` passed with `67 passed, 2 skipped`.
+- Inspected generated stub report and `trace/report_data.json`; task statuses show `run_regression_tests` failed before `repair_notes_project`, then `verify_repaired` and `verify_test_inventory` succeeded. Full `scenario_018` remains blocked because current runtime still does not execute true nested delegation or upper-cycle evidence gates from `orchestration_020`.

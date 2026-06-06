@@ -1,0 +1,48 @@
+id: ollama_notes_plan
+goal: Create a bounded supervision plan for the notes repair scenario.
+entrypoint: plan_notes_project
+
+budgets:
+  max_iterations: 2
+  max_tool_calls: 0
+  max_model_calls: 3
+  max_cpu_time: 10
+
+tasks:
+  - id: plan_notes_project
+    type: model
+    task: Plan the notes knowledge-base generation and repair flow.
+    executor:
+      kind: model
+      model:
+        provider: ollama
+        name: carstenuhlig/omnicoder-9b:latest
+      prompt:
+        id: ollama_plan_notes_app
+        file: ../../prompts/ollama_plan_notes_app.md
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required:
+        - status
+        - plan
+        - evidence_required
+      properties:
+        status:
+          enum:
+            - success
+            - failure
+        plan:
+          type: array
+        evidence_required:
+          type: array
+
+links:
+  plan_notes_project:
+    success: success
+    failure: fail
+    retry_exceeded: fail
+    budget_exceeded: fail
+
+nested_cycles: []
