@@ -13,6 +13,9 @@ NEVER EVER REMOVE MY PRETTY EXAMPLES
 ## Project Workflow
 
 - Read the relevant quest, docs, and nearby tests before editing code.
+- Treat quest examples as behavioral and layout contracts, not decorative hints. If an example shows a page, report, trace, CLI output, or artifact shape, make the default output match that shape directly.
+- Do not satisfy a flow-shaped example by adding fields to an unrelated existing structure. For report/UI work, if the example is chronological prose or block flow, the primary view must be chronological prose or block flow; tables may only remain as secondary/debug views unless the quest asks for a table.
+- When existing implementation notes conflict with a quest example, prefer the example and call out the conflict in implementation notes instead of preserving the old shape by inertia.
 - Active implementation work lives in `quests/`; completed quest files move to `quests/done/` in the same commit that finishes the work.
 - Follow quest order by default. If the user names a specific quest, do that quest first and keep the change scoped to it.
 - When finishing a quest, update its implementation notes or handoff section so the next agent can resume without rereading the whole session history.
