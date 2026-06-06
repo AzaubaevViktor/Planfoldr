@@ -48,6 +48,7 @@ def run_and_trace(
         logger.write("scenario_error", error_type=type(exc).__name__, reason=str(exc))
         status_writer.update("scenario_error", status="error", reason=str(exc), current_task_id=None)
         _write_live_report_data(loaded, trace_dir=trace_dir, run_id=run_id, logger=logger)
+        _write_live_report_shell(loaded, report_path=report_path, trace_dir=trace_dir, execution_log_path=logger.path)
         raise
     logger.write("scenario_finish", status=result.status, reason=result.reason)
     status_writer.update("scenario_finish", status=result.status, reason=result.reason, current_task_id=None)
@@ -852,22 +853,6 @@ class TraceWriter:
         )
 
     def _write_report(self) -> None:
-        rows = "\n".join(
-            self._task_table_row_html(cycle, task, index)
-            for cycle in self.result.cycle_results
-            for index, task in enumerate(cycle.task_results)
-        )
-        cycles = "\n".join(
-            "<li>"
-            f"<details><summary>{html.escape(cycle.cycle_path or cycle.cycle_id)} "
-            f"<strong>{html.escape(cycle.status)}</strong></summary>"
-            f"{self._cycle_task_list_html(cycle)}"
-            "</details>"
-            "</li>"
-            for cycle in self.result.cycle_results
-        )
-        model_sections = self._model_report_sections()
-        input_sections = self._input_report_sections()
         status_snapshot = _read_json_optional(self.trace_dir / "status.json")
         manifest_snapshot = self._manifest()
         document = f"""<!doctype html>
@@ -876,108 +861,90 @@ class TraceWriter:
   <meta charset="utf-8">
   <title>Planfoldr Report: {html.escape(self.loaded.document.id)}</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }}
     code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; }}
-    details {{ border: 1px solid #d1d5db; margin: 1rem 0; padding: 0.75rem; }}
+    details {{ border-left: 3px solid #d1d5db; margin: 0.5rem 0 1rem; padding: 0.5rem 0 0.5rem 0.75rem; }}
     summary {{ cursor: pointer; font-weight: 600; }}
     pre {{ background: #111827; color: #f9fafb; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }}
     .muted {{ color: #6b7280; }}
-    .toolbar {{ display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }}
-    .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; }}
-    .metric {{ border: 1px solid #d1d5db; padding: 0.75rem; }}
-    button {{ cursor: pointer; }}
+    .flow {{ max-width: 90rem; }}
+    .task {{ border-top: 1px solid #e5e7eb; padding: 1rem 0; }}
+    .line {{ margin: 0.25rem 0; }}
+    .result-success {{ color: #166534; }}
+    .result-failure, .result-error {{ color: #991b1b; }}
+    .diff {{ font-weight: 600; }}
   </style>
 </head>
 <body>
-  <h1>{html.escape(self.loaded.document.id)}</h1>
-  <div class="toolbar">
-    <button id="refresh-report" type="button">Refresh Report Data</button>
-    <span class="muted">Snapshot loaded at <span id="snapshot-loaded-at">{html.escape(_timestamp())}</span></span>
-  </div>
-  <p>Status: <strong>{html.escape(self.result.status)}</strong></p>
-  <p>Trace manifest: <code>{html.escape(str(self.trace_dir / "manifest.json"))}</code></p>
-  <p>Execution log: <code>{html.escape(str(self.execution_log_path or ""))}</code></p>
-  <h2>Live Status</h2>
-  <div id="live-status">{_status_html(status_snapshot)}</div>
-  <h2>Cycles</h2>
-  <ul>{cycles}</ul>
-  <h2>Task Executions</h2>
-  <label>Filter by task <input id="task-filter" type="search"></label>
-  <table id="tasks">
-    <thead><tr><th>Flow</th><th>Cycle</th><th>Task</th><th>Summary</th><th>Status</th><th>Reason</th><th>Diff</th><th>Details</th></tr></thead>
-    <tbody id="task-rows">{rows}</tbody>
-  </table>
-  <h2>Task Inputs</h2>
-  <div id="task-inputs">{input_sections}</div>
-  <h2>Model Text</h2>
-  <div id="model-text">{model_sections}</div>
-  <h2>Execution Log</h2>
-  <pre id="execution-log">{html.escape(_read_optional_text(self.execution_log_path) if self.execution_log_path is not None else "")}</pre>
+  <main class="flow">
+    <h1>Starting <code>{html.escape(self.loaded.document.id)}</code></h1>
+    <details>
+      <summary>cut with additional human-readable info</summary>
+      <p>Status: <strong>{html.escape(self.result.status)}</strong></p>
+      <p>Trace manifest: <code>{html.escape(str(self.trace_dir / "manifest.json"))}</code></p>
+      <p>Execution log: <code>{html.escape(str(self.execution_log_path or ""))}</code></p>
+      {_report_pre('status.json', json.dumps(status_snapshot, indent=2, sort_keys=True))}
+    </details>
+    <section id="execution-flow">{self._execution_flow_html()}</section>
+    <details>
+      <summary>cut with execution log</summary>
+      <pre id="execution-log">{html.escape(_read_optional_text(self.execution_log_path) if self.execution_log_path is not None else "")}</pre>
+    </details>
+  </main>
   <script id="report-snapshot" type="application/json">{html.escape(json.dumps({"manifest": manifest_snapshot, "status": status_snapshot}, sort_keys=True))}</script>
-  {_report_refresh_script(auto_refresh_condition="(snapshot.status || {}).status === 'running'")}
 </body>
 </html>
 """
         self.report_path.write_text(document, encoding="utf-8")
 
-    def _task_table_row_html(self, cycle: CycleResult, task: TaskResult, index: int) -> str:
-        return (
-            "<tr>"
-            f"<td>{html.escape(_task_flow_text(cycle, index))}</td>"
-            f"<td>{html.escape(cycle.cycle_id)}</td>"
-            f"<td>{html.escape(task.task_id)}</td>"
-            f"<td>{html.escape(_task_summary_text(task))}</td>"
-            f"<td>{html.escape(task.status)}</td>"
-            f"<td>{html.escape(task.reason or '')}</td>"
-            f"<td>{_short_diff_summary_html(task.output.get('diff_summary'))}</td>"
-            f"<td>{self._task_table_detail_html(cycle, task)}</td>"
-            "</tr>"
-        )
-
-    def _model_report_sections(self) -> str:
-        sections: List[str] = []
-        for task in self.result.task_results:
-            if task.metadata.get("executor") != "model":
-                continue
-            stream_dir = self.trace_dir / "models" / task.execution_id
-            content = _read_optional_text(stream_dir / "content.txt")
-            thinking = _read_optional_text(stream_dir / "thinking.txt")
-            assembled = _read_optional_text(stream_dir / "assembled.txt")
-            raw_response = (
-                ""
-                if any((content, thinking, assembled))
-                else _raw_response_report_text(
-                    _read_model_raw_response(self.trace_dir, task),
-                    artifact=f"trace/{_raw_response_artifact_path(task.execution_id)}",
+    def _execution_flow_html(self) -> str:
+        blocks: List[str] = []
+        previous_cycle: Optional[str] = None
+        for cycle in self.result.cycle_results:
+            cycle_path = cycle.cycle_path or cycle.cycle_id
+            if previous_cycle is not None and previous_cycle != cycle_path:
+                blocks.append(
+                    "<p class='line muted'>"
+                    f"cycle up/down to {html.escape(cycle_path)}"
+                    "</p>"
                 )
-            )
-            retry_feedback = task.metadata.get("retry_feedback")
-            retry_feedback_text = (
-                json.dumps(retry_feedback, indent=2, sort_keys=True)
-                if isinstance(retry_feedback, dict)
-                else ""
-            )
-            if not any((content, thinking, assembled, raw_response, retry_feedback_text)):
-                continue
-            sections.append(
-                "<details open>"
-                f"<summary>{html.escape(task.task_id)} - {html.escape(task.execution_id)}</summary>"
-                f"<p class='muted'>Status: {html.escape(task.status)}</p>"
-                f"{_report_pre('Retry Feedback', retry_feedback_text)}"
-                f"{_report_pre('Content', content)}"
-                f"{_report_pre('Thinking', thinking)}"
-                f"{_report_pre('Assembled Stream', assembled)}"
-                f"{_report_pre('Raw Response', raw_response)}"
+            previous_cycle = cycle_path
+            for index, task in enumerate(cycle.task_results):
+                blocks.append(self._task_flow_block_html(cycle, task, index))
+        if not blocks:
+            return "<p class='muted'>No task executions captured.</p>"
+        return "\n".join(blocks)
+
+    def _task_flow_block_html(self, cycle: CycleResult, task: TaskResult, index: int) -> str:
+        result_class = "result-success" if task.status == "success" else "result-failure"
+        reason = f" ({task.reason})" if task.reason else ""
+        retry_feedback = task.metadata.get("retry_feedback")
+        retry_html = ""
+        if isinstance(retry_feedback, dict):
+            retry_html = (
+                "<p class='line'>"
+                f"retry {html.escape(str(retry_feedback.get('failed_attempt')))}"
+                f"/{html.escape(str(retry_feedback.get('max_attempts')))} with additional message to model"
+                "</p>"
+                "<details><summary>cut with additional message</summary>"
+                f"{_report_pre('Retry Feedback', json.dumps(retry_feedback, indent=2, sort_keys=True))}"
                 "</details>"
             )
-        if not sections:
-            return "<p class='muted'>No model text captured.</p>"
-        return "\n".join(sections)
+        diff_html = _short_diff_summary_html(task.output.get("diff_summary"))
+        diff_line = f"<p class='line diff'>{diff_html}</p>" if diff_html else ""
+        return (
+            "<article class='task'>"
+            f"<p class='line'>{html.escape(_task_flow_text(cycle, index))}</p>"
+            f"<p class='line'>{html.escape(_task_summary_text(task))}</p>"
+            f"{self._task_process_detail_html(cycle, task)}"
+            f"<p class='line {result_class}'>result: {html.escape(task.status)}{html.escape(reason)}</p>"
+            f"{diff_line}"
+            f"{self._task_diff_detail_html(task)}"
+            f"{retry_html}"
+            "</article>"
+        )
 
-    def _task_table_detail_html(self, cycle: CycleResult, task: TaskResult) -> str:
+    def _task_process_detail_html(self, cycle: CycleResult, task: TaskResult) -> str:
         base = self._task_artifact_dir(cycle.cycle_id, task.task_id, task.execution_id)
         files = [
             ("Status", "status.json"),
@@ -993,13 +960,52 @@ class TraceWriter:
             _report_pre(label, _read_optional_text(self.trace_dir / base / name))
             for label, name in files
         )
+        model_text = self._task_model_text_html(task)
         return (
-            "<details><summary>Task Details</summary>"
+            "<details>"
+            "<summary>cut with additional human-readable info about execution process</summary>"
             f"<p>{links}</p>"
             f"{self._request_route_html(cycle, task)}"
-            f"{_file_changes_html(task.output.get('file_changes'), task.output.get('diff_summary'))}"
+            f"{model_text}"
             f"{previews}"
             "</details>"
+        )
+
+    def _task_diff_detail_html(self, task: TaskResult) -> str:
+        details = _file_changes_html(task.output.get("file_changes"), task.output.get("diff_summary"))
+        if not details:
+            return ""
+        return f"<details><summary>cut with additional diff info</summary>{details}</details>"
+
+    def _task_model_text_html(self, task: TaskResult) -> str:
+        if task.metadata.get("executor") != "model":
+            return ""
+        stream_dir = self.trace_dir / "models" / task.execution_id
+        content = _read_optional_text(stream_dir / "content.txt")
+        thinking = _read_optional_text(stream_dir / "thinking.txt")
+        assembled = _read_optional_text(stream_dir / "assembled.txt")
+        raw_response = (
+            ""
+            if any((content, thinking, assembled))
+            else _raw_response_report_text(
+                _read_model_raw_response(self.trace_dir, task),
+                artifact=f"trace/{_raw_response_artifact_path(task.execution_id)}",
+            )
+        )
+        retry_feedback = task.metadata.get("retry_feedback")
+        retry_feedback_text = (
+            json.dumps(retry_feedback, indent=2, sort_keys=True)
+            if isinstance(retry_feedback, dict)
+            else ""
+        )
+        if not any((content, thinking, assembled, raw_response, retry_feedback_text)):
+            return ""
+        return (
+            _report_pre("Retry Feedback", retry_feedback_text)
+            + _report_pre("Content", content)
+            + _report_pre("Thinking", thinking)
+            + _report_pre("Assembled Stream", assembled)
+            + _report_pre("Raw Response", raw_response)
         )
 
     def _request_route_html(self, cycle: CycleResult, task: TaskResult) -> str:
@@ -1016,38 +1022,6 @@ class TraceWriter:
             },
         }
         return _report_pre("Source / Destination", json.dumps(route, indent=2, sort_keys=True))
-
-    def _cycle_task_list_html(self, cycle: CycleResult) -> str:
-        if not cycle.task_results:
-            return "<p class='muted'>No task executions captured.</p>"
-        items = "\n".join(
-            "<li>"
-            f"<code>{html.escape(task.task_id)}</code> "
-            f"<strong>{html.escape(task.status)}</strong> "
-            f"{_short_diff_summary_html(task.output.get('diff_summary'))} "
-            f"<span class='muted'>{html.escape(task.reason or '')}</span>"
-            "</li>"
-            for task in cycle.task_results
-        )
-        return f"<ul>{items}</ul>"
-
-    def _input_report_sections(self) -> str:
-        sections: List[str] = []
-        for task in self.result.task_results:
-            path = self.trace_dir / "inputs" / f"{task.execution_id}.json"
-            payload = _read_optional_text(path)
-            if not payload:
-                continue
-            sections.append(
-                "<details>"
-                f"<summary>{html.escape(task.task_id)} - {html.escape(task.execution_id)}</summary>"
-                f"{_report_pre('Input Artifact', payload)}"
-                "</details>"
-            )
-        if not sections:
-            return "<p class='muted'>No task inputs captured.</p>"
-        return "\n".join(sections)
-
 
 def replay_task(trace_dir: str | Path, task_id: str) -> TaskResult:
     trace_path = Path(trace_dir)
@@ -1329,37 +1303,32 @@ def _write_live_report_shell(
   <meta charset="utf-8">
   <title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #d1d5db; padding: 0.5rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
-    details {{ border: 1px solid #d1d5db; margin: 1rem 0; padding: 0.75rem; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }}
+    code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; }}
+    details {{ border-left: 3px solid #d1d5db; margin: 0.5rem 0 1rem; padding: 0.5rem 0 0.5rem 0.75rem; }}
     pre {{ background: #111827; color: #f9fafb; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }}
     .muted {{ color: #6b7280; }}
+    .flow {{ max-width: 90rem; }}
+    .task {{ border-top: 1px solid #e5e7eb; padding: 1rem 0; }}
+    .line {{ margin: 0.25rem 0; }}
     .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; }}
     .metric {{ border: 1px solid #d1d5db; padding: 0.75rem; }}
   </style>
 </head>
 <body>
-  <h1>{html.escape(loaded.document.id)}</h1>
-  <button id="refresh-report" type="button">Refresh Report Data</button>
-  <p class="muted">This report is live. Final task, input and model sections appear as trace files are written.</p>
-  <h2>Live Status</h2>
-  <div id="live-status">{_status_html(status)}</div>
-  <h2>Cycles</h2>
-  <ul id="cycle-list">{_live_cycle_list_html(loaded)}</ul>
-  <h2>Task Executions</h2>
-  <label>Filter by task <input id="task-filter" type="search"></label>
-  <table id="tasks">
-    <thead><tr><th>Cycle Path</th><th>Cycle</th><th>Task</th><th>Status</th><th>Reason</th><th>Details</th></tr></thead>
-    <tbody id="task-rows">{_status_work_rows_html(status)}</tbody>
-  </table>
-  <h2>Task Inputs</h2>
-  <div id="task-inputs"><p class="muted">No task inputs captured yet.</p></div>
-  <h2>Model Text</h2>
-  <div id="model-text"><p class="muted">No model text captured yet.</p></div>
-  <h2>Execution Log</h2>
-  <pre id="execution-log">{html.escape(_read_optional_text(execution_log_path))}</pre>
+  <main class="flow">
+    <h1>Starting <code>{html.escape(loaded.document.id)}</code></h1>
+    <button id="refresh-report" type="button">Refresh Report Data</button>
+    <details open>
+      <summary>cut with additional human-readable info</summary>
+      <div id="live-status">{_status_html(status)}</div>
+    </details>
+    <section id="execution-flow">{_status_work_flow_html(status)}</section>
+    <details>
+      <summary>cut with execution log</summary>
+      <pre id="execution-log">{html.escape(_read_optional_text(execution_log_path))}</pre>
+    </details>
+  </main>
   <script id="report-snapshot" type="application/json">{_script_json({"manifest": manifest, "status": status})}</script>
   {_report_refresh_script(auto_refresh_condition="true")}
 </body>
@@ -1632,48 +1601,29 @@ def _status_html(status: Dict[str, Any]) -> str:
     )
 
 
-def _status_work_rows_html(status: Dict[str, Any]) -> str:
-    rows = []
-    work = status.get("work", [])
+def _status_work_flow_html(status: Dict[str, Any]) -> str:
+    work = [item for item in status.get("work", []) if isinstance(item, dict)]
+    if not work:
+        return "<p class='muted'>No task executions captured yet.</p>"
+    blocks = []
     for index, item in enumerate(work):
-        previous_task = work[index - 1].get("task_id") if index > 0 and isinstance(work[index - 1], dict) else "start"
-        next_task = work[index + 1].get("task_id") if index + 1 < len(work) and isinstance(work[index + 1], dict) else "finish"
+        previous_task = work[index - 1].get("task_id") if index > 0 else "start"
+        next_task = work[index + 1].get("task_id") if index + 1 < len(work) else "finish"
         current_task = item.get("task_id") or "unknown"
         cycle_id = item.get("cycle_id") or "unknown"
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(cycle_id))}: {html.escape(str(previous_task))} -&gt; [{html.escape(str(current_task))}] -&gt; {html.escape(str(next_task))}</td>"
-            f"<td>{html.escape(str(item.get('cycle_id') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('task_id') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('executor_kind') or item.get('task_type') or ''))}: {html.escape(str(item.get('task_id') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('status') or ''))}</td>"
-            f"<td>{html.escape(str(item.get('reason') or ''))}</td>"
-            "<td></td>"
-            "<td></td>"
-            "</tr>"
-        )
-    return "\n".join(rows)
-
-
-def _live_cycle_list_html(loaded: LoadedScenario) -> str:
-    items = []
-    for cycle in loaded.cycles:
-        tasks = "\n".join(
-            "<li>"
-            f"<code>{html.escape(task.id)}</code> "
-            f"<span class='muted'>{html.escape(task.type)}</span>"
-            "</li>"
-            for task in cycle.document.tasks
-        )
-        items.append(
-            "<li>"
-            f"<details><summary>{html.escape(cycle.document.id)} <strong>queued</strong></summary>"
-            f"<ul>{tasks}</ul>"
+        executor = item.get("executor_kind") or item.get("task_type") or "task"
+        reason = f" ({item.get('reason')})" if item.get("reason") else ""
+        blocks.append(
+            "<article class='task'>"
+            f"<p class='line'>{html.escape(str(cycle_id))}: {html.escape(str(previous_task))} -&gt; [{html.escape(str(current_task))}] -&gt; {html.escape(str(next_task))}</p>"
+            f"<p class='line'>{html.escape(str(executor))}: {html.escape(str(current_task))}</p>"
+            "<details><summary>cut with additional human-readable info about execution process</summary>"
+            f"{_report_pre('Work Status', json.dumps(item, indent=2, sort_keys=True))}"
             "</details>"
-            "</li>"
+            f"<p class='line'>result: {html.escape(str(item.get('status') or 'queued'))}{html.escape(reason)}</p>"
+            "</article>"
         )
-    return "\n".join(items)
-
+    return "\n".join(blocks)
 
 def _run_relative_path(trace_dir: Path, path: Optional[Path]) -> Optional[str]:
     if path is None:
@@ -1732,10 +1682,6 @@ def _script_json(value: Any) -> str:
 def _report_refresh_script(*, auto_refresh_condition: str) -> str:
     script = r"""<script>
     const snapshot = JSON.parse(document.getElementById('report-snapshot').textContent);
-    const filter = document.getElementById('task-filter');
-    if (filter) {
-      filter.addEventListener('input', applyTaskFilter);
-    }
     async function readJson(path) {
       const response = await fetch(path + '?t=' + Date.now());
       if (!response.ok) throw new Error(response.statusText);
@@ -1748,13 +1694,6 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
     }
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-    }
-    function applyTaskFilter() {
-      if (!filter) return;
-      const value = filter.value.toLowerCase();
-      document.querySelectorAll('#tasks tbody tr').forEach(row => {
-        row.hidden = !row.textContent.toLowerCase().includes(value);
-      });
     }
     function renderStatus(status) {
       const budget = status.budget || {};
@@ -1773,21 +1712,19 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
       `;
     }
     function renderTasks(tasks) {
-      const target = document.getElementById('task-rows');
+      const target = document.getElementById('execution-flow');
       if (!target || !Array.isArray(tasks) || tasks.length === 0) return;
       target.innerHTML = tasks.map((task, index) => `
-        <tr>
-          <td>${escapeHtml(taskFlowText(tasks, index))}</td>
-          <td>${escapeHtml(task.cycle_id || '')}</td>
-          <td>${escapeHtml(task.task_id || '')}</td>
-          <td>${escapeHtml(taskSummaryText(task))}</td>
-          <td>${escapeHtml(task.status || '')}</td>
-          <td>${escapeHtml(task.reason || '')}</td>
-          <td>${escapeHtml(diffSummaryText(task))}</td>
-          <td>${taskDetailsLinks(task)}</td>
-        </tr>
+        <article class="task">
+          <p class="line">${escapeHtml(taskFlowText(tasks, index))}</p>
+          <p class="line">${escapeHtml(taskSummaryText(task))}</p>
+          ${taskProcessDetails(task)}
+          <p class="line">result: ${escapeHtml(task.status || '')}${task.reason ? ` (${escapeHtml(task.reason)})` : ''}</p>
+          ${diffSummaryText(task) ? `<p class="line diff">${escapeHtml(diffSummaryText(task))}</p>` : ''}
+          ${taskDiffDetails(task)}
+          ${taskRetryDetails(task)}
+        </article>
       `).join('');
-      applyTaskFilter();
     }
     function taskFlowText(tasks, index) {
       const task = tasks[index] || {};
@@ -1827,59 +1764,30 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
         renderTasks(status.work);
       }
     }
-    function taskDetailsLinks(task) {
+    function taskProcessDetails(task) {
       const dir = task.task_artifact_dir;
-      if (!dir) return '';
-      const links = [['Status', 'status.json'], ['Context', 'context.json'], ['Input', 'input.json'], ['Output', 'output.json']]
+      const links = dir ? [['Status', 'status.json'], ['Context', 'context.json'], ['Input', 'input.json'], ['Output', 'output.json']]
         .map(([label, name]) => `<a href="${escapeHtml(dir)}/${name}">${escapeHtml(label)}</a>`)
-        .join(' ');
-      return `<details><summary>Task Details</summary>${links}</details>`;
+        .join(' ') : '';
+      const metadata = task.metadata || {};
+      const route = {
+        source: {cycle_id: task.cycle_id || null, cycle_path: task.cycle_path || task.cycle_id || null, task_id: task.task_id || null},
+        destination: {executor: metadata.executor || task.executor_kind || 'unknown', artifact_dir: task.executor_artifact_dir || null},
+      };
+      const status = task.status_artifact ? '' : `<h3>Work Status</h3><pre>${escapeHtml(JSON.stringify(task, null, 2))}</pre>`;
+      return `<details><summary>cut with additional human-readable info about execution process</summary><p>${links}</p><h3>Source / Destination</h3><pre>${escapeHtml(JSON.stringify(route, null, 2))}</pre>${status}</details>`;
     }
-    async function renderInputs(inputs) {
-      const target = document.getElementById('task-inputs');
-      if (!target || !Array.isArray(inputs) || inputs.length === 0) return;
-      const blocks = [];
-      for (const item of inputs) {
-        if (!item.path) continue;
-        try {
-          const text = await readText(item.path);
-          blocks.push(`<details><summary>${escapeHtml(item.cycle_path || item.cycle_id || '')} / ${escapeHtml(item.task_id || '')} - ${escapeHtml(item.execution_id || '')}</summary><h3>Input Artifact</h3><pre>${escapeHtml(text)}</pre></details>`);
-        } catch (error) {}
-      }
-      if (blocks.length > 0) target.innerHTML = blocks.join('');
+    function taskDiffDetails(task) {
+      const output = task.output || {};
+      const changes = Array.isArray(output.file_changes) ? output.file_changes : [];
+      if (changes.length === 0) return '';
+      const rows = changes.map(change => `<li><strong>${escapeHtml(change.action || 'changed')}</strong> <code>${escapeHtml(change.path || '')}</code> <span class="muted">${escapeHtml(change.bytes || 0)} byte(s), +${escapeHtml(change.lines_added || 0)} -${escapeHtml(change.lines_removed || 0)}</span></li>`).join('');
+      return `<details><summary>cut with additional diff info</summary><h3>File Changes</h3><p>${escapeHtml(diffSummaryText(task))}</p><ul>${rows}</ul></details>`;
     }
-    async function renderModels(models) {
-      const target = document.getElementById('model-text');
-      if (!target || !Array.isArray(models) || models.length === 0) return;
-      const blocks = [];
-      for (const item of models) {
-        const parts = [];
-        for (const [title, key] of [['Content', 'content'], ['Thinking', 'thinking'], ['Assembled Stream', 'assembled']]) {
-          if (!item[key]) continue;
-          try {
-            const text = await readText(item[key]);
-            if (text) parts.push(`<h3>${escapeHtml(title)}</h3><pre>${escapeHtml(text)}</pre>`);
-          } catch (error) {}
-        }
-        if (parts.length === 0 && item.raw_response) {
-          const chars = Number(item.raw_response_chars || 0);
-          if (chars > 4000) {
-            parts.push(`<h3>Raw Response</h3><pre>${escapeHtml(`Raw response omitted from HTML because it is too large (${chars} character(s)). Inspect ${item.raw_response} for provider diagnostics.`)}</pre>`);
-          } else {
-            try {
-              const text = await readText(item.raw_response);
-              if (text) parts.push(`<h3>Raw Response</h3><pre>${escapeHtml(text)}</pre>`);
-            } catch (error) {}
-          }
-        }
-        if (item.retry_feedback) {
-          parts.unshift(`<h3>Retry Feedback</h3><pre>${escapeHtml(JSON.stringify(item.retry_feedback, null, 2))}</pre>`);
-        }
-        if (parts.length > 0) {
-          blocks.push(`<details open><summary>${escapeHtml(item.cycle_path || item.cycle_id || '')} / ${escapeHtml(item.task_id || '')} - ${escapeHtml(item.execution_id || '')}</summary>${parts.join('')}</details>`);
-        }
-      }
-      if (blocks.length > 0) target.innerHTML = blocks.join('');
+    function taskRetryDetails(task) {
+      const feedback = (task.metadata || {}).retry_feedback;
+      if (!feedback || typeof feedback !== 'object') return '';
+      return `<p class="line">retry ${escapeHtml(feedback.failed_attempt)}/${escapeHtml(feedback.max_attempts)} with additional message to model</p><details><summary>cut with additional message</summary><h3>Retry Feedback</h3><pre>${escapeHtml(JSON.stringify(feedback, null, 2))}</pre></details>`;
     }
     async function refreshReport() {
       let manifest = snapshot.manifest || {};
@@ -1905,8 +1813,6 @@ def _report_refresh_script(*, auto_refresh_condition: str) -> str:
         if (Array.isArray(report.task_executions) && report.task_executions.length > 0) {
           renderTasks(report.task_executions);
         }
-        await renderInputs(report.task_inputs || []);
-        await renderModels(report.model_outputs || []);
       } else {
         try { renderTasks(await readJson(data.task_executions || 'trace/tasks/executions.json')); } catch (error) {}
       }

@@ -83,24 +83,19 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert report_data["model_outputs"][0]["model_artifact_dir"].startswith("trace/models/deterministic/")
     assert report_data["model_outputs"][0]["stream"].startswith("trace/models/")
     report_text = report.read_text(encoding="utf-8")
-    assert "Refresh Report Data" in report_text
-    assert "Live Status" in report_text
-    assert "Cycles" in report_text
-    assert "executor_cycle <strong>success</strong>" in report_text
-    assert "Task Inputs" in report_text
-    assert "Execution Log" in report_text
-    assert "trace/report_data.json" in report_text
-    assert "renderModels" in report_text
-    assert "<th>Flow</th><th>Cycle</th><th>Task</th><th>Summary</th><th>Status</th><th>Reason</th><th>Diff</th><th>Details</th>" in report_text
+    assert "Starting <code>executor_scenario</code>" in report_text
+    assert "cut with additional human-readable info" in report_text
     assert "executor_cycle: start -&gt; [ask_model] -&gt; run_command" in report_text
     assert "model: deterministic goal executor_prompt" in report_text
     assert "command: python3 -c &quot;print(&#x27;executor ok&#x27;)&quot; in " in report_text
     assert "tests/fixtures/scenarios" in report_text
-    assert "Task Details" in report_text
+    assert "result: success" in report_text
+    assert "cut with additional human-readable info about execution process" in report_text
+    assert "cut with execution log" in report_text
     assert "Source / Destination" in report_text
     assert "trace/tasks/model/" in report_text
-    assert "taskSummaryText" in report_text
-    assert "diffSummaryText" in report_text
+    assert "<table" not in report_text
+    assert "Task Executions" not in report_text
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events
@@ -128,8 +123,8 @@ def test_trace_records_cycle_membership_for_repeated_task_ids(tmp_path: Path) ->
     report_text = (tmp_path / "multi_cycle_report_scenario" / "cycle-report" / "report.html").read_text(
         encoding="utf-8"
     )
-    assert "<td>report_first_cycle: start -&gt; [shared_task] -&gt; finish</td><td>report_first_cycle</td><td>shared_task</td>" in report_text
-    assert "<td>report_second_cycle: start -&gt; [shared_task] -&gt; finish</td><td>report_second_cycle</td><td>shared_task</td>" in report_text
+    assert "report_first_cycle: start -&gt; [shared_task] -&gt; finish" in report_text
+    assert "report_second_cycle: start -&gt; [shared_task] -&gt; finish" in report_text
 
 
 def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:
@@ -275,7 +270,9 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
     report_text = (tmp_path / "large" / "report.html").read_text(encoding="utf-8")
     assert "File Changes" in report_text
     assert "short diff: 1 files changed, 0 deleted, +1 -0" in report_text
-    assert "<td>tool: write_files</td><td>success</td><td></td><td>short diff: 1 files changed, 0 deleted, +1 -0</td>" in report_text
+    assert "tool: write_files" in report_text
+    assert "result: success" in report_text
+    assert "cut with additional diff info" in report_text
     assert "0-&gt;12 byte(s), none -> sha256:demo-after" in report_text
     assert "demo.txt" in report_text
 
@@ -317,9 +314,12 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     assert status["status"] == "error"
     assert report_data["status"]["status"] == "error"
     report_text = (tmp_path / "executor_scenario" / "error-run" / "report.html").read_text(encoding="utf-8")
-    assert "executor_cycle <strong>queued</strong>" in report_text
-    assert "ask_model" in report_text
-    assert "run_command" in report_text
+    assert "Starting <code>executor_scenario</code>" in report_text
+    assert "Status</strong><br>error" in report_text
+    assert "executor_cycle: start -&gt; [ask_model] -&gt; run_command" in report_text
+    assert "executor_cycle: ask_model -&gt; [run_command] -&gt; finish" in report_text
+    assert "result: failed (boom in ask_model)" in report_text
+    assert "<table" not in report_text
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert [event["event"] for event in events] == [
         "run_initialized",
@@ -383,7 +383,7 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
     assert (stream_dir / "assembled.txt").read_text(encoding="utf-8") == "thinking partial content"
     assert (stream_dir / "content.txt").read_text(encoding="utf-8") == "partial content"
     report_text = (tmp_path / "executor_scenario" / "stream-run" / "report.html").read_text(encoding="utf-8")
-    assert "Model Text" in report_text
+    assert "model: deterministic goal executor_prompt" in report_text
     assert "partial content" in report_text
     assert "thinking " in report_text
     model_metadata = json.loads(
