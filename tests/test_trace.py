@@ -443,6 +443,28 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
     assert model_metadata["stream_artifacts"]["stream"] == f"models/{execution_id}/stream.jsonl"
 
 
+def test_live_report_shows_streaming_output_before_model_finishes(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+    report_path = tmp_path / "executor_scenario" / "live-stream-run" / "report.html"
+    adapter = InspectingStreamingModelAdapter(report_path)
+    registry = ExecutorRegistry(
+        permission_engine=PermissionEngine(loaded.document.constraints, base_dir=FIXTURES),
+        budget_tracker=BudgetTracker(loaded.document.budgets),
+        prompts=loaded.cycles[0].prompts,
+        model_adapter=adapter,
+    )
+
+    run_and_trace(loaded, registry, output_root=tmp_path, run_id="live-stream-run")
+
+    assert adapter.live_report_snapshots
+    live_report = adapter.live_report_snapshots[0]
+    assert '<meta http-equiv="refresh" content="1">' in live_report
+    assert "executor_cycle / ask_model" in live_report
+    assert "streaming output is updating" in live_report
+    assert "live partial content" in live_report
+    assert "result: running" in live_report
+
+
 def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
     result = run_and_trace(loaded, _registry(loaded), output_root=tmp_path / "first", run_id="manual-source")
@@ -542,4 +564,38 @@ class FakeStreamingModelAdapter:
             output={"status": "success"},
             raw='{"status":"success"}',
             metadata={"adapter": "fake-streaming", "streaming": True},
+        )
+
+
+class InspectingStreamingModelAdapter:
+    def __init__(self, report_path: Path) -> None:
+        self.report_path = report_path
+        self.live_report_snapshots: list[str] = []
+
+    def generate(self, *, task, model, messages, config, tools, progress_callback=None):
+        if progress_callback is not None:
+            progress_callback(
+                "model_stream_chunk",
+                {
+                    "kind": "content",
+                    "text": "live partial content",
+                    "chars": 20,
+                    "thinking_chars": 0,
+                    "content_chars": 20,
+                },
+            )
+            self.live_report_snapshots.append(self.report_path.read_text(encoding="utf-8"))
+            progress_callback(
+                "model_stream_finish",
+                {
+                    "chars": 20,
+                    "thinking_chars": 0,
+                    "content_chars": 20,
+                    "tokens": {"generated": 5, "source": "provider"},
+                },
+            )
+        return ModelResponse(
+            output={"status": "success"},
+            raw='{"status":"success"}',
+            metadata={"adapter": "inspecting-streaming", "streaming": True},
         )

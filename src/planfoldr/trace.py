@@ -31,6 +31,12 @@ def run_and_trace(
     status_writer = StatusWriter(trace_dir / "status.json", _initial_status(loaded, run_id))
     _write_live_manifest(loaded, trace_dir=trace_dir, report_path=report_path, run_id=run_id, logger=logger)
     _write_live_report_shell(loaded, report_path=report_path, trace_dir=trace_dir, execution_log_path=logger.path)
+
+    def refresh_live_report() -> None:
+        _write_live_report_data(loaded, trace_dir=trace_dir, run_id=run_id, logger=logger)
+        _write_live_report_shell(loaded, report_path=report_path, trace_dir=trace_dir, execution_log_path=logger.path)
+
+    status_writer.after_write = refresh_live_report
     logger.write("run_initialized", scenario_id=loaded.document.id, run_id=run_id)
     logger.write("scenario_start", scenario_id=loaded.document.id, cycle_count=len(loaded.cycles))
     try:
@@ -87,6 +93,7 @@ class StatusWriter:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.state = dict(initial)
+        self.after_write = None
         self._write()
 
     def update(self, event: str, **fields: Any) -> None:
@@ -119,6 +126,8 @@ class StatusWriter:
 
     def _write(self) -> None:
         self.path.write_text(json.dumps(self.state, indent=2, sort_keys=True), encoding="utf-8")
+        if self.after_write is not None:
+            self.after_write()
 
 
 class LoggingExecutor:
@@ -221,10 +230,12 @@ class LoggingExecutor:
 
     def _update_model_status(self, event: str, fields: Dict[str, Any]) -> None:
         if self.status_writer is not None:
+            task_id = fields.get("task_id")
+            cycle_id = self.task_cycle_ids.get(str(task_id))
             self.status_writer.update(
                 event,
-                current_task_id=fields.get("task_id"),
-                current_cycle_id=self.task_cycle_ids.get(str(fields.get("task_id"))),
+                current_task_id=task_id,
+                current_cycle_id=cycle_id,
                 current_attempt=fields.get("attempt"),
                 stream={
                     "execution_id": fields.get("execution_id"),
@@ -232,6 +243,13 @@ class LoggingExecutor:
                     "content_chars": fields.get("content_chars"),
                     "thinking_chars": fields.get("thinking_chars"),
                     "tokens": fields.get("tokens"),
+                },
+                work_update={
+                    "task_id": task_id,
+                    "cycle_id": cycle_id,
+                    "executor_kind": "model",
+                    "status": "running" if event != "model_stream_error" else "failed",
+                    "execution_id": fields.get("execution_id"),
                 },
             )
 
@@ -1298,11 +1316,12 @@ def _write_live_report_shell(
     execution_log_path: Path,
 ) -> None:
     status = _read_json_optional(trace_dir / "status.json")
+    live_refresh = '<meta http-equiv="refresh" content="1">\n  ' if status.get("status") == "running" else ""
     document = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
+  {live_refresh}<title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }}
     code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; }}
@@ -1314,6 +1333,8 @@ def _write_live_report_shell(
     .line {{ margin: 0.25rem 0; }}
     .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; }}
     .metric {{ border: 1px solid #d1d5db; padding: 0.75rem; }}
+    .streaming {{ border-left: 3px solid #2563eb; padding-left: 0.75rem; }}
+    .streaming pre {{ max-height: 24rem; }}
   </style>
 </head>
 <body>
@@ -1323,7 +1344,7 @@ def _write_live_report_shell(
       <summary>cut with additional human-readable info</summary>
       <div id="live-status">{_status_html(status)}</div>
     </details>
-    <section id="execution-flow">{_status_work_flow_html(status)}</section>
+    <section id="execution-flow">{_status_work_flow_html(status, trace_dir=trace_dir)}</section>
   </main>
 </body>
 </html>
@@ -1595,10 +1616,11 @@ def _status_html(status: Dict[str, Any]) -> str:
     )
 
 
-def _status_work_flow_html(status: Dict[str, Any]) -> str:
+def _status_work_flow_html(status: Dict[str, Any], *, trace_dir: Optional[Path] = None) -> str:
     work = [item for item in status.get("work", []) if isinstance(item, dict)]
     if not work:
         return "<p class='muted'>No task executions captured yet.</p>"
+    active_stream = status.get("stream") if isinstance(status.get("stream"), dict) else {}
     blocks = []
     for index, item in enumerate(work):
         previous_task = work[index - 1].get("task_id") if index > 0 else "start"
@@ -1607,10 +1629,23 @@ def _status_work_flow_html(status: Dict[str, Any]) -> str:
         cycle_id = item.get("cycle_id") or "unknown"
         executor = item.get("executor_kind") or item.get("task_type") or "task"
         reason = f" ({item.get('reason')})" if item.get("reason") else ""
+        stream = active_stream if current_task == status.get("current_task_id") else {}
+        stream_execution_id = item.get("execution_id") or stream.get("execution_id")
+        show_stream = item.get("status") == "running" or current_task == status.get("current_task_id")
+        stream_html = (
+            _live_stream_preview_html(
+                stream_execution_id,
+                trace_dir=trace_dir,
+                stream=stream,
+            )
+            if show_stream
+            else ""
+        )
         blocks.append(
             "<article class='task'>"
             f"<p class='line'>{html.escape(str(cycle_id))}: {html.escape(str(previous_task))} -&gt; [{html.escape(str(current_task))}] -&gt; {html.escape(str(next_task))}</p>"
             f"<p class='line'>{html.escape(str(executor))}: {html.escape(str(current_task))}</p>"
+            f"{stream_html}"
             "<details><summary>cut with additional human-readable info about execution process</summary>"
             f"{_report_pre('Work Status', json.dumps(item, indent=2, sort_keys=True))}"
             "</details>"
@@ -1618,6 +1653,64 @@ def _status_work_flow_html(status: Dict[str, Any]) -> str:
             "</article>"
         )
     return "\n".join(blocks)
+
+
+def _live_stream_preview_html(
+    execution_id: Any,
+    *,
+    trace_dir: Optional[Path],
+    stream: Dict[str, Any],
+) -> str:
+    if trace_dir is None or not execution_id:
+        return ""
+    stream_path = trace_dir / "models" / str(execution_id) / "stream.jsonl"
+    rows = _read_stream_rows(stream_path)
+    if not rows:
+        return ""
+    content = "".join(str(row.get("text", "")) for row in rows if row.get("kind") == "content")
+    thinking = "".join(str(row.get("text", "")) for row in rows if row.get("kind") == "thinking")
+    assembled = "".join(str(row.get("text", "")) for row in rows)
+    visible = content or assembled
+    preview = _tail_text(visible, 5000)
+    thinking_preview = _tail_text(thinking, 2000) if thinking and thinking != visible else ""
+    stats = {
+        "chars": stream.get("chars"),
+        "content_chars": stream.get("content_chars"),
+        "thinking_chars": stream.get("thinking_chars"),
+        "chunks": len(rows),
+    }
+    thinking_html = _report_pre("Streaming Thinking", thinking_preview) if thinking_preview else ""
+    return (
+        "<div class='streaming'>"
+        "<p class='line'>streaming output is updating</p>"
+        f"{_report_pre('Stream Stats', json.dumps(stats, indent=2, sort_keys=True))}"
+        f"{thinking_html}"
+        f"{_report_pre('Streaming Output', preview)}"
+        "</div>"
+    )
+
+
+def _read_stream_rows(path: Path) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return rows
+    for line in lines[-200:]:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _tail_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"...\n{text[-limit:]}"
+
 
 def _run_relative_path(trace_dir: Path, path: Optional[Path]) -> Optional[str]:
     if path is None:

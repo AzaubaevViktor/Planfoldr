@@ -113,6 +113,7 @@ Opening `report.html` during or after a run shows a chronological, expandable an
 - `write_files` tasks now expose file change events in report details with action, path and byte count.
 - Task details now include a readable Source / Destination block with cycle/task origin and executor artifact destination.
 - Deeper line-level diff summaries are split into `view_002`.
+- Follow-up live-report fix rewrites `report.html` on status updates, adds file-friendly refresh while running, and shows current model stream text from `stream.jsonl` in the running task block.
 - Completed and moved to `quests/done/`.
 - Verified with `.venv/bin/python -m pytest -q`.
 
