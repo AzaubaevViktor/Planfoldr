@@ -7,7 +7,7 @@ from planfoldr.executors import ExecutorRegistry, ModelResponse, StubModelAdapte
 from planfoldr.guards import BudgetTracker, PermissionEngine
 from planfoldr.loader import load_scenario
 from planfoldr.runtime import Outcome, ScenarioResult, CycleResult, make_task_result
-from planfoldr.trace import TraceWriter, replay_task, run_and_trace
+from planfoldr.trace import TraceWriter, _status_work_flow_html, replay_task, run_and_trace
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "scenarios"
@@ -86,14 +86,23 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert report_data["model_outputs"][0]["stream"].startswith("trace/models/")
     report_text = report.read_text(encoding="utf-8")
     assert "Starting <code>executor_scenario</code>" in report_text
-    assert "cut with additional human-readable info" in report_text
+    assert "additional info" in report_text
     assert "executor_cycle: start -&gt; [ask_model] -&gt; run_command" in report_text
     assert "model: deterministic goal executor_prompt" in report_text
     assert "command: python3 -c &quot;print(&#x27;executor ok&#x27;)&quot; in " in report_text
     assert "tests/fixtures/scenarios" in report_text
     assert "result: success" in report_text
-    assert "cut with additional human-readable info about execution process" in report_text
-    assert "Source / Destination" in report_text
+    assert "Source" in report_text
+    assert "Context" in report_text
+    assert "Input" in report_text
+    assert "Model Content" in report_text
+    assert "Final Output" in report_text
+    assert "Updated Context" in report_text
+    assert "Context Diff" in report_text
+    assert "Status" in report_text
+    assert "Budget Spent" in report_text
+    assert "Budget Remaining" in report_text
+    assert "Duration" in report_text
     assert "&quot;iterations&quot;" in report_text
     assert "&quot;model_tokens&quot;" in report_text
     assert "&quot;model_cost_usd&quot;" in report_text
@@ -101,7 +110,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "<table" not in report_text
     assert "Task Executions" not in report_text
     assert "Refresh Report Data" not in report_text
-    assert "cut with execution log" not in report_text
+    assert "cut with" not in report_text
     assert "<script" not in report_text
     assert report_text.rstrip().endswith("</main>\n</body>\n</html>")
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
@@ -134,6 +143,52 @@ def test_trace_records_cycle_membership_for_repeated_task_ids(tmp_path: Path) ->
     assert "report_first_cycle: start -&gt; [shared_task] -&gt; finish" in report_text
     assert "cycle down from report_first_cycle to report_second_cycle" in report_text
     assert "report_second_cycle: start -&gt; [shared_task] -&gt; finish" in report_text
+
+
+def test_live_work_flow_marks_active_cycle_level_and_task() -> None:
+    report_text = _status_work_flow_html(
+        {
+            "current_cycle_id": "ollama_notes_repair",
+            "current_task_id": "setup_repo",
+            "work": [
+                {
+                    "cycle_id": "ollama_notes_plan",
+                    "task_id": "plan_notes_project",
+                    "executor_kind": "model",
+                    "status": "succeeded",
+                },
+                {
+                    "cycle_id": "ollama_notes_repair",
+                    "task_id": "setup_workspace",
+                    "executor_kind": "command",
+                    "status": "succeeded",
+                },
+                {
+                    "cycle_id": "ollama_notes_repair",
+                    "task_id": "setup_repo",
+                    "executor_kind": "command",
+                    "status": "running",
+                },
+                {
+                    "cycle_id": "ollama_notes_repair",
+                    "task_id": "generate_notes_project",
+                    "executor_kind": "model",
+                    "status": "queued",
+                },
+            ],
+        }
+    )
+
+    assert (
+        "<p class='line task-level-muted'>ollama_notes_plan: start -&gt; "
+        "[plan_notes_project] -&gt; finish</p>"
+    ) in report_text
+    assert (
+        "<p class='line task-level-current'>ollama_notes_repair: setup_workspace -&gt; "
+        "[<strong>setup_repo</strong>] -&gt; generate_notes_project</p>"
+    ) in report_text
+    assert "result: queued" not in report_text
+    assert "ollama_notes_plan: plan_notes_project -&gt; [setup_workspace]" not in report_text
 
 
 def test_report_labels_cycle_down_and_cycle_up_transitions(tmp_path: Path) -> None:
@@ -336,7 +391,8 @@ def test_trace_extracts_large_json_strings_to_adjacent_artifacts(tmp_path: Path)
     assert "short diff: 1 files changed, 0 deleted, +1 -0" in report_text
     assert "tool: write_files" in report_text
     assert "result: success" in report_text
-    assert "cut with additional diff info" in report_text
+    assert "File Changes" in report_text
+    assert "additional info" in report_text
     assert "0-&gt;12 byte(s), none -> sha256:demo-after" in report_text
     assert "demo.txt" in report_text
 
@@ -381,11 +437,10 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     assert "Starting <code>executor_scenario</code>" in report_text
     assert "Status</strong><br>error" in report_text
     assert "executor_cycle: start -&gt; [ask_model] -&gt; run_command" in report_text
-    assert "executor_cycle: ask_model -&gt; [run_command] -&gt; finish" in report_text
     assert "result: failed (boom in ask_model)" in report_text
     assert "<table" not in report_text
     assert "Refresh Report Data" not in report_text
-    assert "cut with execution log" not in report_text
+    assert "cut with" not in report_text
     assert "<script" not in report_text
     assert report_text.rstrip().endswith("</main>\n</body>\n</html>")
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
@@ -452,6 +507,8 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
     assert (stream_dir / "content.txt").read_text(encoding="utf-8") == "partial content"
     report_text = (tmp_path / "executor_scenario" / "stream-run" / "report.html").read_text(encoding="utf-8")
     assert "model: deterministic goal executor_prompt" in report_text
+    assert "Generation" in report_text
+    assert "<summary>thinking</summary>" in report_text
     assert "partial content" in report_text
     assert "thinking " in report_text
     model_metadata = json.loads(
@@ -486,8 +543,14 @@ def test_live_report_shows_streaming_output_before_model_finishes(tmp_path: Path
     assert '!event.target.hasAttribute("data-live-summary")' not in live_report
     assert "executor_cycle / ask_model" in live_report
     assert "streaming output is updating" in live_report
+    assert "Generation" in live_report
     assert "live partial content" in live_report
     assert "result: running" in live_report
+    assert (
+        "executor_cycle: start -&gt; [<strong>ask_model</strong>] -&gt; run_command"
+        in live_report
+    )
+    assert "queued" not in live_report
 
 
 def test_trace_writer_accepts_audit_and_decision_logs(tmp_path: Path) -> None:

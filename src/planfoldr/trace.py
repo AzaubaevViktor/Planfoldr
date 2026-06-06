@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import difflib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -888,7 +889,7 @@ class TraceWriter:
   <main class="flow">
     <h1>Starting <code>{html.escape(self.loaded.document.id)}</code></h1>
     <details>
-      <summary>cut with additional human-readable info</summary>
+      <summary>additional info</summary>
       <p>Status: <strong>{html.escape(self.result.status)}</strong></p>
       <p>Trace manifest: <code>{html.escape(str(self.trace_dir / "manifest.json"))}</code></p>
       <p>Execution log: <code>{html.escape(str(self.execution_log_path or ""))}</code></p>
@@ -930,7 +931,7 @@ class TraceWriter:
                 f"retry {html.escape(str(retry_feedback.get('failed_attempt')))}"
                 f"/{html.escape(str(retry_feedback.get('max_attempts')))} with additional message to model"
                 "</p>"
-                "<details><summary>cut with additional message</summary>"
+                "<details><summary>additional info</summary>"
                 f"{_report_pre('Retry Feedback', json.dumps(retry_feedback, indent=2, sort_keys=True))}"
                 "</details>"
             )
@@ -960,18 +961,34 @@ class TraceWriter:
             f"<a href='trace/{html.escape(base)}/{name}'>{html.escape(label)}</a>"
             for label, name in files
         )
-        previews = "".join(
-            _report_pre(label, _read_optional_text(self.trace_dir / base / name))
-            for label, name in files
-        )
         model_text = self._task_model_text_html(task)
+        context_text = _read_optional_text(self.trace_dir / base / "context.json")
+        input_text = _read_optional_text(self.trace_dir / base / "input.json")
+        output_text = _read_optional_text(self.trace_dir / base / "output.json")
+        status_text = _read_optional_text(self.trace_dir / base / "status.json")
+        original_context = _loads_json_object(context_text)
+        updated_context = _updated_task_context(original_context, task)
+        source = _task_source_payload(
+            cycle,
+            task,
+            task_artifact_dir=f"trace/{base}",
+            executor_artifact_dir=_executor_artifact_dir_for_task(task),
+        )
         return (
             "<details>"
-            "<summary>cut with additional human-readable info about execution process</summary>"
+            "<summary>additional info</summary>"
             f"<p>{links}</p>"
-            f"{self._request_route_html(cycle, task)}"
+            f"{_report_pre('Source', json.dumps(source, indent=2, sort_keys=True))}"
+            f"{_report_pre('Context', context_text)}"
+            f"{_report_pre('Input', input_text)}"
             f"{model_text}"
-            f"{previews}"
+            f"{_report_pre('Final Output', output_text)}"
+            f"{_report_detail('updated context', _report_json('Updated Context', updated_context))}"
+            f"{_report_detail('context diff', _report_pre('Context Diff', _json_diff(original_context, updated_context)))}"
+            f"{_report_detail('status', _report_pre('Status', status_text))}"
+            f"{_report_pre('Budget Spent', json.dumps(_budget_spent(task.budget_before, task.budget_after), indent=2, sort_keys=True))}"
+            f"{_report_pre('Budget Remaining', json.dumps((task.budget_after or {}).get('remaining', {}), indent=2, sort_keys=True))}"
+            f"{_report_pre('Duration', json.dumps(_task_duration(task), indent=2, sort_keys=True))}"
             "</details>"
         )
 
@@ -979,7 +996,7 @@ class TraceWriter:
         details = _file_changes_html(task.output.get("file_changes"), task.output.get("diff_summary"))
         if not details:
             return ""
-        return f"<details><summary>cut with additional diff info</summary>{details}</details>"
+        return f"<details><summary>additional info</summary>{details}</details>"
 
     def _task_model_text_html(self, task: TaskResult) -> str:
         if task.metadata.get("executor") != "model":
@@ -1006,9 +1023,9 @@ class TraceWriter:
             return ""
         return (
             _report_pre("Retry Feedback", retry_feedback_text)
-            + _report_pre("Content", content)
-            + _report_pre("Thinking", thinking)
-            + _report_pre("Assembled Stream", assembled)
+            + _report_pre("Generation", assembled)
+            + (_report_detail("thinking", _report_pre("Thinking", thinking)) if thinking else "")
+            + _report_pre("Model Content", content or raw_response)
             + _report_pre("Raw Response", raw_response)
         )
 
@@ -1025,7 +1042,7 @@ class TraceWriter:
                 "artifact_dir": f"trace/{executor_dir}" if executor_dir else None,
             },
         }
-        return _report_pre("Source / Destination", json.dumps(route, indent=2, sort_keys=True))
+        return _report_pre("Source", json.dumps(route, indent=2, sort_keys=True))
 
 def replay_task(trace_dir: str | Path, task_id: str) -> TaskResult:
     trace_path = Path(trace_dir)
@@ -1048,6 +1065,26 @@ def _task_flow_text(cycle: CycleResult, index: int) -> str:
     current_task = tasks[index].task_id if 0 <= index < len(tasks) else "unknown"
     next_task = tasks[index + 1].task_id if index + 1 < len(tasks) else "finish"
     return f"{cycle.cycle_path or cycle.cycle_id}: {previous_task} -> [{current_task}] -> {next_task}"
+
+
+def _task_flow_line_html(
+    cycle_id: Any,
+    previous_task: Any,
+    current_task: Any,
+    next_task: Any,
+    *,
+    is_active_level: bool = True,
+    is_active_task: bool = False,
+) -> str:
+    level_class = "task-level-current" if is_active_level else "task-level-muted"
+    current_text = html.escape(str(current_task))
+    current_html = f"<strong>{current_text}</strong>" if is_active_task else current_text
+    return (
+        f"<p class='line {level_class}'>"
+        f"{html.escape(str(cycle_id))}: {html.escape(str(previous_task))} -&gt; "
+        f"[{current_html}] -&gt; {html.escape(str(next_task))}"
+        "</p>"
+    )
 
 
 def _cycle_transition_text(previous_cycle: str, cycle_path: str) -> str:
@@ -1330,7 +1367,7 @@ def _write_live_report_shell(
   <main class="flow">
     <h1>Starting <code>{html.escape(loaded.document.id)}</code></h1>
     <details open data-live-summary>
-      <summary>cut with additional human-readable info</summary>
+      <summary>additional info</summary>
       <div id="live-status">{_status_html(status)}</div>
     </details>
     <section id="execution-flow">{_status_work_flow_html(status, trace_dir=trace_dir)}</section>
@@ -1568,6 +1605,8 @@ def _report_styles() -> str:
     .flow { max-width: 90rem; }
     .task { border-top: 1px solid #e5e7eb; padding: 1rem 0; }
     .line { margin: 0.25rem 0; }
+    .task-level-muted { color: #6b7280; }
+    .task-level-current { color: #111827; }
     .report-pre, .json-block { border: 1px solid #d1d5db; background: #f3f4f6; color: #111827; overflow: auto; padding: 0.75rem; }
     .json-block { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.9rem; line-height: 1.5; }
     .json-block summary, .json-node summary { font-weight: 500; }
@@ -1605,6 +1644,119 @@ def _report_json(title: str, value: Any) -> str:
         f"<div class='json-view'>{_json_value_html(value)}</div>"
         "</details>"
     )
+
+
+def _report_detail(summary: str, body: str) -> str:
+    if not body:
+        return ""
+    return f"<details><summary>{html.escape(summary)}</summary>{body}</details>"
+
+
+def _loads_json_object(text: str) -> Dict[str, Any]:
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _task_source_payload(
+    cycle: CycleResult,
+    task: TaskResult,
+    *,
+    task_artifact_dir: Optional[str] = None,
+    executor_artifact_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "cycle_id": cycle.cycle_id,
+        "cycle_path": cycle.cycle_path or cycle.cycle_id,
+        "task_id": task.task_id,
+        "execution_id": task.execution_id,
+        "executor": task.metadata.get("executor", "unknown"),
+        "task_artifact_dir": task_artifact_dir,
+        "executor_artifact_dir": executor_artifact_dir,
+    }
+
+
+def _executor_artifact_dir_for_task(task: TaskResult) -> Optional[str]:
+    executor = task.metadata.get("executor")
+    if executor == "model":
+        model = task.metadata.get("model", {})
+        model_name = str(model.get("name") or "unknown_model") if isinstance(model, dict) else "unknown_model"
+        return f"trace/models/{_safe_trace_segment(model_name)}/{task.execution_id}"
+    if executor == "tool":
+        tool_name = str(task.metadata.get("tool") or "unknown_tool")
+        return f"trace/tools/{_safe_trace_segment(tool_name)}/{task.execution_id}"
+    if executor == "command":
+        command = str(task.metadata.get("command") or "unknown_command")
+        return f"trace/commands/{_safe_trace_segment(command[:80])}/{task.execution_id}"
+    return None
+
+
+def _updated_task_context(original_context: Dict[str, Any], task: TaskResult) -> Dict[str, Any]:
+    updated = json.loads(json.dumps(original_context, sort_keys=True)) if original_context else {}
+    updated["result"] = {
+        "status": task.status,
+        "reason": task.reason,
+        "output": task.output,
+        "evidence": task.evidence,
+        "artifacts": task.artifacts,
+    }
+    updated["budget_after"] = task.budget_after
+    updated["finished_at"] = task.finished_at
+    return updated
+
+
+def _json_diff(before: Dict[str, Any], after: Dict[str, Any]) -> str:
+    before_lines = json.dumps(before, indent=2, sort_keys=True).splitlines()
+    after_lines = json.dumps(after, indent=2, sort_keys=True).splitlines()
+    diff = "\n".join(
+        difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile="context",
+            tofile="updated_context",
+            lineterm="",
+        )
+    )
+    return diff or "No context changes."
+
+
+def _budget_spent(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, Any]:
+    before_usage = before.get("usage", {}) if isinstance(before, dict) else {}
+    after_usage = after.get("usage", {}) if isinstance(after, dict) else {}
+    keys = sorted(set(before_usage) | set(after_usage))
+    spent: Dict[str, Any] = {}
+    for key in keys:
+        before_value = before_usage.get(key, 0)
+        after_value = after_usage.get(key, 0)
+        if isinstance(before_value, (int, float)) and isinstance(after_value, (int, float)):
+            spent[key] = after_value - before_value
+    return spent
+
+
+def _task_duration(task: TaskResult) -> Dict[str, Any]:
+    started_at = _parse_timestamp(task.started_at)
+    finished_at = _parse_timestamp(task.finished_at)
+    elapsed = None
+    if started_at is not None and finished_at is not None:
+        elapsed = max(0.0, (finished_at - started_at).total_seconds())
+    return {
+        "started_at": task.started_at,
+        "finished_at": task.finished_at,
+        "elapsed_seconds": elapsed,
+    }
+
+
+def _parse_timestamp(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _json_value_html(value: Any, *, key: Optional[str] = None, trailing_comma: bool = False) -> str:
@@ -1851,13 +2003,18 @@ def _status_html(status: Dict[str, Any]) -> str:
 
 def _status_work_flow_html(status: Dict[str, Any], *, trace_dir: Optional[Path] = None) -> str:
     work = [item for item in status.get("work", []) if isinstance(item, dict)]
-    if not work:
+    visible_work = [item for item in work if item.get("status") != "queued"]
+    if not visible_work:
         return "<p class='muted'>No task executions captured yet.</p>"
     active_stream = status.get("stream") if isinstance(status.get("stream"), dict) else {}
+    active_cycle_id = status.get("current_cycle_id")
+    active_task_id = status.get("current_task_id")
     blocks = []
     for index, item in enumerate(work):
-        previous_task = work[index - 1].get("task_id") if index > 0 else "start"
-        next_task = work[index + 1].get("task_id") if index + 1 < len(work) else "finish"
+        if item.get("status") == "queued":
+            continue
+        previous_task = _adjacent_work_task_id(work, index, direction=-1, default="start")
+        next_task = _adjacent_work_task_id(work, index, direction=1, default="finish")
         current_task = item.get("task_id") or "unknown"
         cycle_id = item.get("cycle_id") or "unknown"
         executor = item.get("executor_kind") or item.get("task_type") or "task"
@@ -1876,16 +2033,27 @@ def _status_work_flow_html(status: Dict[str, Any], *, trace_dir: Optional[Path] 
         )
         blocks.append(
             "<article class='task'>"
-            f"<p class='line'>{html.escape(str(cycle_id))}: {html.escape(str(previous_task))} -&gt; [{html.escape(str(current_task))}] -&gt; {html.escape(str(next_task))}</p>"
+            f"{_task_flow_line_html(cycle_id, previous_task, current_task, next_task, is_active_level=cycle_id == active_cycle_id, is_active_task=current_task == active_task_id)}"
             f"<p class='line'>{html.escape(str(executor))}: {html.escape(str(current_task))}</p>"
             f"{stream_html}"
-            "<details><summary>cut with additional human-readable info about execution process</summary>"
+            "<details><summary>additional info</summary>"
             f"{_report_pre('Work Status', json.dumps(item, indent=2, sort_keys=True))}"
             "</details>"
             f"<p class='line'>result: {html.escape(str(item.get('status') or 'queued'))}{html.escape(reason)}</p>"
             "</article>"
         )
     return "\n".join(blocks)
+
+
+def _adjacent_work_task_id(work: List[Dict[str, Any]], index: int, *, direction: int, default: str) -> Any:
+    current_cycle_id = work[index].get("cycle_id")
+    cursor = index + direction
+    while 0 <= cursor < len(work):
+        item = work[cursor]
+        if item.get("cycle_id") == current_cycle_id:
+            return item.get("task_id") or "unknown"
+        cursor += direction
+    return default
 
 
 def _live_stream_preview_html(
@@ -1912,13 +2080,13 @@ def _live_stream_preview_html(
         "thinking_chars": stream.get("thinking_chars"),
         "chunks": len(rows),
     }
-    thinking_html = _report_pre("Streaming Thinking", thinking_preview) if thinking_preview else ""
+    thinking_html = _report_detail("thinking", _report_pre("Thinking", thinking_preview)) if thinking_preview else ""
     return (
         "<div class='streaming'>"
         "<p class='line'>streaming output is updating</p>"
         f"{_report_pre('Stream Stats', json.dumps(stats, indent=2, sort_keys=True))}"
         f"{thinking_html}"
-        f"{_report_pre('Streaming Output', preview)}"
+        f"{_report_pre('Generation', preview)}"
         "</div>"
     )
 
