@@ -91,11 +91,14 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "tests/fixtures/scenarios" in report_text
     assert "result: success" in report_text
     assert "cut with additional human-readable info about execution process" in report_text
-    assert "cut with execution log" in report_text
     assert "Source / Destination" in report_text
     assert "trace/tasks/model/" in report_text
     assert "<table" not in report_text
     assert "Task Executions" not in report_text
+    assert "Refresh Report Data" not in report_text
+    assert "cut with execution log" not in report_text
+    assert "<script" not in report_text
+    assert report_text.rstrip().endswith("</main>\n</body>\n</html>")
     log_events = [json.loads(line)["event"] for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert log_events[:3] == ["run_initialized", "scenario_start", "task_start"]
     assert "task_finish" in log_events
@@ -320,6 +323,10 @@ def test_run_and_trace_writes_execution_log_before_task_error(tmp_path: Path) ->
     assert "executor_cycle: ask_model -&gt; [run_command] -&gt; finish" in report_text
     assert "result: failed (boom in ask_model)" in report_text
     assert "<table" not in report_text
+    assert "Refresh Report Data" not in report_text
+    assert "cut with execution log" not in report_text
+    assert "<script" not in report_text
+    assert report_text.rstrip().endswith("</main>\n</body>\n</html>")
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert [event["event"] for event in events] == [
         "run_initialized",

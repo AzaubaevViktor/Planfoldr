@@ -854,7 +854,6 @@ class TraceWriter:
 
     def _write_report(self) -> None:
         status_snapshot = _read_json_optional(self.trace_dir / "status.json")
-        manifest_snapshot = self._manifest()
         document = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -886,12 +885,7 @@ class TraceWriter:
       {_report_pre('status.json', json.dumps(status_snapshot, indent=2, sort_keys=True))}
     </details>
     <section id="execution-flow">{self._execution_flow_html()}</section>
-    <details>
-      <summary>cut with execution log</summary>
-      <pre id="execution-log">{html.escape(_read_optional_text(self.execution_log_path) if self.execution_log_path is not None else "")}</pre>
-    </details>
   </main>
-  <script id="report-snapshot" type="application/json">{html.escape(json.dumps({"manifest": manifest_snapshot, "status": status_snapshot}, sort_keys=True))}</script>
 </body>
 </html>
 """
@@ -1296,7 +1290,6 @@ def _write_live_report_shell(
     execution_log_path: Path,
 ) -> None:
     status = _read_json_optional(trace_dir / "status.json")
-    manifest = _read_json_optional(trace_dir / "manifest.json")
     document = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1318,19 +1311,12 @@ def _write_live_report_shell(
 <body>
   <main class="flow">
     <h1>Starting <code>{html.escape(loaded.document.id)}</code></h1>
-    <button id="refresh-report" type="button">Refresh Report Data</button>
     <details open>
       <summary>cut with additional human-readable info</summary>
       <div id="live-status">{_status_html(status)}</div>
     </details>
     <section id="execution-flow">{_status_work_flow_html(status)}</section>
-    <details>
-      <summary>cut with execution log</summary>
-      <pre id="execution-log">{html.escape(_read_optional_text(execution_log_path))}</pre>
-    </details>
   </main>
-  <script id="report-snapshot" type="application/json">{_script_json({"manifest": manifest, "status": status})}</script>
-  {_report_refresh_script(auto_refresh_condition="true")}
 </body>
 </html>
 """
@@ -1673,159 +1659,3 @@ def _redact_secrets(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_secrets(item) for item in value]
     return value
-
-
-def _script_json(value: Any) -> str:
-    return html.escape(json.dumps(value, sort_keys=True).replace("</", "<\\/"))
-
-
-def _report_refresh_script(*, auto_refresh_condition: str) -> str:
-    script = r"""<script>
-    const snapshot = JSON.parse(document.getElementById('report-snapshot').textContent);
-    async function readJson(path) {
-      const response = await fetch(path + '?t=' + Date.now());
-      if (!response.ok) throw new Error(response.statusText);
-      return await response.json();
-    }
-    async function readText(path) {
-      const response = await fetch(path + '?t=' + Date.now());
-      if (!response.ok) throw new Error(response.statusText);
-      return await response.text();
-    }
-    function escapeHtml(value) {
-      return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-    }
-    function renderStatus(status) {
-      const budget = status.budget || {};
-      const usage = budget.usage || {};
-      const remaining = budget.remaining || {};
-      const target = document.getElementById('live-status');
-      if (!target) return;
-      target.innerHTML = `
-        <div class="status-grid">
-          <div class="metric"><strong>Status</strong><br>${escapeHtml(status.status)}</div>
-          <div class="metric"><strong>Current Task</strong><br>${escapeHtml(status.current_cycle_id || '')} / ${escapeHtml(status.current_task_id || '')}</div>
-          <div class="metric"><strong>Attempt</strong><br>${escapeHtml(status.current_attempt || '')}</div>
-          <div class="metric"><strong>Last Event</strong><br>${escapeHtml(status.last_event || '')}<br><span class="muted">${escapeHtml(status.last_event_at || '')}</span></div>
-        </div>
-        <pre>${escapeHtml(JSON.stringify({usage, remaining}, null, 2))}</pre>
-      `;
-    }
-    function renderTasks(tasks) {
-      const target = document.getElementById('execution-flow');
-      if (!target || !Array.isArray(tasks) || tasks.length === 0) return;
-      target.innerHTML = tasks.map((task, index) => `
-        <article class="task">
-          <p class="line">${escapeHtml(taskFlowText(tasks, index))}</p>
-          <p class="line">${escapeHtml(taskSummaryText(task))}</p>
-          ${taskProcessDetails(task)}
-          <p class="line">result: ${escapeHtml(task.status || '')}${task.reason ? ` (${escapeHtml(task.reason)})` : ''}</p>
-          ${diffSummaryText(task) ? `<p class="line diff">${escapeHtml(diffSummaryText(task))}</p>` : ''}
-          ${taskDiffDetails(task)}
-          ${taskRetryDetails(task)}
-        </article>
-      `).join('');
-    }
-    function taskFlowText(tasks, index) {
-      const task = tasks[index] || {};
-      const prev = index > 0 ? (tasks[index - 1].task_id || 'unknown') : 'start';
-      const next = index + 1 < tasks.length ? (tasks[index + 1].task_id || 'unknown') : 'finish';
-      const cycle = task.cycle_path || task.cycle_id || 'unknown';
-      return `${cycle}: ${prev} -> [${task.task_id || 'unknown'}] -> ${next}`;
-    }
-    function taskSummaryText(task) {
-      const metadata = task.metadata || {};
-      const executor = metadata.executor || task.executor_kind || task.task_type || '';
-      if (executor === 'command') {
-        return `command: ${metadata.command || ''} in ${metadata.cwd || '.'}`;
-      }
-      if (executor === 'model') {
-        const model = metadata.model || {};
-        const prompt = metadata.prompt || {};
-        const retry = metadata.retry_feedback ? ` retry ${metadata.retry_feedback.failed_attempt}/${metadata.retry_feedback.max_attempts}` : '';
-        return `model: ${model.name || 'unknown_model'} goal ${prompt.prompt_id || task.task_id || 'unknown'}${retry}`;
-      }
-      if (executor === 'tool') return `tool: ${metadata.tool || task.executor_kind || 'unknown_tool'}`;
-      return `${executor || 'task'}: ${task.task_id || ''}`;
-    }
-    function diffSummaryText(task) {
-      const output = task.output || {};
-      const summary = output.diff_summary || task.diff_summary;
-      if (!summary || typeof summary !== 'object') return '';
-      const changed = Number(summary.files_changed || 0);
-      const deleted = Number(summary.files_deleted || 0);
-      const added = Number(summary.lines_added || 0);
-      const removed = Number(summary.lines_removed || 0);
-      if (changed === 0 && deleted === 0 && added === 0 && removed === 0) return '';
-      return `short diff: ${changed} files changed, ${deleted} deleted, +${added} -${removed}`;
-    }
-    function renderStatusWork(status) {
-      if (Array.isArray(status.work) && status.work.length > 0) {
-        renderTasks(status.work);
-      }
-    }
-    function taskProcessDetails(task) {
-      const dir = task.task_artifact_dir;
-      const links = dir ? [['Status', 'status.json'], ['Context', 'context.json'], ['Input', 'input.json'], ['Output', 'output.json']]
-        .map(([label, name]) => `<a href="${escapeHtml(dir)}/${name}">${escapeHtml(label)}</a>`)
-        .join(' ') : '';
-      const metadata = task.metadata || {};
-      const route = {
-        source: {cycle_id: task.cycle_id || null, cycle_path: task.cycle_path || task.cycle_id || null, task_id: task.task_id || null},
-        destination: {executor: metadata.executor || task.executor_kind || 'unknown', artifact_dir: task.executor_artifact_dir || null},
-      };
-      const status = task.status_artifact ? '' : `<h3>Work Status</h3><pre>${escapeHtml(JSON.stringify(task, null, 2))}</pre>`;
-      return `<details><summary>cut with additional human-readable info about execution process</summary><p>${links}</p><h3>Source / Destination</h3><pre>${escapeHtml(JSON.stringify(route, null, 2))}</pre>${status}</details>`;
-    }
-    function taskDiffDetails(task) {
-      const output = task.output || {};
-      const changes = Array.isArray(output.file_changes) ? output.file_changes : [];
-      if (changes.length === 0) return '';
-      const rows = changes.map(change => `<li><strong>${escapeHtml(change.action || 'changed')}</strong> <code>${escapeHtml(change.path || '')}</code> <span class="muted">${escapeHtml(change.bytes || 0)} byte(s), +${escapeHtml(change.lines_added || 0)} -${escapeHtml(change.lines_removed || 0)}</span></li>`).join('');
-      return `<details><summary>cut with additional diff info</summary><h3>File Changes</h3><p>${escapeHtml(diffSummaryText(task))}</p><ul>${rows}</ul></details>`;
-    }
-    function taskRetryDetails(task) {
-      const feedback = (task.metadata || {}).retry_feedback;
-      if (!feedback || typeof feedback !== 'object') return '';
-      return `<p class="line">retry ${escapeHtml(feedback.failed_attempt)}/${escapeHtml(feedback.max_attempts)} with additional message to model</p><details><summary>cut with additional message</summary><h3>Retry Feedback</h3><pre>${escapeHtml(JSON.stringify(feedback, null, 2))}</pre></details>`;
-    }
-    async function refreshReport() {
-      let manifest = snapshot.manifest || {};
-      try { manifest = await readJson('trace/manifest.json'); } catch (error) {}
-      const data = (manifest || {}).report_data || {};
-      let report = null;
-      try { report = await readJson(data.report_snapshot || 'trace/report_data.json'); } catch (error) {}
-      try {
-        const status = await readJson(data.status || 'trace/status.json');
-        renderStatus(status);
-        if (!report || !Array.isArray(report.task_executions) || report.task_executions.length === 0) {
-          renderStatusWork(status);
-        }
-      } catch (error) {
-        if (report?.status) {
-          renderStatus(report.status);
-          if (!Array.isArray(report.task_executions) || report.task_executions.length === 0) {
-            renderStatusWork(report.status);
-          }
-        }
-      }
-      if (report) {
-        if (Array.isArray(report.task_executions) && report.task_executions.length > 0) {
-          renderTasks(report.task_executions);
-        }
-      } else {
-        try { renderTasks(await readJson(data.task_executions || 'trace/tasks/executions.json')); } catch (error) {}
-      }
-      const logPath = (report && report.execution_log) || data.execution_log;
-      if (logPath) {
-        try { document.getElementById('execution-log').textContent = await readText(logPath); } catch (error) {}
-      }
-      const loadedAt = document.getElementById('snapshot-loaded-at');
-      if (loadedAt) loadedAt.textContent = new Date().toISOString();
-    }
-    document.getElementById('refresh-report').addEventListener('click', refreshReport);
-    if (__AUTO_REFRESH_CONDITION__) {
-      setInterval(refreshReport, 3000);
-    }
-  </script>"""
-    return script.replace("__AUTO_REFRESH_CONDITION__", auto_refresh_condition)
