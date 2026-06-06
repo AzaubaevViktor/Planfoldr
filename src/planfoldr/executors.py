@@ -358,6 +358,18 @@ class ExecutorRegistry:
             attempt=attempt,
             model=model.name,
             provider=model.provider,
+            input={
+                "task_id": task.id,
+                "execution_id": execution_id,
+                "executor": "model",
+                "declared_input": {},
+                "request": None,
+                "model": model.model_dump(mode="json"),
+                "prompt": prompt_meta.to_dict(),
+                "messages": [{"role": "user", "content": prompt_meta.rendered_prompt}],
+                "config": {"prompt_id": prompt_meta.prompt_id, "attempt": attempt},
+                "tools": [],
+            },
         )
         response = self.model_adapter.generate(
             task=task,

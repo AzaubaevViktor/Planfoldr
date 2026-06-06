@@ -535,16 +535,27 @@ def test_live_report_shows_streaming_output_before_model_finishes(tmp_path: Path
 
     run_and_trace(loaded, registry, output_root=tmp_path, run_id="live-stream-run")
 
-    assert adapter.live_report_snapshots
-    live_report = adapter.live_report_snapshots[0]
+    assert len(adapter.live_report_snapshots) >= 2
+    immediate_report = adapter.live_report_snapshots[0]
+    live_report = adapter.live_report_snapshots[-1]
+    assert "Source" in immediate_report
+    assert "Context" in immediate_report
+    assert "Input" in immediate_report
+    assert "Generation" in immediate_report
+    assert "live partial content" not in immediate_report
     assert '<meta http-equiv="refresh"' not in live_report
-    assert "planfoldr-live-pause-until" in live_report
-    assert "window.clearTimeout(reloadTimer)" in live_report
+    assert "planfoldr-live-pause-until" not in live_report
+    assert "window.clearTimeout(reloadTimer)" not in live_report
+    assert "planfoldr-live-open-details" in live_report
     assert "window.location.reload()" in live_report
     assert "data-live-summary" in live_report
     assert '!event.target.hasAttribute("data-live-summary")' not in live_report
     assert "executor_cycle / ask_model" in live_report
-    assert "streaming output is updating" in live_report
+    assert "streaming output is updating" not in live_report
+    assert "Stream Stats" not in live_report
+    assert "Source" in live_report
+    assert "Context" in live_report
+    assert "Input" in live_report
     assert "Generation" in live_report
     assert "live partial content" in live_report
     assert "result: running" in live_report
@@ -662,6 +673,7 @@ class InspectingStreamingModelAdapter:
 
     def generate(self, *, task, model, messages, config, tools, progress_callback=None):
         if progress_callback is not None:
+            self.live_report_snapshots.append(self.report_path.read_text(encoding="utf-8"))
             progress_callback(
                 "model_stream_chunk",
                 {

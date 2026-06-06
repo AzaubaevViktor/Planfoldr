@@ -147,6 +147,7 @@ class LoggingExecutor:
         self.status_writer = status_writer
         self.task_cycle_ids = dict(task_cycle_ids or {})
         self._streams: Dict[str, Dict[str, Any]] = {}
+        self._active_tasks: Dict[str, Any] = {}
 
     def __call__(self, task):
         if hasattr(self.executor, "set_model_progress_callback"):
@@ -158,6 +159,7 @@ class LoggingExecutor:
             executor_kind=task.executor.kind,
         )
         cycle_id = self.task_cycle_ids.get(task.id)
+        self._active_tasks[task.id] = task
         if self.status_writer is not None:
             self.status_writer.update(
                 "task_start",
@@ -193,6 +195,7 @@ class LoggingExecutor:
                         "reason": str(exc),
                     },
                 )
+            self._active_tasks.pop(task.id, None)
             raise
         self.logger.write(
             "task_finish",
@@ -215,6 +218,7 @@ class LoggingExecutor:
                     "budget_after": result.budget_after,
                 },
             )
+        self._active_tasks.pop(task.id, None)
         return result
 
     def _write_model_progress(self, event: str, fields: Dict[str, Any]) -> None:
@@ -233,6 +237,9 @@ class LoggingExecutor:
         if self.status_writer is not None:
             task_id = fields.get("task_id")
             cycle_id = self.task_cycle_ids.get(str(task_id))
+            live_artifacts = {}
+            if event == "model_stream_start":
+                live_artifacts = self._write_live_model_task_artifacts(fields)
             self.status_writer.update(
                 event,
                 current_task_id=task_id,
@@ -251,8 +258,82 @@ class LoggingExecutor:
                     "executor_kind": "model",
                     "status": "running" if event != "model_stream_error" else "failed",
                     "execution_id": fields.get("execution_id"),
+                    **live_artifacts,
                 },
             )
+
+    def _write_live_model_task_artifacts(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        task_id = str(fields.get("task_id") or "")
+        execution_id = str(fields.get("execution_id") or "")
+        task = self._active_tasks.get(task_id)
+        if not task_id or not execution_id or task is None:
+            return {}
+        cycle_id = self.task_cycle_ids.get(task_id)
+        base = f"live/tasks/{_safe_trace_segment(task.type)}/{execution_id}"
+        source = {
+            "cycle_id": cycle_id,
+            "cycle_path": cycle_id,
+            "task_id": task_id,
+            "execution_id": execution_id,
+            "executor": "model",
+            "task_artifact_dir": f"trace/{base}",
+            "executor_artifact_dir": f"trace/models/{_safe_trace_segment(str(fields.get('model') or 'unknown_model'))}/{execution_id}",
+        }
+        started_at = _timestamp()
+        status = {
+            "task_id": task_id,
+            "execution_id": execution_id,
+            "cycle_id": cycle_id,
+            "cycle_path": cycle_id,
+            "task_type": task.type,
+            "executor": "model",
+            "status": "running",
+            "reason": None,
+            "started_at": started_at,
+            "finished_at": None,
+        }
+        context = _redact_secrets(
+            {
+                "task_id": task_id,
+                "execution_id": execution_id,
+                "cycle_id": cycle_id,
+                "cycle_path": cycle_id,
+                "task_type": task.type,
+                "task": task.task,
+                "input_schema": task.input_schema,
+                "output_schema": task.output_schema,
+                "source": source,
+            }
+        )
+        input_payload = fields.get("input")
+        if not isinstance(input_payload, dict):
+            input_payload = {
+                "task_id": task_id,
+                "execution_id": execution_id,
+                "executor": "model",
+                "declared_input": {},
+                "request": None,
+                "model": {"provider": fields.get("provider"), "name": fields.get("model")},
+                "messages": [],
+                "config": {"attempt": fields.get("attempt")},
+                "tools": [],
+            }
+        self._write_live_json(f"{base}/source.json", source)
+        self._write_live_json(f"{base}/status.json", status)
+        self._write_live_json(f"{base}/context.json", context)
+        self._write_live_json(f"{base}/input.json", _redact_secrets(input_payload))
+        return {
+            "source": source,
+            "source_artifact": f"trace/{base}/source.json",
+            "status_artifact": f"trace/{base}/status.json",
+            "context_artifact": f"trace/{base}/context.json",
+            "input_artifact": f"trace/{base}/input.json",
+        }
+
+    def _write_live_json(self, relative: str, value: Any) -> None:
+        target = self.trace_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
 
     def _start_model_stream(self, fields: Dict[str, Any]) -> None:
         self._stream_state(fields)
@@ -1384,11 +1465,8 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
         return ""
     return """<script>
 (function () {
-  var pauseKey = "planfoldr-live-pause-until";
   var detailsKey = "planfoldr-live-open-details";
   var scrollKey = "planfoldr-live-scroll-y";
-  var pauseMs = 10 * 60 * 1000;
-  var reloadTimer = null;
 
   function detailsList() {
     return Array.prototype.slice.call(document.querySelectorAll("details"));
@@ -1417,16 +1495,6 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
     }
   }
 
-  function pauseRefresh() {
-    if (reloadTimer !== null) {
-      window.clearTimeout(reloadTimer);
-      reloadTimer = null;
-    }
-    sessionStorage.setItem(pauseKey, String(Date.now() + pauseMs));
-    saveOpenDetails();
-    sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
-  }
-
   function restoreScroll() {
     var saved = Number(sessionStorage.getItem(scrollKey) || "0");
     if (saved > 0) {
@@ -1439,14 +1507,12 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
 
   document.addEventListener("toggle", function (event) {
     if (event.target && event.target.tagName === "DETAILS") {
-      pauseRefresh();
+      saveOpenDetails();
     }
   }, true);
 
   window.addEventListener("scroll", function () {
-    if ((window.scrollY || 0) > 20) {
-      pauseRefresh();
-    }
+    sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
   }, { passive: true });
 
   window.addEventListener("beforeunload", function () {
@@ -1454,11 +1520,7 @@ def _live_report_refresh_script(status: Dict[str, Any]) -> str:
     sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
   });
 
-  if (Number(sessionStorage.getItem(pauseKey) || "0") > Date.now()) {
-    return;
-  }
-
-  reloadTimer = window.setTimeout(function () {
+  window.setTimeout(function () {
     saveOpenDetails();
     sessionStorage.setItem(scrollKey, String(window.scrollY || 0));
     window.location.reload();
@@ -2020,27 +2082,65 @@ def _status_work_flow_html(status: Dict[str, Any], *, trace_dir: Optional[Path] 
         stream = active_stream if current_task == status.get("current_task_id") else {}
         stream_execution_id = item.get("execution_id") or stream.get("execution_id")
         show_stream = item.get("status") == "running" or current_task == status.get("current_task_id")
-        stream_html = (
-            _live_stream_preview_html(
-                stream_execution_id,
-                trace_dir=trace_dir,
-                stream=stream,
-            )
-            if show_stream
-            else ""
-        )
+        stream_html = _live_stream_preview_html(stream_execution_id, trace_dir=trace_dir) if show_stream else ""
+        detail_html = _live_task_detail_html(item, trace_dir=trace_dir, stream_html=stream_html)
         blocks.append(
             "<article class='task'>"
             f"{_task_flow_line_html(cycle_id, previous_task, current_task, next_task, is_active_level=cycle_id == active_cycle_id, is_active_task=current_task == active_task_id)}"
             f"<p class='line'>{html.escape(str(executor))}: {html.escape(str(current_task))}</p>"
-            f"{stream_html}"
-            "<details><summary>additional info</summary>"
-            f"{_report_pre('Work Status', json.dumps(item, indent=2, sort_keys=True))}"
-            "</details>"
+            f"{detail_html}"
             f"<p class='line'>result: {html.escape(str(item.get('status') or 'queued'))}{html.escape(reason)}</p>"
             "</article>"
         )
     return "\n".join(blocks)
+
+
+def _live_task_detail_html(item: Dict[str, Any], *, trace_dir: Optional[Path], stream_html: str) -> str:
+    executor = item.get("executor_kind") or item.get("task_type") or "task"
+    if executor != "model":
+        return (
+            "<details><summary>additional info</summary>"
+            f"{_report_pre('Work Status', json.dumps(item, indent=2, sort_keys=True))}"
+            "</details>"
+        )
+    source = item.get("source") if isinstance(item.get("source"), dict) else {}
+    source_text = json.dumps(source, indent=2, sort_keys=True) if source else _read_report_artifact_text(
+        trace_dir, item.get("source_artifact")
+    )
+    context_text = _read_report_artifact_text(trace_dir, item.get("context_artifact"))
+    input_text = _read_report_artifact_text(trace_dir, item.get("input_artifact"))
+    status_text = _read_report_artifact_text(trace_dir, item.get("status_artifact"))
+    budget_after = item.get("budget_after") if isinstance(item.get("budget_after"), dict) else {}
+    budget_html = ""
+    if budget_after:
+        budget_html = (
+            f"{_report_pre('Budget Spent', json.dumps(budget_after.get('usage', {}), indent=2, sort_keys=True))}"
+            f"{_report_pre('Budget Remaining', json.dumps(budget_after.get('remaining', {}), indent=2, sort_keys=True))}"
+        )
+    return (
+        "<details open><summary>additional info</summary>"
+        f"{_report_pre('Source', source_text)}"
+        f"{_report_pre('Context', context_text)}"
+        f"{_report_pre('Input', input_text)}"
+        f"{stream_html}"
+        f"{_report_detail('status', _report_pre('Status', status_text))}"
+        f"{budget_html}"
+        "</details>"
+    )
+
+
+def _read_report_artifact_text(trace_dir: Optional[Path], value: Any) -> str:
+    if trace_dir is None or not value:
+        return ""
+    path = Path(str(value))
+    if path.is_absolute() or ".." in path.parts:
+        return ""
+    target = trace_dir.parent / path if path.parts and path.parts[0] == "trace" else trace_dir / path
+    try:
+        target.relative_to(trace_dir.parent)
+    except ValueError:
+        return ""
+    return _read_optional_text(target)
 
 
 def _adjacent_work_task_id(work: List[Dict[str, Any]], index: int, *, direction: int, default: str) -> Any:
@@ -2058,33 +2158,25 @@ def _live_stream_preview_html(
     execution_id: Any,
     *,
     trace_dir: Optional[Path],
-    stream: Dict[str, Any],
 ) -> str:
     if trace_dir is None or not execution_id:
         return ""
     stream_path = trace_dir / "models" / str(execution_id) / "stream.jsonl"
     rows = _read_stream_rows(stream_path)
-    if not rows:
-        return ""
     content = "".join(str(row.get("text", "")) for row in rows if row.get("kind") == "content")
     thinking = "".join(str(row.get("text", "")) for row in rows if row.get("kind") == "thinking")
-    assembled = "".join(str(row.get("text", "")) for row in rows)
-    visible = content or assembled
-    preview = _tail_text(visible, 5000)
-    thinking_preview = _tail_text(thinking, 2000) if thinking and thinking != visible else ""
-    stats = {
-        "chars": stream.get("chars"),
-        "content_chars": stream.get("content_chars"),
-        "thinking_chars": stream.get("thinking_chars"),
-        "chunks": len(rows),
-    }
+    preview = _tail_text(content, 5000)
+    thinking_preview = _tail_text(thinking, 2000) if thinking else ""
     thinking_html = _report_detail("thinking", _report_pre("Thinking", thinking_preview)) if thinking_preview else ""
+    generation_html = (
+        _report_pre("Generation", preview)
+        if preview
+        else "<h3>Generation</h3><pre class='report-pre'></pre>"
+    )
     return (
         "<div class='streaming'>"
-        "<p class='line'>streaming output is updating</p>"
-        f"{_report_pre('Stream Stats', json.dumps(stats, indent=2, sort_keys=True))}"
         f"{thinking_html}"
-        f"{_report_pre('Generation', preview)}"
+        f"{generation_html}"
         "</div>"
     )
 
