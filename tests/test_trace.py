@@ -95,7 +95,7 @@ def test_run_and_trace_writes_manifest_task_parts_and_report(tmp_path: Path) -> 
     assert "Source" in report_text
     assert "Context" in report_text
     assert "Input" in report_text
-    assert "Model Content" in report_text
+    assert "Content" in report_text
     assert "Final Output" in report_text
     assert "Updated Context" in report_text
     assert "Context Diff" in report_text
@@ -509,7 +509,7 @@ def test_run_and_trace_writes_model_stream_progress_events(tmp_path: Path) -> No
     assert (stream_dir / "content.txt").read_text(encoding="utf-8") == "partial content"
     report_text = (tmp_path / "executor_scenario" / "stream-run" / "report.html").read_text(encoding="utf-8")
     assert "model: deterministic goal executor_prompt" in report_text
-    assert "Generation" in report_text
+    assert "Content" in report_text
     assert "<summary>thinking</summary>" in report_text
     assert "partial content" in report_text
     assert "thinking " in report_text

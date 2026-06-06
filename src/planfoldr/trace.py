@@ -1055,6 +1055,24 @@ class TraceWriter:
             task_artifact_dir=f"trace/{base}",
             executor_artifact_dir=_executor_artifact_dir_for_task(task),
         )
+        budget_spent_html = _report_pre("Budget Spent", json.dumps(_budget_spent(task.budget_before, task.budget_after), indent=2, sort_keys=True))
+        budget_remaining_html = _report_pre("Budget Remaining", json.dumps((task.budget_after or {}).get("remaining", {}), indent=2, sort_keys=True))
+        duration_html = _report_pre("Duration", json.dumps(_task_duration(task), indent=2, sort_keys=True))
+        if task.metadata.get("executor") == "model":
+            return (
+                f"<p>{links}</p>"
+                f"{_report_pre('Source', json.dumps(source, indent=2, sort_keys=True))}"
+                f"{_report_pre('Context', context_text)}"
+                f"{_report_pre('Input', input_text)}"
+                f"{model_text}"
+                f"{_report_pre('Final Output', output_text)}"
+                f"{_report_detail('updated context', _report_json('Updated Context', updated_context))}"
+                f"{_report_detail('context diff', _report_pre('Context Diff', _json_diff(original_context, updated_context)))}"
+                f"{_report_detail('status', _report_pre('Status', status_text))}"
+                f"{budget_spent_html}"
+                f"{budget_remaining_html}"
+                f"{duration_html}"
+            )
         return (
             "<details>"
             "<summary>additional info</summary>"
@@ -1067,9 +1085,9 @@ class TraceWriter:
             f"{_report_detail('updated context', _report_json('Updated Context', updated_context))}"
             f"{_report_detail('context diff', _report_pre('Context Diff', _json_diff(original_context, updated_context)))}"
             f"{_report_detail('status', _report_pre('Status', status_text))}"
-            f"{_report_pre('Budget Spent', json.dumps(_budget_spent(task.budget_before, task.budget_after), indent=2, sort_keys=True))}"
-            f"{_report_pre('Budget Remaining', json.dumps((task.budget_after or {}).get('remaining', {}), indent=2, sort_keys=True))}"
-            f"{_report_pre('Duration', json.dumps(_task_duration(task), indent=2, sort_keys=True))}"
+            f"{budget_spent_html}"
+            f"{budget_remaining_html}"
+            f"{duration_html}"
             "</details>"
         )
 
@@ -1104,10 +1122,8 @@ class TraceWriter:
             return ""
         return (
             _report_pre("Retry Feedback", retry_feedback_text)
-            + _report_pre("Generation", assembled)
             + (_report_detail("thinking", _report_pre("Thinking", thinking)) if thinking else "")
-            + _report_pre("Model Content", content or raw_response)
-            + _report_pre("Raw Response", raw_response)
+            + _report_pre("Content", content or raw_response)
         )
 
     def _request_route_html(self, cycle: CycleResult, task: TaskResult) -> str:
@@ -2118,14 +2134,12 @@ def _live_task_detail_html(item: Dict[str, Any], *, trace_dir: Optional[Path], s
             f"{_report_pre('Budget Remaining', json.dumps(budget_after.get('remaining', {}), indent=2, sort_keys=True))}"
         )
     return (
-        "<details open><summary>additional info</summary>"
         f"{_report_pre('Source', source_text)}"
         f"{_report_pre('Context', context_text)}"
         f"{_report_pre('Input', input_text)}"
         f"{stream_html}"
         f"{_report_detail('status', _report_pre('Status', status_text))}"
         f"{budget_html}"
-        "</details>"
     )
 
 
