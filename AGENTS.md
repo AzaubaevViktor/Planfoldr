@@ -54,8 +54,10 @@ NEVER EVER REMOVE MY PRETTY EXAMPLES
   5. Run focused tests first, then the full default suite with `.venv/bin/python -m pytest -q`.
   6. If any verification step cannot be run, document exactly what was not run and why before committing.
   7. Commit only after the implementation, quest notes and verification evidence agree with the examples and acceptance conditions.
+- Never mark a quest, checklist item, or audit line complete until final verification has actually run and its concrete artifact/output has been inspected. `compileall` is only a syntax/import sanity check; it does not count as final verification and cannot replace focused tests, full tests, real-model tests when required, or generated report/trace inspection.
 - Optional Ollama coverage is opt-in and may require a local model plus explicit environment variables. Do not run it as part of the default suite unless the user asks or the quest requires it.
 - When the user asks for Ollama/model tests or a quest requires them, it is acceptable to run local Ollama models up to and including 12 GB from `ollama list` without trying to conserve GPU, wall-clock time, or token usage. This is a local machine; resource usage for those eligible models is allowed to be effectively unbounded for verification.
+- Ollama e2e test runs must preserve generated run artifacts under `runs/` with a `test_run_` run id prefix so reports, traces, decisions and generated workspaces remain inspectable after pytest exits.
 - If `compileall` is useful, keep pycache output inside an allowed temp path, for example:
 
 ```bash

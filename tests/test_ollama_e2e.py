@@ -4,6 +4,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -15,6 +16,7 @@ from planfoldr.trace import run_and_trace
 
 
 SCENARIO = Path(__file__).parents[1] / "examples" / "scenarios" / "ollama_cli_todo_app.yaml"
+RUNS_ROOT = SCENARIO.parents[2] / "runs"
 MODEL_ENV = "PLANFOLDR_OLLAMA_MODEL"
 TIMEOUT_ENV = "PLANFOLDR_OLLAMA_TIMEOUT"
 
@@ -38,8 +40,11 @@ def test_ollama_cli_todo_demo(tmp_path: Path) -> None:
     model_override = os.environ.get(MODEL_ENV)
     if model_override:
         _override_model_name(loaded, model_override)
-    runtime = apply_runtime_context(loaded, output_root=tmp_path, run_id="ollama-test")
+    model_name = model_override or _first_model_name(loaded)
+    run_id = _test_run_id(model_name)
+    runtime = apply_runtime_context(loaded, output_root=RUNS_ROOT, run_id=run_id)
     inputs = loaded.document.inputs
+    run_dir = RUNS_ROOT / loaded.document.id / run_id
     registry = ExecutorRegistry(
         permission_engine=PermissionEngine(loaded.document.constraints, base_dir=SCENARIO.parents[2]),
         budget_tracker=BudgetTracker(loaded.document.budgets),
@@ -49,16 +54,18 @@ def test_ollama_cli_todo_demo(tmp_path: Path) -> None:
         invalid_output_retries=loaded.document.defaults.retry.invalid_output,
     )
 
-    result = run_and_trace(loaded, registry, output_root=tmp_path, run_id="ollama-test")
+    result = run_and_trace(loaded, registry, output_root=RUNS_ROOT, run_id=run_id)
 
     generated = Path(inputs["repository_path"])
+    assert run_dir.name.startswith("test_run_")
+    assert generated == run_dir / "workspace" / "project"
     assert result.status == "success"
     assert (generated / "AGENTS.md").exists()
     assert (generated / "ARCHITECTURE.md").exists()
     assert list(generated.glob("tests/test_*.py"))
-    _assert_generated_cli_behaves_like_todo_prompt(generated, tmp_path / "cli-contract")
-    assert (tmp_path / loaded.document.id / "ollama-test" / "trace" / "manifest.json").exists()
-    assert (tmp_path / loaded.document.id / "ollama-test" / "report.html").exists()
+    _assert_generated_cli_behaves_like_todo_prompt(generated, run_dir / "cli-contract")
+    assert (run_dir / "trace" / "manifest.json").exists()
+    assert (run_dir / "report.html").exists()
 
 
 def _override_model_name(loaded, model_name: str) -> None:
@@ -66,6 +73,23 @@ def _override_model_name(loaded, model_name: str) -> None:
         for task in cycle.document.tasks:
             if task.executor.model is not None:
                 task.executor.model.name = model_name
+
+
+def _first_model_name(loaded) -> str:
+    for cycle in loaded.cycles:
+        for task in cycle.document.tasks:
+            if task.executor.model is not None:
+                return task.executor.model.name
+    return "unknown_model"
+
+
+def _test_run_id(model_name: str, *, suffix: str | None = None) -> str:
+    return f"test_run_{_slug(model_name)}_{suffix or uuid4().hex[:8]}"
+
+
+def _slug(value: str) -> str:
+    chars = [char.lower() if char.isalnum() else "_" for char in value]
+    return "_".join("".join(chars).strip("_").split("_")) or "unknown"
 
 
 def _assert_generated_cli_behaves_like_todo_prompt(project: Path, state_root: Path) -> None:
@@ -147,6 +171,12 @@ def _combined_output(result: subprocess.CompletedProcess[str]) -> str:
 def _looks_completed(output: str) -> bool:
     markers = ("done", "complete", "completed", "finished", "[x]", "(x)", "true", "yes")
     return any(marker in output for marker in markers)
+
+
+def test_ollama_demo_test_run_id_uses_test_run_prefix() -> None:
+    assert _test_run_id("carstenuhlig/omnicoder-9b:latest", suffix="fixed") == (
+        "test_run_carstenuhlig_omnicoder_9b_latest_fixed"
+    )
 
 
 def test_hidden_cli_contract_accepts_generated_main_module(tmp_path: Path) -> None:
