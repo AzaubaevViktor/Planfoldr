@@ -187,6 +187,21 @@ def test_trace_writes_report_readable_task_inputs(tmp_path: Path) -> None:
     assert input_artifacts["command"]["env"] == {"PATH": "<inherited>"}
 
 
+def test_report_renders_json_blocks_with_highlighted_links_and_collapsible_nodes(tmp_path: Path) -> None:
+    loaded = load_scenario(FIXTURES / "executor_scenario.yaml")
+
+    run_and_trace(loaded, _registry(loaded), output_root=tmp_path, run_id="json-view")
+
+    report_text = (tmp_path / "executor_scenario" / "json-view" / "report.html").read_text(encoding="utf-8")
+    assert ".report-pre, .json-block { border: 1px solid #d1d5db; background: #f3f4f6;" in report_text
+    assert "<details open class='json-block'>" in report_text
+    assert "<details open class='json-node json-collection'>" in report_text
+    assert "<span class='json-key'>&quot;status&quot;</span>" in report_text
+    assert "<span class='json-punctuation'>{</span>" in report_text
+    assert "<span class='json-string'>&quot;success&quot;</span>" in report_text
+    assert "class='json-string json-link' href='trace/models/deterministic/" in report_text
+
+
 def test_trace_persists_model_retry_feedback_in_task_input(tmp_path: Path) -> None:
     loaded = load_scenario(FIXTURES / "validation_scenario.yaml")
     registry = ExecutorRegistry(

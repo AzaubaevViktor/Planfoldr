@@ -878,15 +878,7 @@ class TraceWriter:
   <meta charset="utf-8">
   <title>Planfoldr Report: {html.escape(self.loaded.document.id)}</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }}
-    code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; }}
-    details {{ border-left: 3px solid #d1d5db; margin: 0.5rem 0 1rem; padding: 0.5rem 0 0.5rem 0.75rem; }}
-    summary {{ cursor: pointer; font-weight: 600; }}
-    pre {{ background: #111827; color: #f9fafb; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }}
-    .muted {{ color: #6b7280; }}
-    .flow {{ max-width: 90rem; }}
-    .task {{ border-top: 1px solid #e5e7eb; padding: 1rem 0; }}
-    .line {{ margin: 0.25rem 0; }}
+{_report_styles()}
     .result-success {{ color: #166534; }}
     .result-failure, .result-error {{ color: #991b1b; }}
     .diff {{ font-weight: 600; }}
@@ -1323,14 +1315,7 @@ def _write_live_report_shell(
   <meta charset="utf-8">
   <title>Planfoldr Report: {html.escape(loaded.document.id)}</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }}
-    code {{ background: #f3f4f6; padding: 0.1rem 0.25rem; }}
-    details {{ border-left: 3px solid #d1d5db; margin: 0.5rem 0 1rem; padding: 0.5rem 0 0.5rem 0.75rem; }}
-    pre {{ background: #111827; color: #f9fafb; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }}
-    .muted {{ color: #6b7280; }}
-    .flow {{ max-width: 90rem; }}
-    .task {{ border-top: 1px solid #e5e7eb; padding: 1rem 0; }}
-    .line {{ margin: 0.25rem 0; }}
+{_report_styles()}
     .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.75rem; }}
     .metric {{ border: 1px solid #d1d5db; padding: 0.75rem; }}
     .streaming {{ border-left: 3px solid #2563eb; padding-left: 0.75rem; }}
@@ -1568,10 +1553,165 @@ def _read_json_optional(path: Path) -> Dict[str, Any]:
         return {}
 
 
+def _report_styles() -> str:
+    return """
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; line-height: 1.45; }
+    code { background: #f3f4f6; padding: 0.1rem 0.25rem; }
+    details { border-left: 3px solid #d1d5db; margin: 0.5rem 0 1rem; padding: 0.5rem 0 0.5rem 0.75rem; }
+    summary { cursor: pointer; font-weight: 600; }
+    pre { background: #f3f4f6; color: #111827; overflow: auto; padding: 0.75rem; white-space: pre-wrap; }
+    .muted { color: #6b7280; }
+    .flow { max-width: 90rem; }
+    .task { border-top: 1px solid #e5e7eb; padding: 1rem 0; }
+    .line { margin: 0.25rem 0; }
+    .report-pre, .json-block { border: 1px solid #d1d5db; background: #f3f4f6; color: #111827; overflow: auto; padding: 0.75rem; }
+    .json-block { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.9rem; line-height: 1.5; }
+    .json-block summary, .json-node summary { font-weight: 500; }
+    .json-view { margin-top: 0.35rem; }
+    .json-node { border-left: 2px solid #d1d5db; margin: 0.15rem 0; padding: 0.1rem 0 0.1rem 0.75rem; }
+    .json-children { margin-left: 1rem; }
+    .json-row { min-height: 1.35rem; }
+    .json-key { color: #7c2d12; font-weight: 600; }
+    .json-punctuation { color: #4f46e5; font-weight: 700; }
+    .json-string { color: #166534; }
+    .json-number { color: #1d4ed8; }
+    .json-boolean { color: #9333ea; font-weight: 600; }
+    .json-null { color: #6b7280; font-weight: 600; }
+    .json-link { text-decoration: underline; text-underline-offset: 0.15rem; }
+"""
+
+
 def _report_pre(title: str, text: str) -> str:
     if not text:
         return ""
-    return f"<h3>{html.escape(title)}</h3><pre>{html.escape(text)}</pre>"
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return f"<h3>{html.escape(title)}</h3><pre class='report-pre'>{html.escape(text)}</pre>"
+    if not isinstance(parsed, (dict, list)):
+        return f"<h3>{html.escape(title)}</h3><pre class='report-pre'>{html.escape(text)}</pre>"
+    return _report_json(title, parsed)
+
+
+def _report_json(title: str, value: Any) -> str:
+    return (
+        f"<h3>{html.escape(title)}</h3>"
+        f"<details open class='json-block'>"
+        f"<summary>{html.escape(title)} {_json_summary_html(value)}</summary>"
+        f"<div class='json-view'>{_json_value_html(value)}</div>"
+        "</details>"
+    )
+
+
+def _json_value_html(value: Any, *, key: Optional[str] = None, trailing_comma: bool = False) -> str:
+    if isinstance(value, dict):
+        return _json_collection_html(value, key=key, opener="{", closer="}", trailing_comma=trailing_comma)
+    if isinstance(value, list):
+        return _json_collection_html(value, key=key, opener="[", closer="]", trailing_comma=trailing_comma)
+    prefix = f"{_json_key_html(key)}<span class='json-punctuation'>: </span>" if key is not None else ""
+    comma = "<span class='json-punctuation'>,</span>" if trailing_comma else ""
+    return f"<div class='json-row'>{prefix}{_json_scalar_html(value)}{comma}</div>"
+
+
+def _json_collection_html(
+    value: Dict[str, Any] | List[Any],
+    *,
+    key: Optional[str],
+    opener: str,
+    closer: str,
+    trailing_comma: bool,
+) -> str:
+    prefix = f"{_json_key_html(key)}<span class='json-punctuation'>: </span>" if key is not None else ""
+    comma = "<span class='json-punctuation'>,</span>" if trailing_comma else ""
+    if not value:
+        return (
+            "<div class='json-row'>"
+            f"{prefix}<span class='json-punctuation'>{html.escape(opener + closer)}</span>{comma}"
+            "</div>"
+        )
+    rows = []
+    items = list(value.items()) if isinstance(value, dict) else list(enumerate(value))
+    for index, item in enumerate(items):
+        child_key: Optional[str]
+        child_value: Any
+        if isinstance(value, dict):
+            child_key, child_value = str(item[0]), item[1]
+        else:
+            child_key, child_value = None, item[1]
+        rows.append(_json_value_html(child_value, key=child_key, trailing_comma=index < len(items) - 1))
+    return (
+        f"<details open class='json-node json-collection'>"
+        f"<summary>{prefix}<span class='json-punctuation'>{html.escape(opener)}</span>"
+        f" <span class='muted'>{_json_count_text(value)}</span> "
+        f"<span class='json-punctuation'>{html.escape(closer)}</span>{comma}</summary>"
+        f"<div class='json-children'>{''.join(rows)}</div>"
+        "</details>"
+    )
+
+
+def _json_summary_html(value: Any) -> str:
+    if isinstance(value, dict):
+        return (
+            "<span class='json-punctuation'>{</span> "
+            f"<span class='muted'>{_json_count_text(value)}</span> "
+            "<span class='json-punctuation'>}</span>"
+        )
+    if isinstance(value, list):
+        return (
+            "<span class='json-punctuation'>[</span> "
+            f"<span class='muted'>{_json_count_text(value)}</span> "
+            "<span class='json-punctuation'>]</span>"
+        )
+    return ""
+
+
+def _json_count_text(value: Dict[str, Any] | List[Any]) -> str:
+    count = len(value)
+    unit = "key" if isinstance(value, dict) else "item"
+    suffix = "" if count == 1 else "s"
+    return f"{count} {unit}{suffix}"
+
+
+def _json_key_html(key: str) -> str:
+    return f"<span class='json-key'>{html.escape(json.dumps(key))}</span>"
+
+
+def _json_scalar_html(value: Any) -> str:
+    if isinstance(value, str):
+        escaped = html.escape(json.dumps(value))
+        href = _json_path_href(value)
+        if href:
+            return f"<a class='json-string json-link' href='{html.escape(href, quote=True)}'>{escaped}</a>"
+        return f"<span class='json-string'>{escaped}</span>"
+    if isinstance(value, bool):
+        return f"<span class='json-boolean'>{str(value).lower()}</span>"
+    if value is None:
+        return "<span class='json-null'>null</span>"
+    if isinstance(value, (int, float)):
+        return f"<span class='json-number'>{html.escape(json.dumps(value))}</span>"
+    return f"<span class='json-string'>{html.escape(json.dumps(str(value)))}</span>"
+
+
+def _json_path_href(value: str) -> Optional[str]:
+    if not value or any(char in value for char in "\n\r\t"):
+        return None
+    if value.startswith(("http://", "https://")):
+        return value
+    path = Path(value)
+    if path.is_absolute():
+        return value
+    parts = path.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        return None
+    if parts[0] in {"trace", "logs"}:
+        return value
+    if parts[0] in {"commands", "cycles", "inputs", "models", "tasks", "tools"}:
+        return f"trace/{value}"
+    if value in {"artifacts.json", "manifest.json", "report_data.json", "scenario.json", "scenario_definition.json", "status.json"}:
+        return f"trace/{value}"
+    if "/" in value and path.suffix in {".json", ".jsonl", ".log", ".md", ".txt"}:
+        return value
+    return None
 
 
 def _file_changes_html(value: Any, summary: Any = None) -> str:
