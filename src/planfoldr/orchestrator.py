@@ -271,7 +271,7 @@ class Orchestrator:
 
     # -- create_ticket routing ------------------------------------------------
     def _create_ticket(self, spec: Dict[str, Any]) -> str:
-        ttype = spec.get("type", "code")
+        ttype = spec.get("type") or spec.get("ticket_type") or "code"
         queue_id = TYPE_TO_QUEUE.get(ttype)
         if queue_id is None or not self.queue_registry.has(queue_id):
             # Unknown specialization → escalate to birthgiver, route the work to developer for now.
@@ -280,13 +280,19 @@ class Orchestrator:
         n = self._counters.get(queue_id, 0) + 1
         self._counters[queue_id] = n
         tid = spec.get("id") or f"{queue_id}-{n}"
+        # Local models phrase the goal in different fields -- accept the common aliases.
+        goal = (spec.get("goal") or spec.get("description") or spec.get("summary")
+                or spec.get("task") or spec.get("title") or "")
+        title = spec.get("title") or (goal[:60] if goal else tid)
+        raw_checks = spec.get("checks") or spec.get("verification") or spec.get("tests") or []
         checks = [c if isinstance(c, Check) else (Check.from_dict(c) if isinstance(c, dict)
-                  else Check(kind="command", spec=str(c))) for c in spec.get("checks", [])]
+                  else Check(kind="command", spec=str(c))) for c in raw_checks]
+        raw_deps = spec.get("dependencies") or spec.get("depends_on") or spec.get("blocked_by") or []
         executor_role = self.queue_registry.get(queue_id).executor_roles[0]
         ticket = new_ticket(
-            tid, title=spec.get("title", tid), type=ttype, goal=spec.get("goal", ""),
+            tid, title=title, type=ttype, goal=goal,
             created_by=spec.get("created_by", "orchestrator"), audit=self.audit, checks=checks,
-            dependencies=[d for d in spec.get("dependencies", []) if d in self.tickets],
+            dependencies=[d for d in raw_deps if d in self.tickets],
             spawned_by=spec.get("spawned_by"), role=executor_role, queue=queue_id,
             difficulty=float(spec.get("difficulty", 0.5)),
         )

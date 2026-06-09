@@ -49,6 +49,20 @@ _PROTOCOL = (
     "Never wrap it in markdown."
 )
 
+_ACTION_REFERENCE = {
+    "file_edit": '{"action":"file_edit","args":{"path":"relative/file.py","content":"<FULL file content>"}} — creates/overwrites a file in the workspace',
+    "bash": '{"action":"bash","args":{"cmd":"<shell command>"}} — run a command in the workspace (use rarely; do not repeat read-only commands)',
+    "create_ticket": '{"action":"create_ticket","args":{"type":"code|tests|research|fix|verify","title":"...","goal":"<concrete goal>","dependencies":["<ticket-id>"],"checks":[{"kind":"command","spec":"<shell test that exits 0 on success>"}]}}',
+    "update_ticket": '{"action":"update_ticket","args":{"finding":"<evidence/notes>","status":"note"}}',
+    "write_context": '{"action":"write_context","args":{"section":"<name>","content":"..."}}',
+    "read_context": '{"action":"read_context","args":{"section":"<name>"}}',
+    "request_decision": '{"action":"request_decision","args":{"question":"<ask @human>"}}',
+    "request_context": '{"action":"request_context","args":{"question":"<ask parent>"}}',
+    "verify": '{"action":"verify","args":{"passed":true,"reason":"<why the evidence proves the goal>"}}',
+    "plan": '{"action":"plan","args":{"notes":"<short plan>"}}',
+    "finish": '{"action":"finish","args":{}} — use when the GOAL is achieved',
+}
+
 
 @dataclass
 class CycleResult:
@@ -198,25 +212,43 @@ class Cycle:
         self.local_memory["verdict"] = {"passed": passed, "reason": reason, "false_verification": passed and cmd_fail}
 
     # -- action loop ----------------------------------------------------------
+    # Actions handled by the cycle itself rather than by a tool in the role's toolset.
+    _NON_TOOL_ACTIONS = {"finish", "plan", "verify", "note"}
+
+    def _effective_allowed(self, allowed: set) -> set:
+        """Only offer actions the role can actually perform: phase actions ∩ role toolset (plus the
+        cycle-handled non-tool actions). Prevents e.g. the orchestrator being offered file_edit."""
+        return {a for a in allowed if a in self._NON_TOOL_ACTIONS or self.toolset.can(a)}
+
     def _action_loop(self, phase: str, *, allowed: set, max_iterations: int) -> None:
+        allowed = self._effective_allowed(allowed)
         last_result: Optional[Dict[str, Any]] = None
         reformat_left = 2
+        last_sig: Optional[str] = None
+        repeats = 0
         for _ in range(max_iterations):
             if self.budget.blocked:
                 return
             action = self._one_action(phase, user=self._changes_user(phase, allowed, last_result), allowed=allowed)
             if action.error and reformat_left > 0:
                 reformat_left -= 1
-                last_result = {"protocol_error": action.error}
+                last_result = {"protocol_error": action.error, "hint": "Reply with exactly one JSON action object."}
                 continue
             if action.action in {"finish", ""}:
+                return
+            # Break out of a model stuck repeating the identical action (e.g. ls -R loops).
+            sig = f"{action.action}:{action.args!r}"
+            repeats = repeats + 1 if sig == last_sig else 0
+            last_sig = sig
+            if repeats >= 2:
+                self.local_memory.setdefault("notes", []).append(f"stopped repeated action {action.action}")
                 return
             if action.action == "plan":
                 self.local_memory.setdefault("plan", []).append(action.args.get("notes", action.thinking))
                 last_result = {"ok": True}
                 continue
             if action.action not in allowed:
-                last_result = {"error": f"action '{action.action}' not allowed in {phase}"}
+                last_result = {"error": f"action '{action.action}' not allowed in {phase}; allowed: {sorted(allowed)}"}
                 continue
             try:
                 result = self.toolset.invoke(
@@ -257,12 +289,18 @@ class Cycle:
         return parse_action(response.content)
 
     def _changes_user(self, phase: str, allowed: set, last_result: Optional[Dict[str, Any]]) -> str:
+        ref = "\n".join(f"- {_ACTION_REFERENCE[a]}" for a in sorted(allowed) if a in _ACTION_REFERENCE)
+        constraints = self.ticket.metadata.get("constraints") or []
         return (
-            f"PHASE: {phase}. Ticket {self.ticket.id} ({self.ticket.type}).\n"
-            f"Goal: {self.ticket.goal}\n"
-            f"Context: {self.local_memory.get('context', {})}\n"
-            f"Allowed actions: {sorted(allowed)} (use 'finish' when the goal is achieved).\n"
-            f"Workspace is the current directory. Last tool result: {last_result}\n"
+            f"PHASE: {phase}. You are working on ticket {self.ticket.id} ({self.ticket.type}).\n"
+            f"GOAL: {self.ticket.goal}\n"
+            + (f"CONSTRAINTS: {constraints}\n" if constraints else "")
+            + f"CONTEXT: {self.local_memory.get('context', {})}\n"
+            "The workspace is the current directory and may be empty; CREATE the files needed to "
+            "achieve the GOAL using file_edit (provide the full file content). Do not repeat "
+            "read-only commands. When the GOAL is achieved, respond with finish.\n"
+            f"ACTION REFERENCE (choose exactly ONE):\n{ref}\n"
+            f"Last tool result: {last_result}\n"
             f"{_PROTOCOL}"
         )
 
