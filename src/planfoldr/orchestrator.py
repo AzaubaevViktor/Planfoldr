@@ -39,9 +39,10 @@ BASE_ROLES: Dict[str, Dict[str, Any]] = {
     "orchestration": {
         "domain": [],
         "prompt": ("You are the orchestrator. Break the goal into the MINIMAL set of tickets via "
-                   "create_ticket — often a single code ticket, plus a tests ticket only if useful. "
-                   "Give each ticket a concrete goal and command checks. NEVER create duplicate "
-                   "tickets for the same work. Once the tickets are created, respond with finish."),
+                   "create_ticket. For a single-file goal create EXACTLY ONE code ticket. Add a "
+                   "tests ticket only when the goal explicitly needs separate tests. Give each "
+                   "ticket a concrete goal and command checks. NEVER create duplicate or speculative "
+                   "tickets. Immediately after creating the ticket(s), respond with finish."),
         "can_create": ["*"],  # the top planner may create any ticket type; unknown types summon birthgiver
     },
     "developer": {
@@ -297,6 +298,8 @@ class Orchestrator:
         adapter = self.model_registry.adapter_for(model_cfg.id)
         ticket_budget = self.budget.delegate(ticket.budget or dict(DEFAULT_TICKET_BUDGET), scope="ticket", ticket_id=ticket.id)
         self.ticket_budgets[ticket.id] = ticket_budget
+        # Decomposition cycles get tight bounds (few tickets, few iterations); work cycles get more.
+        is_planning = ticket.type in ("orchestration", "plan", "decompose")
         cycle = Cycle(
             ticket=ticket, role=role, model_config=model_cfg, model_adapter=adapter, budget=ticket_budget,
             audit=self.audit, toolset=role.effective_toolset(queue_id), workspace=self.workspace,
@@ -304,6 +307,7 @@ class Orchestrator:
             allowed_paths=self._allowed_paths, on_create_ticket=self._create_ticket,
             on_request_decision=self.human, on_summon=self._on_summon,
             stream_sink=self.stream_sink, ps_provider=self.ps_provider, report_hook=self._write_report,
+            max_iterations=4 if is_planning else 8, spawn_cap=3 if is_planning else 6,
         )
         result = cycle.run()
         self._write_report()

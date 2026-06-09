@@ -109,6 +109,7 @@ class Cycle:
         ps_provider: Optional[Callable[[], str]] = None,
         report_hook: Optional[Callable[[], None]] = None,
         max_iterations: int = 8,
+        spawn_cap: int = 6,
     ) -> None:
         self.ticket = ticket
         self.role = role
@@ -126,6 +127,7 @@ class Cycle:
         self.ps_provider = ps_provider
         self.report_hook = report_hook
         self.max_iterations = max_iterations
+        self.spawn_cap = spawn_cap
         self.execution_id = new_id("exec")
         self.local_memory: Dict[str, Any] = {"changes_log": [], "context": {}}
         self.spawned_tickets: List[str] = []
@@ -412,6 +414,10 @@ class Cycle:
             return None
 
         def wrapped(spec: Dict[str, Any]) -> str:
+            distinct = len(set(self.spawned_tickets))
+            if distinct >= self.spawn_cap:
+                from planfoldr.tools_impl import ToolError
+                raise ToolError(f"ticket limit ({self.spawn_cap}) reached for this cycle; respond with finish")
             spec.setdefault("spawned_by", self.ticket.id)
             ticket_id = fn(spec)
             self.spawned_tickets.append(ticket_id)
