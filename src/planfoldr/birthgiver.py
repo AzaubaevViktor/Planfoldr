@@ -95,8 +95,10 @@ class Birthgiver(Role):
         ticket = new_ticket(
             new_id("birth"), title=f"create role @{role_name}", type="create_role",
             goal=f"Decide whether role '{role_name}' is needed and create it if so.",
-            created_by=requester, role="birthgiver", queue="orchestration", audit=self.audit,
+            created_by=requester, role="birthgiver", queue="birthgiver", audit=self.audit,
         )
+        ticket.metadata["requested_role"] = role_name
+        ticket.metadata["reason"] = reason
         self.audit.emit(EventType.ROLE_SUMMONED, ticket_id=ticket.id, actor=requester, role=role_name, reason=reason)
         return ticket
 

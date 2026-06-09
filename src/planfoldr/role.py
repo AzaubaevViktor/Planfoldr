@@ -73,7 +73,7 @@ class Role:
         )
 
     def can_create(self, ticket_type: str) -> bool:
-        return ticket_type in self.can_create_ticket_types
+        return "*" in self.can_create_ticket_types or ticket_type in self.can_create_ticket_types
 
     def record_score(self, entry: Dict[str, Any]) -> None:
         self.score_history.append(entry)

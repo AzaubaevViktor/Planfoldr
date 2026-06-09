@@ -38,7 +38,7 @@ from planfoldr.util import new_id
 BASE_ROLES: Dict[str, Dict[str, Any]] = {
     "orchestration": {
         "domain": [], "prompt": "You are the orchestrator. Break the goal into tickets via create_ticket.",
-        "can_create": ["code", "tests", "fix", "research", "documentation", "security-review", "verify", "refactor"],
+        "can_create": ["*"],  # the top planner may create any ticket type; unknown types summon birthgiver
     },
     "developer": {
         "domain": ["file_edit", "bash"], "prompt": "You are a developer. Write code and tests in the workspace.",
@@ -64,6 +64,7 @@ TYPE_TO_QUEUE = {
     "verify": "verification", "benchmark": "verification",
     "security-review": "security", "audit": "security", "block": "security",
     "plan": "orchestration", "decompose": "orchestration", "orchestration": "orchestration",
+    "create_role": "birthgiver",
 }
 
 DEFAULT_TICKET_BUDGET = {Metric.TOKENS: 40_000}
@@ -195,6 +196,11 @@ class Orchestrator:
             self.queue_registry.register(queue)
             self.audit.emit(EventType.QUEUE_CREATED, actor="birthgiver", queue=name,
                             roles=[manager.id, executor.id], seed=True)
+        # The birthgiver gets its own queue so summoned create_role tickets are processed live.
+        bg_queue = Queue(id="birthgiver", name="birthgiver", graph=self.graph, audit=self.audit,
+                         manager_role="birthgiver", executor_roles=["birthgiver"],
+                         description="role/queue creation requests")
+        self.queue_registry.register(bg_queue)
 
     def _resolve_accesses(self) -> List[Path]:
         roots = [self.workspace.resolve()]
@@ -251,6 +257,9 @@ class Orchestrator:
         return best
 
     def _run_executor_cycle(self, queue: Queue, ticket: Ticket) -> None:
+        if ticket.type == "create_role":
+            self._run_birthgiver(ticket)
+            return
         executor = self.role_registry.get(queue.executor_roles[0])
         while True:
             ticket.transition(Status.RUNNING, actor=executor.id, audit=self.audit)
@@ -262,6 +271,20 @@ class Orchestrator:
             if result.status == Status.NEEDS_REVIEW and not ticket.exhausted_attempts() and self.cycles_run < self.max_cycles:
                 continue  # re-attempt until verified or attempts exhausted
             break
+
+    def _run_birthgiver(self, ticket: Ticket) -> None:
+        """Process a summoned create_role ticket: the birthgiver links/creates the role + queue live."""
+        ticket.transition(Status.RUNNING, actor="birthgiver", audit=self.audit)
+        name = ticket.metadata.get("requested_role") or ticket.title
+        decision = self.birthgiver.link_or_create(
+            name, needed=True, prompt=f"You are the {name}.",
+            domain_tools=["file_edit", "bash"], can_create_ticket_types=["fix"],
+            budget_scope={Metric.TOKENS: 30_000},
+        )
+        ticket.add_evidence(check_index=None, status="success", proof=f"birthgiver {decision.action} role '{name}'")
+        ticket.transition(Status.DONE, actor="birthgiver", audit=self.audit, proof=f"role {decision.action}: {name}")
+        self.cycles_run += 1
+        self._write_report()
 
     def _run_cycle(self, ticket: Ticket, queue_id: str, *, role=None, model_cfg=None):
         role = role or self.role_registry.get("orchestrator")
@@ -286,8 +309,9 @@ class Orchestrator:
         ttype = spec.get("type") or spec.get("ticket_type") or "code"
         queue_id = TYPE_TO_QUEUE.get(ttype)
         if queue_id is None or not self.queue_registry.has(queue_id):
-            # Unknown specialization → escalate to birthgiver, route the work to developer for now.
-            self.birthgiver.summon_ticket(ttype, requester=spec.get("created_by", "orchestrator"))
+            # Unknown specialization → summon birthgiver (registered + processed live), route work to developer.
+            summon = self.birthgiver.summon_ticket(ttype, requester=spec.get("created_by", "orchestrator"))
+            self._register_ticket(summon)
             queue_id = "developer"
         n = self._counters.get(queue_id, 0) + 1
         self._counters[queue_id] = n
@@ -308,10 +332,13 @@ class Orchestrator:
             spawned_by=spec.get("spawned_by"), role=executor_role, queue=queue_id,
             difficulty=float(spec.get("difficulty", 0.5)),
         )
-        self.tickets[tid] = ticket
-        self.graph.add_ticket(ticket, spawned_by=ticket.spawned_by)
-        self.queue_registry.get(queue_id).add(ticket)
+        self._register_ticket(ticket)
         return tid
+
+    def _register_ticket(self, ticket: Ticket) -> None:
+        self.tickets[ticket.id] = ticket
+        self.graph.add_ticket(ticket, spawned_by=ticket.spawned_by)
+        self.queue_registry.get(ticket.queue).add(ticket)
 
     # -- final verification ---------------------------------------------------
     def _final_verification(self) -> tuple[str, Optional[str]]:
