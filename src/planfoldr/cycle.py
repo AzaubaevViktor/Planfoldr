@@ -247,6 +247,8 @@ class Cycle:
         reformat_left = 2
         last_sig: Optional[str] = None
         repeats = 0
+        no_progress = 0
+        seen_tickets: set = set()
         for _ in range(max_iterations):
             if self.budget.blocked:
                 return
@@ -281,6 +283,20 @@ class Cycle:
             self.local_memory["changes_log"].append({"action": action.action, "result": result})
             self._emit_tool(phase, {"action": action.action, "args": action.args}, result)
             last_result = result
+            # No-progress detection: a model that keeps erroring, or re-creating an existing ticket
+            # (deduped), or rejected, isn't advancing -> stop instead of burning the whole iteration
+            # budget. (Decomposition usually needs only 1-2 productive actions.)
+            productive = True
+            if not isinstance(result, dict) or result.get("error") or result.get("status") == "rejected":
+                productive = False
+            elif action.action == "create_ticket":
+                tid = result.get("ticket_id")
+                productive = tid not in seen_tickets
+                seen_tickets.add(tid)
+            no_progress = 0 if productive else no_progress + 1
+            if no_progress >= 2:
+                self.local_memory.setdefault("notes", []).append("stopped: no further progress")
+                return
 
     # -- model call -----------------------------------------------------------
     def _one_action(self, phase: str, *, user: str, allowed: set) -> Action:
