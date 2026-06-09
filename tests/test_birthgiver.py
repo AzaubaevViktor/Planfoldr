@@ -87,6 +87,28 @@ def test_create_role_tool_is_meta_and_invokes_birthgiver():
     assert roles.has("data_engineer-exec") and queues.has("data_engineer")
 
 
+def test_comment_tool_summons_unknown_role():
+    from pathlib import Path
+
+    from planfoldr.budget import Budget
+    from planfoldr.role import Executor
+    from planfoldr.ticket import new_ticket
+    from planfoldr.tools_impl import ToolContext, handle_comment
+
+    audit = AuditLog()
+    reg = ToolRegistry()
+    ticket = new_ticket("dev-1", title="t", type="code", goal="g", created_by="o")
+    role = Executor("developer", prompt="p", toolset=Toolset([], registry=reg))
+    summoned = []
+    ctx = ToolContext(audit=audit, budget=Budget(), workspace=Path("."), ticket=ticket, role=role,
+                      on_summon=lambda r, a: summoned.append((r, a)))
+    result = handle_comment({"text": "need a perf pass @perf_guru", "summon": "perf_guru"}, ctx)
+    assert result["summoned"] == "perf_guru"
+    assert ticket.comments[-1].summoned_role == "perf_guru"
+    assert summoned == [("perf_guru", "developer")]
+    assert any(e.event_type == EventType.ROLE_SUMMONED and e.payload["role"] == "perf_guru" for e in audit.events())
+
+
 def test_human_answers_and_audits():
     audit = AuditLog()
     human = Human({"budget": "you may spend up to 50k tokens"}, default="proceed", audit=audit)

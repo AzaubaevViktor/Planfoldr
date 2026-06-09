@@ -43,6 +43,7 @@ class ToolContext:
     command_timeout: float = 120.0
     on_create_ticket: Optional[Callable[[Dict[str, Any]], str]] = None
     on_request_decision: Optional[Callable[[str, str], str]] = None
+    on_summon: Optional[Callable[[str, str], None]] = None
 
     def roots(self) -> List[Path]:
         return self.allowed_paths or [self.workspace]
@@ -156,6 +157,17 @@ def handle_read_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any
     return {"section": args["section"], "content": content}
 
 
+def handle_comment(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+    """Write a comment on the current ticket and optionally summon a role via @role. If the summoned
+    role does not exist the request is routed to the birthgiver (PHASE_3 Context Exploration)."""
+    summon = args.get("summon") or args.get("role")
+    author = getattr(ctx.role, "id", "model")
+    ctx.ticket.add_comment(author=author, text=str(args.get("text", "")), summon=summon, audit=ctx.audit)
+    if summon and ctx.on_summon is not None:
+        ctx.on_summon(summon, author)
+    return {"ok": True, "summoned": summon, "comments": len(ctx.ticket.comments)}
+
+
 def handle_request_decision(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
     question = args.get("question", args.get("text", ""))
     kind = args.get("kind", "decision")
@@ -170,17 +182,22 @@ DEFAULT_HANDLERS = {
     "bash": ("domain", handle_bash),
     "create_ticket": ("base", handle_create_ticket),
     "update_ticket": ("base", handle_update_ticket),
+    "comment": ("base", handle_comment),
     "write_context": ("base", handle_write_context),
     "read_context": ("base", handle_read_context),
     "request_decision": ("base", handle_request_decision),
     "request_context": ("base", handle_request_decision),
 }
 
+# Base tools every role holds (in addition to the registry seed); kept in sync with the toolset.
+_EXTRA_BASE = {"comment"}
+
 
 def register_default_tools(registry: ToolRegistry) -> ToolRegistry:
     for name, (scope, handler) in DEFAULT_HANDLERS.items():
         registry.bind(name, handler)
-        if name not in {"create_ticket", "update_ticket", "read_context", "write_context",
-                        "request_context", "request_decision"}:
+        if scope != "base":
             registry.register(name, scope=scope, handler=handler)
+        elif name in _EXTRA_BASE and not registry.has(name):
+            registry.register(name, scope="base", handler=handler)
     return registry

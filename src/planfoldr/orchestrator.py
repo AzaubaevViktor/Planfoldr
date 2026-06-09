@@ -297,8 +297,8 @@ class Orchestrator:
             audit=self.audit, toolset=role.effective_toolset(queue_id), workspace=self.workspace,
             graph=self.graph, knowledge_base=self.kb, score_system=self.score,
             allowed_paths=self._allowed_paths, on_create_ticket=self._create_ticket,
-            on_request_decision=self.human, stream_sink=self.stream_sink, ps_provider=self.ps_provider,
-            report_hook=self._write_report,
+            on_request_decision=self.human, on_summon=self._on_summon,
+            stream_sink=self.stream_sink, ps_provider=self.ps_provider, report_hook=self._write_report,
         )
         result = cycle.run()
         self._write_report()
@@ -328,6 +328,7 @@ class Orchestrator:
         ticket = new_ticket(
             tid, title=title, type=ttype, goal=goal,
             created_by=spec.get("created_by", "orchestrator"), audit=self.audit, checks=checks,
+            reason=spec.get("reason") or spec.get("why"),
             dependencies=[d for d in raw_deps if d in self.tickets],
             spawned_by=spec.get("spawned_by"), role=executor_role, queue=queue_id,
             difficulty=float(spec.get("difficulty", 0.5)),
@@ -339,6 +340,14 @@ class Orchestrator:
         self.tickets[ticket.id] = ticket
         self.graph.add_ticket(ticket, spawned_by=ticket.spawned_by)
         self.queue_registry.get(ticket.queue).add(ticket)
+
+    def _on_summon(self, role: str, requester: str) -> None:
+        """A model summoned @role via a comment. If that role/queue does not exist, route the
+        request to the birthgiver as an incoming ticket (PHASE_3 Context Exploration)."""
+        if self.role_registry.has(role) or self.role_registry.has(f"{role}-exec") or self.queue_registry.has(role):
+            return
+        summon = self.birthgiver.summon_ticket(role, requester=requester)
+        self._register_ticket(summon)
 
     # -- final verification ---------------------------------------------------
     def _final_verification(self) -> tuple[str, Optional[str]]:

@@ -34,6 +34,7 @@ BASE_TOOLS: Set[str] = {
     "update_ticket",
     "request_context",
     "request_decision",
+    "comment",  # write a ticket comment / summon a role via @role (PHASE_3 context capability)
 }
 META_TOOLS: Set[str] = {"create_role"}
 

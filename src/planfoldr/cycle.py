@@ -54,6 +54,7 @@ _ACTION_REFERENCE = {
     "bash": '{"action":"bash","args":{"cmd":"<shell command>"}} — run a command in the workspace (use rarely; do not repeat read-only commands)',
     "create_ticket": '{"action":"create_ticket","args":{"type":"code|tests|research|fix|verify","title":"...","goal":"<concrete goal>","dependencies":["<ticket-id>"],"checks":[{"kind":"command","spec":"<shell test that exits 0 on success>"}]}}',
     "update_ticket": '{"action":"update_ticket","args":{"finding":"<evidence/notes>","status":"note"}}',
+    "comment": '{"action":"comment","args":{"text":"<comment>","summon":"<@role to call, optional>"}}',
     "write_context": '{"action":"write_context","args":{"section":"<name>","content":"..."}}',
     "read_context": '{"action":"read_context","args":{"section":"<name>"}}',
     "request_decision": '{"action":"request_decision","args":{"question":"<ask @human>"}}',
@@ -103,6 +104,7 @@ class Cycle:
         allowed_paths: Optional[List[Path]] = None,
         on_create_ticket: Optional[Callable[[Dict[str, Any]], str]] = None,
         on_request_decision: Optional[Callable[[str, str], str]] = None,
+        on_summon: Optional[Callable[[str, str], None]] = None,
         stream_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
         ps_provider: Optional[Callable[[], str]] = None,
         report_hook: Optional[Callable[[], None]] = None,
@@ -133,7 +135,7 @@ class Cycle:
             audit=audit, budget=budget, workspace=workspace, ticket=ticket, role=role, graph=graph,
             knowledge_base=knowledge_base, allowed_paths=allowed_paths or [workspace],
             on_create_ticket=self._wrap_create_ticket(on_create_ticket),
-            on_request_decision=on_request_decision,
+            on_request_decision=on_request_decision, on_summon=on_summon,
         )
 
     # -- public ---------------------------------------------------------------
@@ -177,16 +179,21 @@ class Cycle:
             context["related"] = self.graph.related(self.ticket.id, RELATED_TO)
             context["evidence_for"] = self.graph.related(self.ticket.id, EVIDENCE_FOR)
         self.local_memory["context"] = context
+        # Context Exploration is where tickets are managed: plan, read/write KB, create tickets,
+        # update findings, comment / summon roles (PHASE_3 "Context exploration").
         self._action_loop(
             CONTEXT,
-            allowed={"plan", "request_decision", "request_context", "read_context", "finish"},
-            max_iterations=2,
+            allowed={"plan", "read_context", "write_context", "create_ticket", "update_ticket",
+                     "comment", "request_decision", "request_context", "finish"},
+            max_iterations=3,
         )
 
     def _phase_changes(self) -> None:
+        # Changes works the working copy: domain tools + new tickets + KB writes. It does NOT
+        # modify existing tickets or leave comments (PHASE_3 "Изменения в рабочей копии").
         self._action_loop(
             CHANGES,
-            allowed={"file_edit", "bash", "create_ticket", "update_ticket", "write_context",
+            allowed={"file_edit", "bash", "create_ticket", "write_context",
                      "read_context", "request_decision", "finish"},
             max_iterations=self.max_iterations,
         )

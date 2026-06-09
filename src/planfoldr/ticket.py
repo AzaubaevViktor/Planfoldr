@@ -266,18 +266,22 @@ def new_ticket(
     goal: str,
     created_by: str,
     audit: Optional[AuditLog] = None,
+    reason: Optional[str] = None,
     **kwargs: Any,
 ) -> Ticket:
-    """Factory that stamps creation metadata and emits ticket.created."""
+    """Factory that stamps creation metadata and emits ticket.created (with actor, reason,
+    spawned_by -- PHASE_3 'Динамическое создание тикетов')."""
     ticket = Ticket(id=ticket_id, title=title, type=type, _goal=goal, **kwargs)
     ticket.metadata.setdefault("created_by", created_by)
     ticket.metadata.setdefault("created_at", now_iso())
     ticket.metadata.setdefault("change_history", [])
+    if reason:
+        ticket.metadata["reason"] = reason
     if audit is not None:
         audit.emit(
             EventType.TICKET_CREATED,
             ticket_id=ticket_id, actor=created_by,
-            type=type, title=title, goal=goal, spawned_by=ticket.spawned_by,
+            type=type, title=title, goal=goal, spawned_by=ticket.spawned_by, reason=reason,
         )
     return ticket
 
