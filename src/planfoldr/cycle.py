@@ -1,0 +1,333 @@
+"""Cycle (level 5b) -- the base unit of work over a ticket.
+
+Runs four phases in strict order: Context Exploration → Changes → Command Verification → Model
+Verification. Not every ticket type needs all four (research = context + model verify; verify =
+command + model verify), but the order never breaks. The Changes phase is a bounded JSON-action
+loop where the model drives the allowed tools. Each phase emits a `cycle.phase_completed` event.
+
+PHASE_3 "Базовый цикл" + PHASE_4 §2. Properties: execution_id, ticket_id, role, model, phase,
+local_memory (ephemeral, never leaks), budget_used, parent_cycle_id, spawned_tickets. Constraints
+flow down (via the ticket), facts flow up (via `output`). The parent owns the tree; a child cycle
+updates its own ticket but cannot declare the whole project done. Budget is delegated and cannot
+be exceeded without an approved request_decision.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from planfoldr.audit import AuditLog, EventType
+from planfoldr.budget import Budget, Metric
+from planfoldr.model import Action, ModelAdapter, ModelConfig, parse_action
+from planfoldr.score import ScoreSystem
+from planfoldr.ticket import Status, Ticket
+from planfoldr.tools_impl import ToolContext, run_command
+from planfoldr.toolset import ToolDenied, Toolset
+from planfoldr.util import new_id
+
+CONTEXT = "context_exploration"
+CHANGES = "changes"
+COMMAND_VERIFY = "command_verification"
+MODEL_VERIFY = "model_verification"
+
+PHASES_BY_TYPE: Dict[str, List[str]] = {
+    "research": [CONTEXT, MODEL_VERIFY],
+    "verify": [COMMAND_VERIFY, MODEL_VERIFY],
+    "documentation": [CONTEXT, CHANGES, MODEL_VERIFY],
+}
+DEFAULT_PHASES = [CONTEXT, CHANGES, COMMAND_VERIFY, MODEL_VERIFY]
+
+_PROTOCOL = (
+    "Respond with ONE JSON object and nothing else: "
+    '{"thinking": "...", "action": "<name>", "args": {...}}. '
+    "Never wrap it in markdown."
+)
+
+
+@dataclass
+class CycleResult:
+    execution_id: str
+    ticket_id: str
+    status: str                       # done | failed | needs_review | budget_exceeded
+    phases: List[str] = field(default_factory=list)
+    evidence: List[Dict[str, Any]] = field(default_factory=list)
+    spawned_tickets: List[str] = field(default_factory=list)
+    budget_used: Dict[str, float] = field(default_factory=dict)
+    output: Dict[str, Any] = field(default_factory=dict)
+    reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "execution_id": self.execution_id, "ticket_id": self.ticket_id, "status": self.status,
+            "phases": self.phases, "evidence": self.evidence, "spawned_tickets": self.spawned_tickets,
+            "budget_used": self.budget_used, "output": self.output, "reason": self.reason,
+        }
+
+
+class Cycle:
+    def __init__(
+        self,
+        *,
+        ticket: Ticket,
+        role: Any,
+        model_config: ModelConfig,
+        model_adapter: ModelAdapter,
+        budget: Budget,
+        audit: AuditLog,
+        toolset: Toolset,
+        workspace: Path,
+        graph: Any = None,
+        knowledge_base: Any = None,
+        score_system: Optional[ScoreSystem] = None,
+        parent_cycle_id: Optional[str] = None,
+        allowed_paths: Optional[List[Path]] = None,
+        on_create_ticket: Optional[Callable[[Dict[str, Any]], str]] = None,
+        on_request_decision: Optional[Callable[[str, str], str]] = None,
+        stream_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
+        ps_provider: Optional[Callable[[], str]] = None,
+        max_iterations: int = 8,
+    ) -> None:
+        self.ticket = ticket
+        self.role = role
+        self.model_config = model_config
+        self.model = model_adapter
+        self.budget = budget
+        self.audit = audit
+        self.toolset = toolset
+        self.workspace = workspace
+        self.graph = graph
+        self.knowledge_base = knowledge_base
+        self.score_system = score_system
+        self.parent_cycle_id = parent_cycle_id
+        self.stream_sink = stream_sink
+        self.ps_provider = ps_provider
+        self.max_iterations = max_iterations
+        self.execution_id = new_id("exec")
+        self.local_memory: Dict[str, Any] = {"changes_log": [], "context": {}}
+        self.spawned_tickets: List[str] = []
+        self.phase: Optional[str] = None
+        self._budget_exceeded = False
+        self._tool_ctx = ToolContext(
+            audit=audit, budget=budget, workspace=workspace, ticket=ticket, role=role, graph=graph,
+            knowledge_base=knowledge_base, allowed_paths=allowed_paths or [workspace],
+            on_create_ticket=self._wrap_create_ticket(on_create_ticket),
+            on_request_decision=on_request_decision,
+        )
+
+    # -- public ---------------------------------------------------------------
+    def run(self) -> CycleResult:
+        self.audit.emit(
+            EventType.CYCLE_STARTED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
+            role=getattr(self.role, "id", None), model=self.model_config.id,
+            parent_cycle_id=self.parent_cycle_id, type=self.ticket.type,
+        )
+        self.ticket.record_attempt()
+        phases = PHASES_BY_TYPE.get(self.ticket.type, DEFAULT_PHASES)
+        ran: List[str] = []
+        for phase in phases:
+            self.phase = phase
+            getattr(self, f"_phase_{phase}")()
+            ran.append(phase)
+            self.audit.emit(
+                EventType.CYCLE_PHASE_COMPLETED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
+                phase=phase, budget=self.budget.snapshot(),
+            )
+            if self.budget.blocked:
+                self._budget_exceeded = True
+                break
+        return self._finalize(ran)
+
+    # -- phases ---------------------------------------------------------------
+    def _phase_context_exploration(self) -> None:
+        context = {
+            "goal": self.ticket.goal,
+            "checks": [c.to_dict() for c in self.ticket.checks],
+            "prior_evidence": list(self.ticket.evidence),
+            "dependencies": list(self.ticket.dependencies),
+        }
+        if self.graph is not None:
+            from planfoldr.graph import EVIDENCE_FOR, RELATED_TO
+            context["related"] = self.graph.related(self.ticket.id, RELATED_TO)
+            context["evidence_for"] = self.graph.related(self.ticket.id, EVIDENCE_FOR)
+        self.local_memory["context"] = context
+        self._action_loop(
+            CONTEXT,
+            allowed={"plan", "request_decision", "request_context", "read_context", "finish"},
+            max_iterations=2,
+        )
+
+    def _phase_changes(self) -> None:
+        self._action_loop(
+            CHANGES,
+            allowed={"file_edit", "bash", "create_ticket", "update_ticket", "write_context",
+                     "read_context", "request_decision", "finish"},
+            max_iterations=self.max_iterations,
+        )
+
+    def _phase_command_verification(self) -> None:
+        for idx, check in enumerate(self.ticket.checks):
+            if check.kind != "command":
+                continue
+            result = run_command(check.spec, cwd=self.workspace, timeout=self._tool_ctx.command_timeout, budget=self.budget)
+            self.ticket.add_evidence(check_index=idx, status=result["status"], proof=f"$ {check.spec}\nexit={result['exit_code']}\n{result['stderr'][:400]}")
+            self._emit_tool("command_verification", {"check": check.spec}, result)
+
+    def _phase_model_verification(self) -> None:
+        model_checks = [c for c in self.ticket.checks if c.kind == "model"]
+        criteria = [c.spec for c in model_checks] or [self.ticket.goal]
+        evidence_repr = [e for e in self.ticket.evidence]
+        action = self._one_action(
+            MODEL_VERIFY,
+            user=(
+                f"PHASE: model_verification. Judge whether the goal is met by the evidence.\n"
+                f"Goal: {self.ticket.goal}\nCriteria: {criteria}\nEvidence: {evidence_repr}\n"
+                'Respond {"action":"verify","args":{"passed":true|false,"reason":"..."}}.'
+            ),
+            allowed={"verify"},
+        )
+        passed = bool(action.args.get("passed", False)) if action.action == "verify" else False
+        reason = action.args.get("reason", "")
+        # Detect a false verification: model claims pass while command evidence shows failure.
+        cmd_fail = any(e.get("status") == "failure" for e in self.ticket.evidence)
+        self.local_memory["verdict"] = {"passed": passed, "reason": reason, "false_verification": passed and cmd_fail}
+
+    # -- action loop ----------------------------------------------------------
+    def _action_loop(self, phase: str, *, allowed: set, max_iterations: int) -> None:
+        last_result: Optional[Dict[str, Any]] = None
+        reformat_left = 2
+        for _ in range(max_iterations):
+            if self.budget.blocked:
+                return
+            action = self._one_action(phase, user=self._changes_user(phase, allowed, last_result), allowed=allowed)
+            if action.error and reformat_left > 0:
+                reformat_left -= 1
+                last_result = {"protocol_error": action.error}
+                continue
+            if action.action in {"finish", ""}:
+                return
+            if action.action == "plan":
+                self.local_memory.setdefault("plan", []).append(action.args.get("notes", action.thinking))
+                last_result = {"ok": True}
+                continue
+            if action.action not in allowed:
+                last_result = {"error": f"action '{action.action}' not allowed in {phase}"}
+                continue
+            try:
+                result = self.toolset.invoke(
+                    action.action, audit=self.audit, actor=getattr(self.role, "id", "model"),
+                    ticket_id=self.ticket.id, cycle_id=self.execution_id, args=action.args, ctx=self._tool_ctx,
+                )
+            except (ToolDenied, Exception) as exc:  # noqa: BLE001 -- surface tool errors back to the model
+                result = {"error": str(exc)}
+            self.local_memory["changes_log"].append({"action": action.action, "result": result})
+            self._emit_tool(phase, {"action": action.action, "args": action.args}, result)
+            last_result = result
+
+    # -- model call -----------------------------------------------------------
+    def _one_action(self, phase: str, *, user: str, allowed: set) -> Action:
+        system = f"{getattr(self.role, 'effective_prompt', lambda *a: '')(self.ticket.queue) if self.role else ''}\n{_PROTOCOL}\nAllowed actions: {sorted(allowed)}"
+        messages = [{"role": "system", "content": system.strip()}, {"role": "user", "content": user}]
+        chunks: List[str] = []
+
+        def progress(event: str, fields: Dict[str, Any]) -> None:
+            if event == "model_stream_chunk":
+                chunks.append(fields.get("text", ""))
+            if self.stream_sink is not None:
+                self.stream_sink({"phase": phase, "event": event, **fields})
+
+        response = self.model.generate(messages, fmt="json", progress=progress)
+        # Budget accounting happens in the cycle, not the model.
+        self.budget.consume(Metric.API_REQUESTS, 1)
+        self.budget.consume(Metric.TOKENS, response.total_tokens)
+        if self.model_config.cost_per_token:
+            self.budget.consume(Metric.MONEY, response.total_tokens * self.model_config.cost_per_token)
+        if self.ps_provider is not None and response.duration_seconds:
+            self.budget.charge_model_seconds(self.model_config.id, response.duration_seconds, ps_provider=self.ps_provider)
+        self.audit.emit(
+            EventType.MODEL_STREAM, ticket_id=self.ticket.id, cycle_id=self.execution_id, phase=phase,
+            model=self.model_config.id, content_chars=len(response.content),
+            thinking_chars=len(response.thinking), tokens=response.total_tokens,
+        )
+        return parse_action(response.content)
+
+    def _changes_user(self, phase: str, allowed: set, last_result: Optional[Dict[str, Any]]) -> str:
+        return (
+            f"PHASE: {phase}. Ticket {self.ticket.id} ({self.ticket.type}).\n"
+            f"Goal: {self.ticket.goal}\n"
+            f"Context: {self.local_memory.get('context', {})}\n"
+            f"Allowed actions: {sorted(allowed)} (use 'finish' when the goal is achieved).\n"
+            f"Workspace is the current directory. Last tool result: {last_result}\n"
+            f"{_PROTOCOL}"
+        )
+
+    # -- finalize -------------------------------------------------------------
+    def _finalize(self, ran: List[str]) -> CycleResult:
+        verdict = self.local_memory.get("verdict", {})
+        ran_cmd = COMMAND_VERIFY in ran
+        ran_model = MODEL_VERIFY in ran
+        cmd_ok = (not ran_cmd) or all(
+            any(e.get("check_index") == i and e.get("status") == "success" for e in self.ticket.evidence)
+            for i, c in enumerate(self.ticket.checks) if c.kind == "command" and c.required
+        )
+        model_ok = (not ran_model) or bool(verdict.get("passed"))
+        passed = cmd_ok and model_ok and not self._budget_exceeded
+
+        if self._budget_exceeded:
+            status = "budget_exceeded"
+            reason = "budget exceeded; soft stop"
+        elif passed:
+            proof = verdict.get("reason") or "all mandatory checks passed"
+            self.ticket.transition(Status.DONE, actor=getattr(self.role, "id", "executor"), audit=self.audit, proof=proof)
+            status = Status.DONE
+            reason = None
+        elif self.ticket.exhausted_attempts():
+            self.ticket.transition(Status.FAILED, actor=getattr(self.role, "id", "executor"), audit=self.audit)
+            status = Status.FAILED
+            reason = "verification failed; attempts exhausted"
+        else:
+            self.ticket.transition(Status.NEEDS_REVIEW, actor=getattr(self.role, "id", "executor"), audit=self.audit)
+            status = Status.NEEDS_REVIEW
+            reason = "verification not passed"
+
+        if self.score_system is not None:
+            self.score_system.record(
+                self.model_config.id, role=getattr(self.role, "id", "executor"), task_type=self.ticket.type,
+                passed=(status == Status.DONE), verified=(status == Status.DONE and ran_model),
+                difficulty=self.ticket.difficulty,
+                tokens_used=self.budget.usage.get(Metric.TOKENS, 0),
+                tokens_budget=self.budget.limits.get(Metric.TOKENS, 0),
+                budget_exhausted=self._budget_exceeded,
+                false_verification=bool(verdict.get("false_verification")),
+            )
+
+        self.audit.emit(
+            EventType.CYCLE_COMPLETED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
+            status=status, spawned=self.spawned_tickets, budget=self.budget.snapshot(),
+        )
+        # Facts flow up via output; local_memory is discarded (ephemeral, never leaks).
+        return CycleResult(
+            execution_id=self.execution_id, ticket_id=self.ticket.id, status=status, phases=ran,
+            evidence=list(self.ticket.evidence), spawned_tickets=list(self.spawned_tickets),
+            budget_used=self.budget.snapshot(),
+            output={"summary": reason or "completed", "verdict": verdict, "spawned": self.spawned_tickets},
+            reason=reason,
+        )
+
+    # -- helpers --------------------------------------------------------------
+    def _wrap_create_ticket(self, fn: Optional[Callable[[Dict[str, Any]], str]]):
+        if fn is None:
+            return None
+
+        def wrapped(spec: Dict[str, Any]) -> str:
+            spec.setdefault("spawned_by", self.ticket.id)
+            ticket_id = fn(spec)
+            self.spawned_tickets.append(ticket_id)
+            return ticket_id
+
+        return wrapped
+
+    def _emit_tool(self, phase: str, call: Dict[str, Any], result: Dict[str, Any]) -> None:
+        if self.stream_sink is not None:
+            self.stream_sink({"phase": phase, "event": "tool_result", "call": call, "result": result})
