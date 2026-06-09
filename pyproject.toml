@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "planfoldr"
+version = "0.4.0"
+description = "Phase 3/4 dynamic ticket-graph orchestration runtime."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+  "pydantic>=2",
+  "PyYAML>=6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "ollama: optional local Ollama end-to-end run (opt-in via PLANFOLDR_OLLAMA_E2E=1)",
+]
