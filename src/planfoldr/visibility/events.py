@@ -35,8 +35,22 @@ class VisibilityState:
             kind = event.get("event")
             if kind == "audit":
                 self._audit(event)
-            elif kind in ("model_stream_chunk", "tool_result"):
+            elif kind == "model_output":
+                self._model_output(event)
+            elif kind == "model_stream_chunk":
+                self._live_chunk(event)  # live preview only -- not stored in the persisted log
+            elif kind == "tool_result":
                 self._append_log({"type": kind, **event})
+
+    def _model_output(self, e: Dict[str, Any]) -> None:
+        cid = e.get("cycle_id")
+        entry = {"phase": e.get("phase"), "model": e.get("model"), "thinking": e.get("thinking", ""),
+                 "content": e.get("content", ""), "tokens": e.get("tokens")}
+        cyc = self.cycles.get(cid)
+        if cyc is not None:
+            cyc.setdefault("outputs", []).append(entry)
+        # Full output goes to the persisted log (one entry per model call -- start is never dropped).
+        self._append_log({"type": "model_output", "cycle_id": cid, "ticket_id": e.get("ticket_id"), **entry})
 
     def _audit(self, e: Dict[str, Any]) -> None:
         et = e.get("event_type", "")
@@ -82,8 +96,17 @@ class VisibilityState:
         elif et == "tool.invoked":
             name = p.get("tool")
             self.tools[name] = self.tools.get(name, 0) + 1
-            if name in ("bash",) or e.get("payload", {}).get("scope") == "command_verification":
-                self.commands.append({"ticket": tid, "args": p.get("args"), "result": p.get("result")})
+            if name in ("bash", "command_verification") or p.get("scope") == "command_verification":
+                args = p.get("args") or {}
+                result = p.get("result") or {}
+                self.commands.append({
+                    "ticket": tid,
+                    "actor": e.get("actor"),
+                    "when": e.get("timestamp"),
+                    "cmd": args.get("cmd") or args.get("command") or args,
+                    "exit_code": result.get("exit_code"),
+                    "status": result.get("status"),
+                })
         elif et == "budget.exceeded":
             self.budgets["exceeded"] = {"resource": p.get("resource"), "limit": p.get("limit"), "used": p.get("used")}
         # Everything also lands in the streaming log.
@@ -98,11 +121,16 @@ class VisibilityState:
         self.log.append(entry)
         if len(self.log) > _MAX_LOG:
             del self.log[: len(self.log) - _MAX_LOG]
-        # attach live model stream text to the owning cycle for the State View drill-down
-        if entry.get("type") == "model_stream_chunk" and entry.get("kind") == "content":
-            for cyc in self.cycles.values():
-                if cyc.get("status") == "running":
-                    cyc["stream"] = (cyc.get("stream", "") + entry.get("text", ""))[-2000:]
+
+    def _live_chunk(self, event: Dict[str, Any]) -> None:
+        # Live token preview for the currently running cycle (drill-down); the canonical full output
+        # is captured per call via model_output, so nothing is lost even if this preview is bounded.
+        if event.get("kind") != "content":
+            return
+        cid = event.get("cycle_id")
+        cyc = self.cycles.get(cid)
+        if cyc is not None:
+            cyc["live"] = (cyc.get("live", "") + event.get("text", ""))[-4000:]
 
     # -- snapshot -------------------------------------------------------------
     def snapshot(self) -> Dict[str, Any]:

@@ -105,6 +105,7 @@ class Cycle:
         on_request_decision: Optional[Callable[[str, str], str]] = None,
         stream_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
         ps_provider: Optional[Callable[[], str]] = None,
+        report_hook: Optional[Callable[[], None]] = None,
         max_iterations: int = 8,
     ) -> None:
         self.ticket = ticket
@@ -121,6 +122,7 @@ class Cycle:
         self.parent_cycle_id = parent_cycle_id
         self.stream_sink = stream_sink
         self.ps_provider = ps_provider
+        self.report_hook = report_hook
         self.max_iterations = max_iterations
         self.execution_id = new_id("exec")
         self.local_memory: Dict[str, Any] = {"changes_log": [], "context": {}}
@@ -152,6 +154,11 @@ class Cycle:
                 EventType.CYCLE_PHASE_COMPLETED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
                 phase=phase, budget=self.budget.snapshot(),
             )
+            if self.report_hook is not None:
+                try:
+                    self.report_hook()  # refresh the live HTML report after each phase
+                except Exception:  # noqa: BLE001 -- reporting must never break the run
+                    pass
             if self.budget.blocked:
                 self._budget_exceeded = True
                 break
@@ -190,6 +197,13 @@ class Cycle:
                 continue
             result = run_command(check.spec, cwd=self.workspace, timeout=self._tool_ctx.command_timeout, budget=self.budget)
             self.ticket.add_evidence(check_index=idx, status=result["status"], proof=f"$ {check.spec}\nexit={result['exit_code']}\n{result['stderr'][:400]}")
+            # Record the command as a traceable event (who/when/cmd/exit) for Visibility.
+            self.audit.emit(
+                EventType.TOOL_INVOKED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
+                actor=getattr(self.role, "id", "verifier"), tool="command_verification",
+                scope="command_verification", args={"cmd": check.spec},
+                result={"exit_code": result["exit_code"], "status": result["status"]},
+            )
             self._emit_tool("command_verification", {"check": check.spec}, result)
 
     def _phase_model_verification(self) -> None:
@@ -271,9 +285,19 @@ class Cycle:
             if event == "model_stream_chunk":
                 chunks.append(fields.get("text", ""))
             if self.stream_sink is not None:
-                self.stream_sink({"phase": phase, "event": event, **fields})
+                self.stream_sink({"phase": phase, "event": event, "cycle_id": self.execution_id,
+                                  "ticket_id": self.ticket.id, **fields})
 
         response = self.model.generate(messages, fmt="json", progress=progress)
+        # Emit the FULL assembled output (thinking + content) so the report never loses the start
+        # of a stream (the per-token chunks above are for live terminal/WS only).
+        if self.stream_sink is not None:
+            self.stream_sink({
+                "event": "model_output", "cycle_id": self.execution_id, "ticket_id": self.ticket.id,
+                "phase": phase, "model": self.model_config.id, "thinking": response.thinking,
+                "content": response.content, "tokens": response.total_tokens,
+                "input": {"system": system, "user": user},
+            })
         # Budget accounting happens in the cycle, not the model.
         self.budget.consume(Metric.API_REQUESTS, 1)
         self.budget.consume(Metric.TOKENS, response.total_tokens)

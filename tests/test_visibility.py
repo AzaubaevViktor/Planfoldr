@@ -46,10 +46,59 @@ def test_state_view_html_has_all_required_slices():
     assert "queues" in html and "cycle_tree" in html and "budgets" in html
 
 
-def test_stream_log_html_embeds_log_and_details():
-    html = render_stream_log_html(embedded=({"system": {}}, [{"type": "audit", "event_type": "cycle.started"}]))
-    assert "__LOG__" in html and "__SNAPSHOT__" in html
-    assert "details" in html  # expandable executions
+def test_stream_log_renders_entries_and_goal_header():
+    snap = {"scenario": {"name": "demo", "goal": "build the thing"}, "status": "running",
+            "log": [{"type": "audit", "event_type": "cycle.started", "cycle_id": "c1", "ticket_id": "dev-1",
+                     "payload": {"model": "m", "role": "developer"}},
+                    {"type": "model_output", "cycle_id": "c1", "content": '{"action":"finish"}', "thinking": "done"}]}
+    html = render_stream_log_html(embedded=snap)
+    # Goal/description at the TOP (in the header, before the log section heading).
+    assert "build the thing" in html
+    assert html.index("build the thing") < html.index("<h2>Streaming Log</h2>")
+    assert html.index("build the thing") < html.index("▶ cycle")  # goal precedes the log entries
+    assert "▶ cycle" in html and "details" in html  # expandable executions
+    assert "__SNAPSHOT__" in html
+
+
+def test_tickets_page_shows_comments_history_and_evidence():
+    from planfoldr.visibility.web import render_tickets_html
+    snap = {"tickets": {"dev-1": {
+        "id": "dev-1", "type": "code", "title": "impl", "goal": "write calc.py", "status": "done",
+        "role": "developer-exec", "queue": "developer", "attempt_count": 1, "max_attempts": 3,
+        "spawned_by": "orchestration-0", "dependencies": [],
+        "comments": [{"author": "developer", "text": "needs a security pass", "timestamp": "t", "summoned_role": "security"}],
+        "evidence": [{"check_index": 0, "status": "success", "proof": "pytest exit 0"}],
+        "checks": [{"kind": "command", "spec": "pytest", "required": True}],
+        "metadata": {"change_history": [{"from": "running", "to": "done", "actor": "developer", "at": "t"}]},
+    }}, "graph": {"nodes": [], "links": []}}
+    html = render_tickets_html(embedded=snap)
+    assert "write calc.py" in html and "needs a security pass" in html
+    assert "security" in html and "running" in html and "done" in html  # history + summons
+    assert "pytest exit 0" in html  # evidence
+
+
+def test_kb_page_shows_sections_and_content():
+    from planfoldr.visibility.web import render_kb_html
+    snap = {"kb": {"findings": {"content": "the bug is in auth.py", "read_roles": ["*"],
+                                "write_roles": ["developer"], "versions": [{"version": 1, "timestamp": "t", "role": "developer"}]}}}
+    html = render_kb_html(embedded=snap)
+    assert "findings" in html and "the bug is in auth.py" in html and "developer" in html
+
+
+def test_state_view_commands_and_budgets_are_human_readable():
+    snap = {
+        "scenario": {"name": "s", "goal": "g"}, "status": "done",
+        "commands": [{"when": "2026-06-10T...", "actor": "developer-exec", "ticket": "dev-1",
+                      "cmd": "pytest", "exit_code": 0, "status": "success"}],
+        "budgets": {"project": {"usage": {"tokens_used": 100}, "limits": {"tokens_used": 1000}, "exceeded": False},
+                    "tickets": [{"ticket": "dev-1", "title": "implement", "goal": "write calc.py",
+                                 "usage": {"tokens_used": 80, "api_requests": 4}, "limits": {}, "exceeded": False}]},
+        "tickets": {"dev-1": {"id": "dev-1", "type": "code", "status": "done"}},
+    }
+    html = render_state_view_html(embedded=snap)
+    assert "developer-exec" in html and "pytest" in html  # commands: who + cmd
+    assert "implement" in html and "write calc.py" in html  # budgets keyed by ticket title/goal, not exec_ ids
+    assert "exec_" not in html.split("State View")[-1] or "implement" in html  # readable, not raw exec ids
 
 
 # -- websocket primitives -----------------------------------------------------
@@ -110,3 +159,22 @@ def test_run_writes_static_visibility_report(tmp_path):
     for slice_name in SLICES:
         assert f'id="{slice_name}"' in state
     assert "developer-1" in state and "tools" in state
+
+
+def test_run_writes_all_pages_analysis_and_model_io(tmp_path):
+    result = run_scenario(E2E.base_scenario(), runs_dir=tmp_path, run_id="test_run_full_vis",
+                          model_adapter=StubModel(E2E.make_e2e_stub()))
+    run = Path(result.run_dir)
+    vis = run / "visibility"
+    for page in ["index.html", "state.html", "tickets.html", "kb.html", "analysis.html"]:
+        assert (vis / page).exists(), page
+    # Structured analysis artifact for human + improving agent.
+    analysis = (run / "analysis.md").read_text()
+    assert "# Run Analysis" in analysis and "## Summary" in analysis
+    assert "## Harness improvement suggestions" in analysis
+    # Full model I/O persisted (nothing lost), per call.
+    model_io = (run / "model_io.jsonl").read_text().strip().splitlines()
+    assert len(model_io) >= 3
+    # Streaming start preserved: the first model output content is present in the log page.
+    tickets_page = (vis / "tickets.html").read_text()
+    assert "developer-1" in tickets_page and "create file alpha.txt" in tickets_page

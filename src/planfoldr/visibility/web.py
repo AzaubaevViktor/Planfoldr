@@ -1,16 +1,21 @@
-"""Visibility web layer (level 6): two HTML pages + a JSON API, fed live over WebSocket.
+"""Visibility web layer (level 6): four server-rendered HTML pages + a JSON API + WebSocket.
 
-- Streaming Log page (`/`): thinking → output → tool calls → results, each execution an expandable
-  details/summary block with its input/context/tools.
-- State View page (`/state`): live slices -- queues / tickets / models / commands / tools / cycles /
-  cycle tree / system / budgets -- with drill-down.
+Pages (all link to each other, all auto-refresh so they update live during a run, and all work as
+static files with no server -- "Не требует сервера для чтения"):
+- `/`            Streaming Log: goal/description header, then thinking → output → tool calls →
+                 results, each execution an expandable details/summary block.
+- `/state`       State View: queues / tickets / models / commands / tools / cycles / cycle tree /
+                 system / budgets, human-readable.
+- `/tickets`     Ticket tree + every ticket in full: goal, status history, comments, evidence, deps.
+- `/kb`          Knowledge Base: every section the models wrote, with version history.
 
-The same HTML works live (served by this server, updating over the WebSocket) and as a static file
-(embedded snapshot, opens with no server -- "Не требует сервера для чтения").
+Pages are rendered server-side from a snapshot dict (built by the orchestrator from live objects),
+so the data is present in the HTML itself -- robust and inspectable.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,31 +25,250 @@ from typing import Any, Dict, List, Optional, Tuple
 from planfoldr.visibility.events import SLICES, VisibilityState
 from planfoldr.visibility.ws import WebSocketServer
 
+REFRESH_SECONDS = 2
 
-def render_stream_log_html(ws_port: Optional[int] = None, embedded: Optional[Tuple[dict, list]] = None) -> str:
-    snap, log = embedded or ({}, [])
-    return _PAGE.format(
-        title="Planfoldr — Streaming Log", ws_port=ws_port or 0,
-        snapshot=json.dumps(snap, default=str), log=json.dumps(log, default=str),
-        body=_STREAM_BODY, script=_STREAM_SCRIPT,
+
+def _norm(embedded: Any) -> Tuple[dict, list]:
+    if embedded is None:
+        return {}, []
+    if isinstance(embedded, tuple):
+        snap, log = embedded
+        return snap or {}, log or []
+    return embedded, embedded.get("log", [])
+
+
+def esc(value: Any) -> str:
+    return html.escape("" if value is None else str(value))
+
+
+def _table(rows: List[Dict[str, Any]], columns: Optional[List[str]] = None) -> str:
+    if not rows:
+        return "<i>none</i>"
+    columns = columns or list({k for r in rows for k in r.keys()})
+    head = "".join(f"<th>{esc(c)}</th>" for c in columns)
+    body = ""
+    for r in rows:
+        cells = "".join(
+            f"<td>{esc(json.dumps(r[c]) if isinstance(r.get(c), (dict, list)) else r.get(c))}</td>"
+            for c in columns
+        )
+        body += f"<tr>{cells}</tr>"
+    return f"<table><tr>{head}</tr>{body}</table>"
+
+
+# --------------------------------------------------------------------------- #
+# Pages
+# --------------------------------------------------------------------------- #
+def render_stream_log_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
+    snap, log = _norm(embedded)
+    sc = snap.get("scenario", {})
+    header = (
+        f'<header><h1>{esc(sc.get("name", "Planfoldr run"))}</h1>'
+        f'<div class="goal"><b>Goal:</b> {esc(sc.get("goal"))}</div>'
+        f'<div class="goal"><b>Status:</b> <span class="status-{esc(snap.get("status"))}">{esc(snap.get("status", "running"))}</span></div>'
+        + (f'<div class="goal"><b>Constraints:</b> {esc(", ".join(sc.get("constraints", [])))}</div>' if sc.get("constraints") else "")
+        + (f'<div class="goal"><b>Verification:</b> {esc(", ".join(sc.get("verification_commands", [])))}</div>' if sc.get("verification_commands") else "")
+        + "</header>"
     )
+    entries = "".join(_log_entry_html(e) for e in log)
+    body = f'{header}<h2>Streaming Log</h2><div id="log">{entries}</div>'
+    return _PAGE.format(title="Planfoldr — Streaming Log", refresh=REFRESH_SECONDS, nav=_NAV, body=body,
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, script=_WS_SCRIPT)
 
 
-def render_state_view_html(ws_port: Optional[int] = None, embedded: Optional[Tuple[dict, list]] = None) -> str:
-    snap, log = embedded or ({}, [])
+def _log_entry_html(e: Dict[str, Any]) -> str:
+    if e.get("type") == "audit":
+        et = e.get("event_type", "")
+        p = e.get("payload", {})
+        if et == "cycle.started":
+            return (f'<details open class="cyc"><summary>▶ cycle {esc(e.get("cycle_id"))[:14]} · '
+                    f'ticket {esc(e.get("ticket_id"))} · model {esc(p.get("model"))} · role {esc(p.get("role"))}</summary>'
+                    f'<div class="evt">input: ticket={esc(e.get("ticket_id"))} type={esc(p.get("type"))}</div></details>')
+        if et == "cycle.phase_completed":
+            return f'<div class="evt">● phase: {esc(p.get("phase"))}</div>'
+        if et == "tool.invoked":
+            return (f'<details class="tool"><summary>🔧 {esc(p.get("tool"))}</summary>'
+                    f'<div class="evt">args: {esc(json.dumps(p.get("args")))}\nresult: {esc(json.dumps(p.get("result")))}</div></details>')
+        if et == "ticket.status_changed":
+            return f'<div class="evt">~ {esc(e.get("ticket_id"))}: {esc(p.get("from"))} → {esc(p.get("to"))}</div>'
+        if et == "cycle.completed":
+            return f'<div class="evt">■ cycle {esc(p.get("status"))}</div>'
+        return ""
+    if e.get("type") == "model_stream_chunk":
+        cls = "thinking" if e.get("kind") == "thinking" else "content"
+        return f'<span class="evt {cls}">{esc(e.get("text"))}</span>'
+    return ""
+
+
+def render_state_view_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
+    snap, _ = _norm(embedded)
+    content = {
+        "system": _render_system(snap),
+        "queues": _table([{"id": q.get("id"), "tickets": q.get("tickets_by_status", {}),
+                           "manager": q.get("manager_role"), "executors": q.get("executor_roles")}
+                          for q in snap.get("queues", {}).values()]),
+        "tickets": _table([{"id": t.get("id"), "type": t.get("type"), "status": t.get("status"),
+                            "role": t.get("role"), "attempts": t.get("attempt_count"),
+                            "goal": (t.get("goal") or "")[:60]} for t in snap.get("tickets", {}).values()]),
+        "models": _render_models(snap),
+        "commands": _table(snap.get("commands", []), ["when", "actor", "ticket", "cmd", "exit_code", "status"]),
+        "tools": _table([{"tool": k, "count": v} for k, v in (snap.get("tools", {}) or {}).items()]),
+        "cycles": _table([{"id": c.get("id"), "ticket": c.get("ticket"), "model": c.get("model"),
+                          "role": c.get("role"), "phase": c.get("phase"), "status": c.get("status")}
+                         for c in snap.get("cycles", {}).values()]),
+        "cycle_tree": _render_tree(snap.get("cycle_tree", [])),
+        "budgets": _render_budgets(snap),
+    }
     sections = "\n".join(
         f'<section id="{s}"><details open><summary>{s.replace("_", " ").title()}</summary>'
-        f'<div class="slice" data-slice="{s}"></div></details></section>'
+        f'<div class="slice">{content.get(s, "")}</div></details></section>'
         for s in SLICES
     )
-    return _PAGE.format(
-        title="Planfoldr — State View", ws_port=ws_port or 0,
-        snapshot=json.dumps(snap, default=str), log=json.dumps(log, default=str),
-        body=f'<h1>State View</h1><nav>{" · ".join(f"<a href=#{s}>{s}</a>" for s in SLICES)}</nav>{sections}',
-        script=_STATE_SCRIPT,
+    body = f'<h1>State View</h1><nav class="anchors">{" · ".join(f"<a href=#{s}>{s}</a>" for s in SLICES)}</nav>{sections}'
+    return _PAGE.format(title="Planfoldr — State View", refresh=REFRESH_SECONDS, nav=_NAV, body=body,
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, script="")
+
+
+def _render_system(snap: Dict[str, Any]) -> str:
+    sc = snap.get("scenario", {})
+    return (f'<b>Scenario:</b> {esc(sc.get("name"))}<br><b>Goal:</b> {esc(sc.get("goal"))}<br>'
+            f'<b>Status:</b> <span class="status-{esc(snap.get("status"))}">{esc(snap.get("status"))}</span><br>'
+            f'<b>Constraints:</b> {esc(", ".join(sc.get("constraints", [])))}<br>'
+            f'<b>Cycles run:</b> {esc(snap.get("cycles_run"))}')
+
+
+def _render_models(snap: Dict[str, Any]) -> str:
+    rows = []
+    for mid, s in (snap.get("scores", {}) or {}).items():
+        rows.append({"model": mid, "global_score": round(s.get("global_score", 0), 2),
+                     "tickets": s.get("tickets"), "by_role": s.get("by_role"), "by_task_type": s.get("by_task_type")})
+    return _table(rows, ["model", "global_score", "tickets", "by_role", "by_task_type"])
+
+
+def _render_budgets(snap: Dict[str, Any]) -> str:
+    budgets = snap.get("budgets", {})
+    project = budgets.get("project", {})
+    proj_html = (f'<h4>Project</h4><div class="evt">tokens={esc(project.get("usage", {}).get("tokens_used"))} '
+                 f'limits={esc(project.get("limits"))} exceeded={esc(project.get("exceeded"))}</div>')
+    rows = []
+    for b in budgets.get("tickets", []):
+        usage = b.get("usage", {})
+        rows.append({
+            "ticket": b.get("ticket"), "title": b.get("title"), "goal": (b.get("goal") or "")[:50],
+            "tokens": usage.get("tokens_used"), "requests": usage.get("api_requests"),
+            "files": usage.get("file_changes"), "commands": usage.get("command_runs"),
+            "gpu_ram_hours": round(usage.get("gpu_ram_hours", 0), 4), "limit": b.get("limits"),
+            "exceeded": b.get("exceeded"),
+        })
+    return proj_html + "<h4>Per ticket</h4>" + _table(
+        rows, ["ticket", "title", "goal", "tokens", "requests", "files", "commands", "gpu_ram_hours", "exceeded"])
+
+
+def _render_tree(nodes: List[Dict[str, Any]]) -> str:
+    if not nodes:
+        return "<i>none</i>"
+    items = "".join(
+        f'<li>cycle {esc(n.get("id"))[:14]} [{esc(n.get("status"))}] ticket={esc(n.get("ticket"))}'
+        f'{_render_tree(n.get("children", []))}</li>' for n in nodes
+    )
+    return f"<ul>{items}</ul>"
+
+
+def render_tickets_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
+    snap, _ = _norm(embedded)
+    tickets = snap.get("tickets", {})
+    graph = snap.get("graph", {})
+    tree = _ticket_tree(tickets, graph)
+    detail = "".join(_ticket_detail_html(t) for t in tickets.values())
+    body = (f'<h1>Tickets</h1><section id="ticket-tree"><h2>Structure</h2>{tree}</section>'
+            f'<section id="ticket-details"><h2>Every ticket</h2>{detail}</section>')
+    return _PAGE.format(title="Planfoldr — Tickets", refresh=REFRESH_SECONDS, nav=_NAV, body=body,
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, script="")
+
+
+def _ticket_tree(tickets: Dict[str, Any], graph: Dict[str, Any]) -> str:
+    children: Dict[Optional[str], List[str]] = {}
+    for tid, t in tickets.items():
+        children.setdefault(t.get("spawned_by"), []).append(tid)
+
+    def build(tid: str) -> str:
+        t = tickets.get(tid, {})
+        kids = "".join(build(c) for c in children.get(tid, []))
+        deps = t.get("dependencies", [])
+        dep_txt = f' ⟵ blocked_by {esc(deps)}' if deps else ""
+        return (f'<li><a href="#t_{esc(tid)}">{esc(tid)}</a> [{esc(t.get("type"))}] '
+                f'<span class="status-{esc(t.get("status"))}">{esc(t.get("status"))}</span>{dep_txt}'
+                f'{f"<ul>{kids}</ul>" if kids else ""}</li>')
+
+    roots = children.get(None, []) + [tid for tid, t in tickets.items() if t.get("spawned_by") and t["spawned_by"] not in tickets]
+    return f'<ul>{"".join(build(r) for r in dict.fromkeys(roots))}</ul>'
+
+
+def _ticket_detail_html(t: Dict[str, Any]) -> str:
+    history = t.get("metadata", {}).get("change_history", [])
+    hist_rows = _table(history, ["from", "to", "actor", "at", "proof", "cause"])
+    comments = t.get("comments", [])
+    comm_rows = _table([{"author": c.get("author"), "when": c.get("timestamp"),
+                         "summons": c.get("summoned_role"), "text": c.get("text")} for c in comments],
+                       ["when", "author", "summons", "text"])
+    evidence = _table([{"check": e.get("check_index"), "status": e.get("status"),
+                        "proof": (str(e.get("proof") or ""))[:200]} for e in t.get("evidence", [])],
+                      ["check", "status", "proof"])
+    checks = _table([{"kind": c.get("kind"), "spec": c.get("spec"), "required": c.get("required")}
+                     for c in t.get("checks", [])], ["kind", "spec", "required"])
+    return (
+        f'<details id="t_{esc(t.get("id"))}" class="ticket"><summary>{esc(t.get("id"))} '
+        f'[{esc(t.get("type"))}] <span class="status-{esc(t.get("status"))}">{esc(t.get("status"))}</span> — {esc(t.get("title"))}</summary>'
+        f'<div class="evt"><b>Goal:</b> {esc(t.get("goal"))}</div>'
+        f'<div class="evt"><b>Role:</b> {esc(t.get("role"))} · <b>Queue:</b> {esc(t.get("queue"))} · '
+        f'<b>Attempts:</b> {esc(t.get("attempt_count"))}/{esc(t.get("max_attempts"))} · '
+        f'<b>spawned_by:</b> {esc(t.get("spawned_by"))} · <b>deps:</b> {esc(t.get("dependencies"))}</div>'
+        f'<h4>Checks</h4>{checks}<h4>Evidence</h4>{evidence}'
+        f'<h4>Comments</h4>{comm_rows}<h4>Status history</h4>{hist_rows}</details>'
     )
 
 
+def render_kb_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
+    snap, _ = _norm(embedded)
+    kb = snap.get("kb", {})
+    if not kb:
+        sections = "<i>The knowledge base is empty.</i>"
+    else:
+        sections = ""
+        for name, sec in kb.items():
+            versions = _table([{"version": v.get("version"), "when": v.get("timestamp"), "role": v.get("role")}
+                               for v in sec.get("versions", [])], ["version", "when", "role"])
+            sections += (
+                f'<details class="kb" open><summary>{esc(name)} '
+                f'(read: {esc(sec.get("read_roles"))}, write: {esc(sec.get("write_roles"))})</summary>'
+                f'<pre class="kbcontent">{esc(sec.get("content"))}</pre>'
+                f'<h4>Versions</h4>{versions}</details>'
+            )
+    body = f'<h1>Knowledge Base</h1><section id="kb">{sections}</section>'
+    return _PAGE.format(title="Planfoldr — Knowledge Base", refresh=REFRESH_SECONDS, nav=_NAV, body=body,
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, script="")
+
+
+PAGES = {
+    "index.html": render_stream_log_html,
+    "state.html": render_state_view_html,
+    "tickets.html": render_tickets_html,
+    "kb.html": render_kb_html,
+}
+
+
+def write_report(target: Path | str, snapshot: Dict[str, Any]) -> Path:
+    vis = Path(target) / "visibility"
+    vis.mkdir(parents=True, exist_ok=True)
+    (vis / "snapshot.json").write_text(json.dumps(snapshot, default=str, indent=2), encoding="utf-8")
+    for filename, render in PAGES.items():
+        (vis / filename).write_text(render(snapshot), encoding="utf-8")
+    return vis
+
+
+# --------------------------------------------------------------------------- #
+# Live server
+# --------------------------------------------------------------------------- #
 class VisibilityServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
         self.host = host
@@ -58,9 +282,10 @@ class VisibilityServer:
     def start(self) -> "VisibilityServer":
         self.ws_port = self.ws.start()
         server = self
+        route = {"/": "index.html", "/state": "state.html", "/tickets": "tickets.html", "/kb": "kb.html"}
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *a):  # silence
+            def log_message(self, *a):
                 pass
 
             def _send(self, body: str, ctype: str = "text/html") -> None:
@@ -72,14 +297,20 @@ class VisibilityServer:
                 self.wfile.write(payload)
 
             def do_GET(self):  # noqa: N802
-                if self.path.startswith("/state"):
-                    self._send(render_state_view_html(server.ws_port))
-                elif self.path.startswith("/snapshot.json"):
-                    self._send(json.dumps(server.state.snapshot(), default=str), "application/json")
-                elif self.path.startswith("/log.json"):
-                    self._send(json.dumps(server.state.recent_log(2000), default=str), "application/json")
+                path = self.path.split("?")[0]
+                vis = server.run_dir / "visibility" if server.run_dir else None
+                if path == "/snapshot.json":
+                    f = (vis / "snapshot.json") if vis else None
+                    self._send(f.read_text() if f and f.exists() else json.dumps(server.state.snapshot()), "application/json")
+                    return
+                page = route.get(path, "index.html")
+                f = (vis / page) if vis else None
+                if f and f.exists():
+                    self._send(f.read_text())
+                elif page == "state.html":
+                    self._send(render_state_view_html(ws_port=server.ws_port))
                 else:
-                    self._send(render_stream_log_html(server.ws_port))
+                    self._send(render_stream_log_html(ws_port=server.ws_port))
 
         self._httpd = ThreadingHTTPServer((self.host, self.http_port), Handler)
         self.http_port = self._httpd.server_address[1]
@@ -90,20 +321,11 @@ class VisibilityServer:
         self.state.ingest(event)
         try:
             self.ws.broadcast(json.dumps(event, default=str))
-        except Exception:  # noqa: BLE001 -- visibility must never break the run
+        except Exception:  # noqa: BLE001
             pass
 
     def attach_run(self, run_dir: Path | str) -> None:
         self.run_dir = Path(run_dir)
-
-    def write_static(self, run_dir: Optional[Path | str] = None) -> Path:
-        target = Path(run_dir) if run_dir else (self.run_dir or Path("."))
-        vis = target / "visibility"
-        vis.mkdir(parents=True, exist_ok=True)
-        embedded = (self.state.snapshot(), self.state.recent_log(5000))
-        (vis / "index.html").write_text(render_stream_log_html(embedded=embedded), encoding="utf-8")
-        (vis / "state.html").write_text(render_state_view_html(embedded=embedded), encoding="utf-8")
-        return vis
 
     def stop(self) -> None:
         self.ws.stop()
@@ -111,90 +333,36 @@ class VisibilityServer:
             self._httpd.shutdown()
 
 
-# --------------------------------------------------------------------------- #
-# HTML / JS (kept dependency-free and small)
-# --------------------------------------------------------------------------- #
+_NAV = ('<nav class="top"><a href="/">Streaming Log</a> · <a href="/state">State</a> · '
+        '<a href="/tickets">Tickets</a> · <a href="/kb">Knowledge Base</a> · '
+        '<a href="index.html">log</a> · <a href="state.html">state</a> · '
+        '<a href="tickets.html">tickets</a> · <a href="kb.html">kb</a></nav>')
+
 _PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>{title}</title>
+<meta http-equiv="refresh" content="{refresh}">
 <style>
  body{{background:#0b0e14;color:#cdd6f4;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0;padding:16px}}
- h1{{font-size:16px}} nav a{{color:#89b4fa;margin-right:6px}}
+ h1{{font-size:17px;margin:.2em 0}} h2{{font-size:14px;color:#89b4fa}} h4{{margin:.4em 0;color:#94e2d5}}
+ header{{border:1px solid #313244;border-radius:8px;padding:10px;background:#11151f}}
+ .goal{{margin:2px 0}} nav a{{color:#89b4fa;margin-right:6px}} nav.anchors a{{color:#a6adc8}}
  section{{border:1px solid #313244;border-radius:8px;margin:10px 0;padding:8px}}
  summary{{cursor:pointer;color:#a6e3a1;font-weight:bold}}
- .thinking{{color:#9399b2}} .content{{color:#cdd6f4}} .tool{{color:#f9e2af}}
+ .thinking{{color:#9399b2}} .content{{color:#cdd6f4}} .tool summary{{color:#f9e2af}}
  .evt{{border-left:2px solid #45475a;padding:2px 8px;margin:2px 0;white-space:pre-wrap}}
- details details{{margin-left:14px}} table{{border-collapse:collapse}} td,th{{border:1px solid #313244;padding:2px 6px}}
+ details details,details .evt{{margin-left:12px}} table{{border-collapse:collapse;margin:4px 0;width:100%}}
+ td,th{{border:1px solid #313244;padding:2px 6px;text-align:left;vertical-align:top;font-size:12px}}
+ th{{color:#fab387}} pre.kbcontent{{background:#11151f;padding:8px;border-radius:6px;white-space:pre-wrap}}
  .status-done{{color:#a6e3a1}} .status-failed{{color:#f38ba8}} .status-running{{color:#f9e2af}}
-</style></head>
-<body>
-<nav><a href="/">Streaming Log</a> · <a href="/state">State View</a></nav>
+ .status-needs_review{{color:#fab387}} .status-budget_exceeded{{color:#f38ba8}} .status-blocked{{color:#9399b2}}
+</style></head><body>
+{nav}
 {body}
-<script>
-window.__SNAPSHOT__ = {snapshot};
-window.__LOG__ = {log};
-window.__WS_PORT__ = {ws_port};
-{script}
-</script></body></html>
+<script>window.__SNAPSHOT__={snapshot};window.__WS_PORT__={ws_port};{script}</script>
+</body></html>
 """
 
-_STREAM_BODY = '<h1>Streaming Log</h1><div id="log"></div>'
-
-_STREAM_SCRIPT = r"""
-const logEl = document.getElementById('log');
-function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function render(e){
-  if(e.type==='audit'){
-    const p=e.payload||{};
-    if(e.event_type==='cycle.started'){
-      const d=document.createElement('details'); d.open=true; d.id='cyc_'+(e.cycle_id||'');
-      d.innerHTML='<summary>▶ cycle '+esc(e.cycle_id||'')+' · ticket '+esc(e.ticket_id)+' · model '+esc(p.model)+' · role '+esc(p.role)+'</summary>'+
-        '<div class="evt">input: ticket='+esc(e.ticket_id)+' type='+esc(p.type)+'</div>';
-      logEl.appendChild(d); return;
-    }
-    const host=document.getElementById('cyc_'+(e.cycle_id||''))||logEl;
-    const div=document.createElement('div'); div.className='evt';
-    if(e.event_type==='cycle.phase_completed') div.textContent='● phase: '+p.phase;
-    else if(e.event_type==='tool.invoked'){
-      const det=document.createElement('details'); det.innerHTML='<summary class="tool">🔧 '+esc(p.tool)+'</summary><div class="evt">args: '+esc(JSON.stringify(p.args))+'\nresult: '+esc(JSON.stringify(p.result))+'</div>';
-      host.appendChild(det); return;
-    }
-    else if(e.event_type==='cycle.completed') div.textContent='■ cycle '+p.status;
-    else if(e.event_type==='ticket.status_changed') div.textContent='~ '+e.ticket_id+': '+p.from+' → '+p.to;
-    else div.textContent=e.event_type+' '+esc(JSON.stringify(p)).slice(0,200);
-    host.appendChild(div);
-  } else if(e.type==='model_stream_chunk'){
-    const host=logEl.lastElementChild||logEl;
-    let span=host.querySelector('.live'); if(!span){span=document.createElement('div');span.className='evt live '+(e.kind||'content');host.appendChild(span);}
-    span.className='evt live '+(e.kind||'content'); span.textContent=(span.textContent||'')+e.text;
-  } else if(e.type==='tool_result'){
-    const host=logEl.lastElementChild||logEl; const div=document.createElement('div'); div.className='evt tool';
-    div.textContent='→ '+esc(JSON.stringify(e.result)).slice(0,200); host.appendChild(div);
-  }
-  window.scrollTo(0,document.body.scrollHeight);
-}
-(window.__LOG__||[]).forEach(render);
-if(window.__WS_PORT__){try{const ws=new WebSocket('ws://'+location.hostname+':'+window.__WS_PORT__);ws.onmessage=m=>render(JSON.parse(m.data));}catch(e){}}
-"""
-
-_STATE_SCRIPT = r"""
-function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function table(rows){if(!rows.length)return '<i>none</i>';const ks=Object.keys(rows[0]);
-  return '<table><tr>'+ks.map(k=>'<th>'+k+'</th>').join('')+'</tr>'+rows.map(r=>'<tr>'+ks.map(k=>'<td>'+esc(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</table>';}
-function tree(nodes){return '<ul>'+nodes.map(n=>'<li>cycle '+esc(n.id)+' ['+esc(n.status)+'] ticket='+esc(n.ticket)+(n.children&&n.children.length?tree(n.children):'')+'</li>').join('')+'</ul>';}
-function render(s){
-  const set=(id,html)=>{const el=document.querySelector('#'+id+' .slice'); if(el)el.innerHTML=html;};
-  set('queues', table(Object.values(s.queues||{})));
-  set('tickets', table(Object.values(s.tickets||{})));
-  set('models', table(Object.values(s.models||{})));
-  set('commands', table(s.commands||[]));
-  set('tools', table(Object.entries(s.tools||{}).map(([k,v])=>({tool:k,count:v}))));
-  set('cycles', table(Object.values(s.cycles||{}).map(c=>({id:c.id,ticket:c.ticket,model:c.model,role:c.role,phase:c.phase,status:c.status,stream:(c.stream||'').slice(-80)}))));
-  set('cycle_tree', tree(s.cycle_tree||[]));
-  set('system', table([s.system||{}]));
-  set('budgets', '<pre>'+esc(JSON.stringify(s.budgets||{},null,2))+'</pre>');
-}
-function refresh(){if(location.protocol==='file:'){render(window.__SNAPSHOT__||{});return;} fetch('/snapshot.json').then(r=>r.json()).then(render).catch(()=>render(window.__SNAPSHOT__||{}));}
-refresh();
-if(window.__WS_PORT__){try{const ws=new WebSocket('ws://'+location.hostname+':'+window.__WS_PORT__);ws.onmessage=()=>refresh();}catch(e){}}
-else setInterval(refresh,1000);
+_WS_SCRIPT = r"""
+if(window.__WS_PORT__){try{const ws=new WebSocket('ws://'+location.hostname+':'+window.__WS_PORT__);
+ ws.onmessage=()=>{};}catch(e){}}
 """

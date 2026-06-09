@@ -113,6 +113,8 @@ class Orchestrator:
         from planfoldr.visibility.events import VisibilityState
         self.vis = VisibilityState()
 
+        self._model_io_path = self.run_dir / "model_io.jsonl"
+
         def _sink(event: Dict[str, Any]) -> None:
             # Every run feeds an internal Visibility state (for the static report) plus any
             # user-supplied sink (terminal / live web server). Observation never breaks the run.
@@ -120,11 +122,15 @@ class Orchestrator:
                 self.vis.ingest(event)
             except Exception:  # noqa: BLE001
                 pass
+            if event.get("event") == "model_output":
+                self._record_model_io(event)
             if stream_sink is not None:
                 stream_sink(event)
 
         self.audit.subscribe(lambda e: _sink({"event": "audit", **e.to_dict()}))
         self.stream_sink = _sink
+        self.ticket_budgets: Dict[str, Budget] = {}
+        self._status = "running"
         self.budget = Budget(scenario.budget, scope="project", audit=self.audit)
         self.graph = TicketGraph(self.audit)
         self.kb = KnowledgeBase(self.audit)
@@ -158,9 +164,11 @@ class Orchestrator:
         self.audit.emit(EventType.SCENARIO_STARTED, scenario=self.scenario.name, goal=self.scenario.goal_text,
                         budget=dict(self.scenario.budget))
         self._seed_base_queues()
+        self._write_report()  # HTML report exists from the very start of the run
         self._run_top_cycle()
         self._executor_loop()
         status, reason = self._final_verification()
+        self._status = status
         self.audit.emit(EventType.SCENARIO_COMPLETED, scenario=self.scenario.name, status=status, reason=reason)
         result = RunResult(
             run_id=self.run_id, run_dir=str(self.run_dir), status=status, scenario=self.scenario.to_dict(),
@@ -260,14 +268,18 @@ class Orchestrator:
         model_cfg = model_cfg or self.model_registry.config_for(self.scenario.model.name)
         adapter = self.model_registry.adapter_for(model_cfg.id)
         ticket_budget = self.budget.delegate(ticket.budget or dict(DEFAULT_TICKET_BUDGET), scope="ticket", ticket_id=ticket.id)
+        self.ticket_budgets[ticket.id] = ticket_budget
         cycle = Cycle(
             ticket=ticket, role=role, model_config=model_cfg, model_adapter=adapter, budget=ticket_budget,
             audit=self.audit, toolset=role.effective_toolset(queue_id), workspace=self.workspace,
             graph=self.graph, knowledge_base=self.kb, score_system=self.score,
             allowed_paths=self._allowed_paths, on_create_ticket=self._create_ticket,
             on_request_decision=self.human, stream_sink=self.stream_sink, ps_provider=self.ps_provider,
+            report_hook=self._write_report,
         )
-        return cycle.run()
+        result = cycle.run()
+        self._write_report()
+        return result
 
     # -- create_ticket routing ------------------------------------------------
     def _create_ticket(self, spec: Dict[str, Any]) -> str:
@@ -336,13 +348,63 @@ class Orchestrator:
         (self.run_dir / "tickets.json").write_text(
             json.dumps({tid: t.to_dict() for tid, t in self.tickets.items()}, indent=2), encoding="utf-8")
         (self.run_dir / "result.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
-        # Static, server-free Visibility report (PHASE_3: "Не требует сервера для чтения").
-        from planfoldr.visibility.web import render_state_view_html, render_stream_log_html
-        vis_dir = self.run_dir / "visibility"
-        vis_dir.mkdir(parents=True, exist_ok=True)
-        embedded = (self.vis.snapshot(), self.vis.recent_log(5000))
-        (vis_dir / "index.html").write_text(render_stream_log_html(embedded=embedded), encoding="utf-8")
-        (vis_dir / "state.html").write_text(render_state_view_html(embedded=embedded), encoding="utf-8")
+        # Final static, server-free Visibility report + the structured Run Analysis.
+        self._write_report()
+        self._build_analysis()
+
+    def _record_model_io(self, event: Dict[str, Any]) -> None:
+        try:
+            with self._model_io_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({
+                    "cycle_id": event.get("cycle_id"), "ticket_id": event.get("ticket_id"),
+                    "phase": event.get("phase"), "model": event.get("model"),
+                    "thinking": event.get("thinking"), "content": event.get("content"),
+                    "tokens": event.get("tokens"),
+                }, ensure_ascii=False, default=str) + "\n")
+        except OSError:
+            pass
+
+    def _snapshot(self) -> Dict[str, Any]:
+        vis = self.vis.snapshot()
+        ticket_budgets = []
+        for tid, b in self.ticket_budgets.items():
+            t = self.tickets.get(tid)
+            ticket_budgets.append({"ticket": tid, "title": t.title if t else tid,
+                                   "goal": t.goal if t else "", "usage": b.snapshot(),
+                                   "limits": dict(b.limits), "exceeded": b.exceeded})
+        return {
+            "scenario": {"name": self.scenario.name, "goal": self.scenario.goal_text,
+                         "constraints": list(self.scenario.constraints),
+                         "verification_commands": list(self.scenario.verification_commands),
+                         "verification_criteria": list(self.scenario.verification_criteria)},
+            "status": self._status,
+            "cycles_run": self.cycles_run,
+            "tickets": {tid: t.to_dict() for tid, t in self.tickets.items()},
+            "graph": self.graph.to_dict(),
+            "queues": {qid: q.to_dict() for qid, q in self.queue_registry.queues.items()},
+            "budgets": {"project": self.budget.to_dict(), "tickets": ticket_budgets},
+            "scores": self.score.to_dict(),
+            "kb": self.kb.to_dict(),
+            "tools": vis.get("tools", {}),
+            "commands": vis.get("commands", []),
+            "cycles": vis.get("cycles", {}),
+            "cycle_tree": vis.get("cycle_tree", []),
+            "log": self.vis.recent_log(4000),
+        }
+
+    def _write_report(self) -> None:
+        try:
+            from planfoldr.visibility.web import write_report
+            write_report(self.run_dir, self._snapshot())
+        except Exception:  # noqa: BLE001 -- reporting must never break the run
+            pass
+
+    def _build_analysis(self) -> None:
+        from planfoldr.visibility.analysis import build_analysis
+        snapshot = self._snapshot()
+        md, html = build_analysis(snapshot)
+        (self.run_dir / "analysis.md").write_text(md, encoding="utf-8")
+        (self.run_dir / "visibility" / "analysis.html").write_text(html, encoding="utf-8")
 
 
 def _ollama_ps() -> str:
