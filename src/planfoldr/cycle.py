@@ -36,6 +36,10 @@ PHASES_BY_TYPE: Dict[str, List[str]] = {
     "research": [CONTEXT, MODEL_VERIFY],
     "verify": [COMMAND_VERIFY, MODEL_VERIFY],
     "documentation": [CONTEXT, CHANGES, MODEL_VERIFY],
+    # The top/orchestration cycle plans and decomposes; it does not verify code itself.
+    "orchestration": [CONTEXT, CHANGES],
+    "plan": [CONTEXT, CHANGES],
+    "decompose": [CONTEXT, CHANGES],
 }
 DEFAULT_PHASES = [CONTEXT, CHANGES, COMMAND_VERIFY, MODEL_VERIFY]
 

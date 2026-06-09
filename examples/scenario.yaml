@@ -1,0 +1,15 @@
+# Canonical Phase 4 MVP example (PHASE_4_recompile Quest 6).
+name: fastapi_health
+goal: "Добавить endpoint GET /health в FastAPI сервис"
+budget:
+  tokens: 50000
+accesses:
+  - path: ./src
+    mode: read_write
+verification:
+  commands:
+    - "pytest tests/test_health.py"
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

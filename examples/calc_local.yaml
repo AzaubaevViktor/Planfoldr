@@ -1,0 +1,17 @@
+# Hermetic local example (offline-safe): only python3 is required for verification.
+name: calc_local
+goal: "Create calc.py in the workspace with add(a, b) and subtract(a, b) functions."
+budget:
+  tokens: 80000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import calc; assert calc.add(2,3)==5 and calc.subtract(5,2)==3; print('ok')\""
+  criteria:
+    - "calc.py defines correct add and subtract functions"
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000
