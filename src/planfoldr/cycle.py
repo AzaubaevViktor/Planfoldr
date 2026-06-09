@@ -45,8 +45,8 @@ DEFAULT_PHASES = [CONTEXT, CHANGES, COMMAND_VERIFY, MODEL_VERIFY]
 
 _PROTOCOL = (
     "Respond with ONE JSON object and nothing else: "
-    '{"thinking": "...", "action": "<name>", "args": {...}}. '
-    "Never wrap it in markdown."
+    '{"thinking": "<one short sentence>", "action": "<name>", "args": {...}}. '
+    "Keep 'thinking' to a single brief sentence. Never wrap it in markdown."
 )
 
 _ACTION_REFERENCE = {
@@ -185,7 +185,7 @@ class Cycle:
             CONTEXT,
             allowed={"plan", "read_context", "write_context", "create_ticket", "update_ticket",
                      "comment", "request_decision", "request_context", "finish"},
-            max_iterations=3,
+            max_iterations=1,  # context is a single lightweight planning pass; work happens in changes
         )
 
     def _phase_changes(self) -> None:
