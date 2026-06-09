@@ -28,7 +28,7 @@ from planfoldr.queue import Queue
 from planfoldr.role import Executor, QueueManager
 from planfoldr.scenario import Scenario
 from planfoldr.score import ScoreSystem
-from planfoldr.ticket import Check, Status, Ticket, new_ticket
+from planfoldr.ticket import TERMINAL, Check, Status, Ticket, new_ticket
 from planfoldr.toolset import ToolRegistry, Toolset
 from planfoldr.tools_impl import register_default_tools
 from planfoldr.util import new_id
@@ -37,7 +37,11 @@ from planfoldr.util import new_id
 # Base role seed: domain tools + the ticket types each may create.
 BASE_ROLES: Dict[str, Dict[str, Any]] = {
     "orchestration": {
-        "domain": [], "prompt": "You are the orchestrator. Break the goal into tickets via create_ticket.",
+        "domain": [],
+        "prompt": ("You are the orchestrator. Break the goal into the MINIMAL set of tickets via "
+                   "create_ticket — often a single code ticket, plus a tests ticket only if useful. "
+                   "Give each ticket a concrete goal and command checks. NEVER create duplicate "
+                   "tickets for the same work. Once the tickets are created, respond with finish."),
         "can_create": ["*"],  # the top planner may create any ticket type; unknown types summon birthgiver
     },
     "developer": {
@@ -147,6 +151,7 @@ class Orchestrator:
         self.max_cycles = max_cycles
         self.tickets: Dict[str, Ticket] = {}
         self._counters: Dict[str, int] = {}
+        self._ticket_index: Dict[tuple, str] = {}  # (type, normalized goal) → id, for dedup
         self.cycles_run = 0
 
         # Model registry (provider-aware). The runtime selects; the model never selects itself.
@@ -319,6 +324,12 @@ class Orchestrator:
         # Local models phrase the goal in different fields -- accept the common aliases.
         goal = (spec.get("goal") or spec.get("description") or spec.get("summary")
                 or spec.get("task") or spec.get("title") or "")
+        # Deduplicate: a near-identical (type, goal) that is still open returns the existing ticket
+        # instead of spawning a duplicate (local models tend to re-create the same ticket).
+        dedup_key = (ttype, " ".join(goal.lower().split())[:80])
+        existing = self._ticket_index.get(dedup_key)
+        if existing and self.tickets.get(existing) and self.tickets[existing].status not in TERMINAL:
+            return existing
         title = spec.get("title") or (goal[:60] if goal else tid)
         raw_checks = spec.get("checks") or spec.get("verification") or spec.get("tests") or []
         checks = [c if isinstance(c, Check) else (Check.from_dict(c) if isinstance(c, dict)
@@ -334,6 +345,7 @@ class Orchestrator:
             difficulty=float(spec.get("difficulty", 0.5)),
         )
         self._register_ticket(ticket)
+        self._ticket_index[dedup_key] = tid
         return tid
 
     def _register_ticket(self, ticket: Ticket) -> None:

@@ -106,6 +106,45 @@ def test_budget_soft_stop_stops_the_run(tmp_path):
     assert "budget.exceeded" in audit_types
 
 
+def test_orchestrator_dedupes_duplicate_tickets(tmp_path):
+    """The orchestration cycle re-creating the same work yields ONE ticket, not duplicates."""
+    def stub_factory():
+        state = {"top": 0, "wrote": set()}
+
+        def stub(messages):
+            text = messages[-1]["content"]
+            if "PHASE: context_exploration" in text:
+                return {"action": "finish", "args": {}}
+            if "PHASE: model_verification" in text:
+                return {"action": "verify", "args": {"passed": True, "reason": "ok"}}
+            if "PHASE: changes" in text:
+                if "(orchestration)" in text:
+                    steps = [
+                        {"action": "create_ticket", "args": {"type": "code", "title": "impl",
+                            "goal": "create file alpha.txt", "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}},
+                        # Duplicate of the same work (different title + casing) -> must dedupe.
+                        {"action": "create_ticket", "args": {"type": "code", "title": "impl again",
+                            "goal": "Create file alpha.txt", "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}},
+                        {"action": "finish", "args": {}},
+                    ]
+                    i = state["top"]
+                    state["top"] = i + 1
+                    return steps[min(i, len(steps) - 1)]
+                m = re.search(r"create file (\S+)", text)
+                if m and m.group(1) not in state["wrote"]:
+                    state["wrote"].add(m.group(1))
+                    return {"action": "file_edit", "args": {"path": m.group(1), "content": "ok\n"}}
+                return {"action": "finish", "args": {}}
+            return {"action": "finish", "args": {}}
+        return stub
+
+    result = run_scenario(base_scenario(commands=["test -f alpha.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_dedup", model_adapter=StubModel(stub_factory()))
+    dev = [t for t in result.tickets if t.startswith("developer-")]
+    assert len(dev) == 1, result.tickets  # deduped
+    assert result.status == "done"
+
+
 def test_birthgiver_creates_role_live_for_unknown_type(tmp_path):
     """An unknown ticket type is summoned to birthgiver, which creates the role+queue during the run."""
     def stub_factory():

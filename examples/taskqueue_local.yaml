@@ -1,0 +1,22 @@
+# Hardening ladder #4: a file-based FIFO task queue (persistence across calls).
+name: taskqueue_local
+goal: >
+  Create taskqueue.py in the workspace backing a FIFO queue with a file. enqueue(task: str,
+  path: str = "queue.txt") -> None appends a task. dequeue(path: str = "queue.txt") -> str | None
+  removes and returns the first (oldest) task, or None if the queue is empty. size(path) -> int
+  returns the number of queued tasks. Persist across process restarts using the file. Use only the
+  Python standard library.
+budget:
+  tokens: 180000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import os,taskqueue as q; [os.path.exists('queue.txt') and os.remove('queue.txt')]; q.enqueue('a'); q.enqueue('b'); assert q.size()==2; assert q.dequeue()=='a'; assert q.dequeue()=='b'; assert q.dequeue() is None; print('fifo-ok')\""
+  criteria:
+    - "taskqueue enqueue/dequeue/size implement a correct file-backed FIFO"
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

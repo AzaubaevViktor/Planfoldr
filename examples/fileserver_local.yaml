@@ -1,0 +1,22 @@
+# Hardening ladder #3: a simple file-based client-server (request/response over files).
+name: fileserver_local
+goal: >
+  Create fileserver.py in the workspace with two functions. handle(request: dict) -> dict returns
+  {"ok": True, "echo": request.get("msg")}. serve(inbox_path: str, outbox_path: str) -> None reads a
+  JSON request object from inbox_path, computes handle(request), and writes the JSON response object
+  to outbox_path. Use only the Python standard library (json).
+budget:
+  tokens: 160000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import json,fileserver; assert fileserver.handle({'msg':'hi'})=={'ok':True,'echo':'hi'}; print('handle-ok')\""
+    - "python3 -c \"import json,fileserver; open('in.json','w').write(json.dumps({'msg':'ping'})); fileserver.serve('in.json','out.json'); r=json.load(open('out.json')); assert r=={'ok':True,'echo':'ping'}; print('serve-ok')\""
+  criteria:
+    - "fileserver.handle and fileserver.serve implement the file-based request/response correctly"
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000
