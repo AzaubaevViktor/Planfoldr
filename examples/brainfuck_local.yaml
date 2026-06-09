@@ -1,0 +1,21 @@
+# Hardening ladder #2: a Brainfuck interpreter (loops, pointer, memory, I/O).
+name: brainfuck_local
+goal: >
+  Create bf.py in the workspace with a function run(program: str, input_str: str = "") -> str
+  that interprets Brainfuck (commands + - < > [ ] . ,) over a byte tape and returns the program's
+  output as a string. Wrap the tape at 256 and treat the pointer cells as 0-initialized.
+budget:
+  tokens: 150000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import bf; assert bf.run('++++++++[>++++++++<-]>+.')=='A'; print('A-ok')\""
+    - "python3 -c \"import bf; assert bf.run('+++++[>+++++<-]>.')==chr(25); print('loop-ok')\""
+  criteria:
+    - "bf.run interprets +,-,<,>,[,],. correctly and returns the output string"
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

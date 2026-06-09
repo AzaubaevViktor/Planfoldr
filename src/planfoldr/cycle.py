@@ -328,8 +328,10 @@ class Cycle:
             + (f"CONSTRAINTS: {constraints}\n" if constraints else "")
             + f"CONTEXT: {self.local_memory.get('context', {})}\n"
             "The workspace is the current directory and may be empty; CREATE the files needed to "
-            "achieve the GOAL using file_edit (provide the full file content). Do not repeat "
-            "read-only commands. When the GOAL is achieved, respond with finish.\n"
+            "achieve the GOAL using file_edit (provide the full file content). NEVER write files "
+            "with bash (no echo/printf/cat/tee redirects) — use file_edit. Use bash ONLY to run "
+            "tests or commands. Do not repeat read-only commands. When the GOAL is achieved, "
+            "respond with finish.\n"
             f"ACTION REFERENCE (choose exactly ONE):\n{ref}\n"
             f"Last tool result: {last_result}\n"
             f"{_PROTOCOL}"

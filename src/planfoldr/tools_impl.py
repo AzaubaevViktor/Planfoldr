@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
@@ -116,10 +117,17 @@ def run_command(cmd: str, *, cwd: Path, timeout: float, budget: Optional[Budget]
     }
 
 
+_FILE_WRITE_RE = re.compile(r"^\s*(echo|printf|cat|tee|sed)\b.*(>|>>|tee)\s*\S", re.DOTALL)
+
+
 def handle_bash(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
     cmd = args.get("cmd") or args.get("command")
     if not cmd:
         raise ToolError("bash requires 'cmd'")
+    # Minimize bash for file authoring: steer obvious file writes to file_edit instead.
+    if _FILE_WRITE_RE.match(str(cmd)):
+        return {"status": "rejected", "error": "use file_edit to write files, not bash",
+                "hint": 'Reply with {"action":"file_edit","args":{"path":...,"content":...}}'}
     cwd = safe_path(ctx, args.get("cwd", ".")) if args.get("cwd") else ctx.workspace
     return run_command(cmd, cwd=cwd, timeout=ctx.command_timeout, budget=ctx.budget)
 
