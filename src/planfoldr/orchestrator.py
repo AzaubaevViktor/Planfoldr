@@ -110,9 +110,21 @@ class Orchestrator:
         self.workspace = self.run_dir / "workspace"
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.audit = AuditLog(self.run_dir / "audit.jsonl")
-        if stream_sink is not None:
-            self.audit.subscribe(lambda e: stream_sink({"event": "audit", **e.to_dict()}))
-        self.stream_sink = stream_sink
+        from planfoldr.visibility.events import VisibilityState
+        self.vis = VisibilityState()
+
+        def _sink(event: Dict[str, Any]) -> None:
+            # Every run feeds an internal Visibility state (for the static report) plus any
+            # user-supplied sink (terminal / live web server). Observation never breaks the run.
+            try:
+                self.vis.ingest(event)
+            except Exception:  # noqa: BLE001
+                pass
+            if stream_sink is not None:
+                stream_sink(event)
+
+        self.audit.subscribe(lambda e: _sink({"event": "audit", **e.to_dict()}))
+        self.stream_sink = _sink
         self.budget = Budget(scenario.budget, scope="project", audit=self.audit)
         self.graph = TicketGraph(self.audit)
         self.kb = KnowledgeBase(self.audit)
@@ -318,6 +330,13 @@ class Orchestrator:
         (self.run_dir / "tickets.json").write_text(
             json.dumps({tid: t.to_dict() for tid, t in self.tickets.items()}, indent=2), encoding="utf-8")
         (self.run_dir / "result.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+        # Static, server-free Visibility report (PHASE_3: "Не требует сервера для чтения").
+        from planfoldr.visibility.web import render_state_view_html, render_stream_log_html
+        vis_dir = self.run_dir / "visibility"
+        vis_dir.mkdir(parents=True, exist_ok=True)
+        embedded = (self.vis.snapshot(), self.vis.recent_log(5000))
+        (vis_dir / "index.html").write_text(render_stream_log_html(embedded=embedded), encoding="utf-8")
+        (vis_dir / "state.html").write_text(render_state_view_html(embedded=embedded), encoding="utf-8")
 
 
 def _ollama_ps() -> str:
