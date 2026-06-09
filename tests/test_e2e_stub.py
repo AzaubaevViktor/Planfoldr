@@ -185,6 +185,48 @@ def test_birthgiver_creates_role_live_for_unknown_type(tmp_path):
     assert result.status == "done"  # the work ticket still completed
 
 
+def test_precheck_short_circuits_already_satisfied_ticket(tmp_path):
+    """A ticket whose required command checks already pass is marked done without a model cycle."""
+    def stub_factory():
+        state = {"top": 0, "wrote": set()}
+
+        def stub(messages):
+            text = messages[-1]["content"]
+            if "PHASE: context_exploration" in text:
+                return {"action": "finish", "args": {}}
+            if "PHASE: model_verification" in text:
+                return {"action": "verify", "args": {"passed": True, "reason": "ok"}}
+            if "PHASE: changes" in text:
+                if "(orchestration)" in text:
+                    steps = [
+                        {"action": "create_ticket", "args": {"type": "code", "title": "impl",
+                            "goal": "create file shared.txt", "checks": [{"kind": "command", "spec": "test -f shared.txt"}]}},
+                        {"action": "create_ticket", "args": {"type": "tests", "title": "confirm",
+                            "goal": "confirm shared file present", "dependencies": ["developer-1"],
+                            "checks": [{"kind": "command", "spec": "test -f shared.txt"}]}},
+                        {"action": "finish", "args": {}},
+                    ]
+                    i = state["top"]
+                    state["top"] = i + 1
+                    return steps[min(i, len(steps) - 1)]
+                m = re.search(r"create file (\S+)", text)
+                if m and m.group(1) not in state["wrote"]:
+                    state["wrote"].add(m.group(1))
+                    return {"action": "file_edit", "args": {"path": m.group(1), "content": "ok\n"}}
+                return {"action": "finish", "args": {}}
+            return {"action": "finish", "args": {}}
+        return stub
+
+    result = run_scenario(base_scenario(commands=["test -f shared.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_precheck", model_adapter=StubModel(stub_factory()))
+    assert result.status == "done"
+    audit = [json.loads(x) for x in (Path(result.run_dir) / "audit.jsonl").read_text().splitlines()]
+    starts = {e["ticket_id"] for e in audit if e["event_type"] == "cycle.started"}
+    assert "developer-1" in starts          # ran a real model cycle
+    assert "developer-2" not in starts      # short-circuited (checks already satisfied) -- no model cycle
+    assert result.tickets["developer-2"] == "done"
+
+
 def test_failed_ticket_makes_scenario_fail(tmp_path):
     def failing():
         state = {"top_step": 0}

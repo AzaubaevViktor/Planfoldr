@@ -266,6 +266,8 @@ class Orchestrator:
         if ticket.type == "create_role":
             self._run_birthgiver(ticket)
             return
+        if self._checks_already_satisfied(ticket):
+            return  # prior work already satisfies this ticket -- skip a redundant model cycle
         executor = self.role_registry.get(queue.executor_roles[0])
         while True:
             ticket.transition(Status.RUNNING, actor=executor.id, audit=self.audit)
@@ -277,6 +279,25 @@ class Orchestrator:
             if result.status == Status.NEEDS_REVIEW and not ticket.exhausted_attempts() and self.cycles_run < self.max_cycles:
                 continue  # re-attempt until verified or attempts exhausted
             break
+
+    def _checks_already_satisfied(self, ticket: Ticket) -> bool:
+        """If a ticket's required command checks already pass (e.g. an earlier ticket produced the
+        file), mark it done without a model cycle -- don't redo verified work."""
+        from planfoldr.tools_impl import run_command
+        required = [(i, c) for i, c in enumerate(ticket.checks) if c.kind == "command" and c.required]
+        if not required:
+            return False
+        results = [(i, c, run_command(c.spec, cwd=self.workspace, timeout=60)) for i, c in required]
+        if not all(r["status"] == "success" for _, _, r in results):
+            return False
+        ticket.transition(Status.RUNNING, actor="runtime", audit=self.audit)
+        for i, c, r in results:
+            ticket.add_evidence(check_index=i, status="success", proof=f"$ {c.spec} (already satisfied)")
+        ticket.transition(Status.DONE, actor="runtime", audit=self.audit,
+                          proof="required checks already satisfied by prior work")
+        self.cycles_run += 1
+        self._write_report()
+        return True
 
     def _run_birthgiver(self, ticket: Ticket) -> None:
         """Process a summoned create_role ticket: the birthgiver links/creates the role + queue live."""
