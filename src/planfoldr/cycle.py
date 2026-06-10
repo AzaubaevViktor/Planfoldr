@@ -108,6 +108,7 @@ class Cycle:
         stream_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
         ps_provider: Optional[Callable[[], str]] = None,
         report_hook: Optional[Callable[[], None]] = None,
+        scenario_contract: Optional[Dict[str, Any]] = None,
         max_iterations: int = 8,
         spawn_cap: int = 6,
     ) -> None:
@@ -126,6 +127,7 @@ class Cycle:
         self.stream_sink = stream_sink
         self.ps_provider = ps_provider
         self.report_hook = report_hook
+        self.scenario_contract = scenario_contract or {}
         self.max_iterations = max_iterations
         self.spawn_cap = spawn_cap
         self.execution_id = new_id("exec")
@@ -337,12 +339,36 @@ class Cycle:
         )
         return parse_action(response.content)
 
+    def _contract_block(self) -> str:
+        """The originating scenario's contract: the project goal plus the exact acceptance commands
+        the final gate runs. Decomposition paraphrases each child ticket's goal and can drop the
+        interface (the "...as specified" collapse); surfacing the real contract to every executor
+        means the implementer always sees the exact API/CLI it will be judged on instead of guessing
+        it. Empty for direct Cycle use without a scenario (e.g. unit tests)."""
+        c = self.scenario_contract
+        if not c:
+            return ""
+        lines = ["PROJECT CONTRACT — the whole project is judged by this; make your work conform to it:"]
+        if c.get("goal"):
+            lines.append(f"- Project goal: {c['goal']}")
+        if c.get("verification_commands"):
+            lines.append("- Acceptance commands that MUST pass (they encode the exact interface — match the "
+                         "module / function / CLI names, signatures, path arguments and return values they "
+                         "assume; do not invent your own):")
+            lines += [f"    $ {cmd}" for cmd in c["verification_commands"]]
+        if c.get("verification_criteria"):
+            lines.append(f"- Acceptance criteria: {list(c['verification_criteria'])}")
+        if c.get("constraints"):
+            lines.append(f"- Project constraints: {list(c['constraints'])}")
+        return "\n".join(lines) + "\n"
+
     def _changes_user(self, phase: str, allowed: set, last_result: Optional[Dict[str, Any]]) -> str:
         ref = "\n".join(f"- {_ACTION_REFERENCE[a]}" for a in sorted(allowed) if a in _ACTION_REFERENCE)
         constraints = self.ticket.metadata.get("constraints") or []
         return (
             f"PHASE: {phase}. You are working on ticket {self.ticket.id} ({self.ticket.type}).\n"
-            f"GOAL: {self.ticket.goal}\n"
+            + self._contract_block()
+            + f"GOAL: {self.ticket.goal}\n"
             + (f"CONSTRAINTS: {constraints}\n" if constraints else "")
             + f"CONTEXT: {self.local_memory.get('context', {})}\n"
             "The workspace is the current directory and may be empty; CREATE the files needed to "

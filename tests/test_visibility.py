@@ -54,9 +54,9 @@ def test_stream_log_renders_entries_and_goal_header():
     html = render_stream_log_html(embedded=snap)
     # Goal/description at the TOP (in the header, before the log section heading).
     assert "build the thing" in html
-    assert html.index("build the thing") < html.index("<h2>Streaming Log</h2>")
-    assert html.index("build the thing") < html.index("▶ cycle")  # goal precedes the log entries
-    assert "▶ cycle" in html and "details" in html  # expandable executions
+    assert html.index("build the thing") < html.index("<h2>Streaming Log")  # heading may carry a pause-refresh button
+    assert html.index("build the thing") < html.index('class="cyc"')  # goal precedes the log entries
+    assert 'class="cyc"' in html and "<details" in html  # expandable executions
     assert "__SNAPSHOT__" in html
 
 

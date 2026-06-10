@@ -42,9 +42,13 @@ BASE_ROLES: Dict[str, Dict[str, Any]] = {
         "domain": [],
         "prompt": ("You are the orchestrator. Break the goal into the MINIMAL set of tickets via "
                    "create_ticket. For a single-file goal create EXACTLY ONE code ticket. Add a "
-                   "tests ticket only when the goal explicitly needs separate tests. Give each "
-                   "ticket a concrete goal and command checks. NEVER create duplicate or speculative "
-                   "tickets. Immediately after creating the ticket(s), respond with finish."),
+                   "tests ticket only when the goal explicitly needs separate tests. Each ticket's "
+                   "goal MUST be self-contained: copy the exact interface from the PROJECT CONTRACT "
+                   "into it (file names, function signatures, parameters, return types, CLI) — never "
+                   "write 'as specified' or refer to anything outside the ticket. Attach the "
+                   "project's acceptance commands as that ticket's command checks so the work is "
+                   "verified. NEVER create duplicate or speculative tickets. Immediately after "
+                   "creating the ticket(s), respond with finish."),
         "can_create": ["*"],  # the top planner may create any ticket type; unknown types summon birthgiver
     },
     "developer": {
@@ -175,6 +179,15 @@ class Orchestrator:
         self.ps_provider = _ollama_ps if scenario.model.provider == "ollama" else None
 
         self._allowed_paths = self._resolve_accesses()
+        # The scenario contract (goal + the exact acceptance commands) is surfaced to every executor
+        # cycle so decomposition can never drop the interface: the implementer always sees the real
+        # API it will be judged on, regardless of how the orchestrator paraphrased the child goal.
+        self._contract = {
+            "goal": self.scenario.goal_text,
+            "verification_commands": list(self.scenario.verification_commands),
+            "verification_criteria": list(self.scenario.verification_criteria),
+            "constraints": list(self.scenario.constraints),
+        }
 
     # -- run ------------------------------------------------------------------
     def run(self) -> RunResult:
@@ -344,6 +357,7 @@ class Orchestrator:
             allowed_paths=self._allowed_paths, on_create_ticket=self._create_ticket,
             on_request_decision=self.human, on_summon=self._on_summon,
             stream_sink=self.stream_sink, ps_provider=self.ps_provider, report_hook=self._write_report,
+            scenario_contract=self._contract,
             max_iterations=4 if is_planning else 8, spawn_cap=3 if is_planning else 6,
         )
         result = cycle.run()
