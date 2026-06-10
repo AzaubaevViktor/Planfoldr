@@ -26,14 +26,36 @@ def test_parse_action_embedded_in_prose():
     assert a.action == "bash" and a.args["cmd"] == "pytest"
 
 
-def test_parse_action_tool_call_fallback():
+def test_parse_action_tool_call_envelope_is_preferred():
     a = parse_action('<tool_call>{"name": "create_ticket", "arguments": {"title": "t"}}</tool_call>')
     assert a.action == "create_ticket" and a.args["title"] == "t"
+
+
+def test_parse_action_tool_call_arguments_string():
+    text = '<tool_call>{"name": "bash", "arguments": "{\\"cmd\\": \\"pytest -q\\"}"}</tool_call>'
+    a = parse_action(text)
+    assert a.action == "bash"
+    assert a.args == {"cmd": "pytest -q"}
+    assert a.error is None
+
+
+def test_parse_action_malformed_tool_call_requests_tool_call_reformat():
+    a = parse_action('<tool_call>{"name": "bash", "arguments": {"cmd": "pytest"</tool_call>')
+    assert a.action == ""
+    assert "<tool_call>" in a.error
+
+
+def test_parse_action_legacy_json_remains_supported():
+    a = parse_action('{"action": "bash", "args": {"cmd": "pytest -q"}}')
+    assert a.action == "bash"
+    assert a.args["cmd"] == "pytest -q"
+    assert a.error is None
 
 
 def test_parse_action_missing_action_is_error():
     a = parse_action('{"foo": "bar"}')
     assert a.action == "" and a.error is not None
+    assert "<tool_call>" in a.error
 
 
 def test_stub_model_is_deterministic_and_counts_tokens():

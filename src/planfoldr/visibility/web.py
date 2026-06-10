@@ -243,6 +243,21 @@ def _try_parse_json(s: str) -> Optional[dict]:
     return None
 
 
+def _tool_call_body(s: str) -> Optional[str]:
+    s = _strip_think_tags(s)
+    match = _re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", s, flags=_re.DOTALL)
+    if match is None:
+        return None
+    return match.group(1).strip()
+
+
+def _try_parse_action_obj(content: str) -> Optional[dict]:
+    body = _tool_call_body(content)
+    if body is not None:
+        return _try_parse_json(body)
+    return _try_parse_json(content)
+
+
 def _action_from_broken_json(s: str) -> Optional[Tuple[str, str]]:
     """Regex fallback when JSON is malformed (e.g. unescaped quotes in args).
 
@@ -259,21 +274,41 @@ def _action_from_broken_json(s: str) -> Optional[Tuple[str, str]]:
     return thinking, f'<div class="tool-line">⚡ <b>{esc(action)}</b>{note}</div>'
 
 
+def _action_from_broken_tool_call(s: str) -> Optional[Tuple[str, str]]:
+    body = _tool_call_body(s)
+    if body is None:
+        return None
+    name_m = _re.search(r'"(?:name|action|tool)"\s*:\s*"([^"]+)"', body)
+    if not name_m:
+        return "", '<div class="tool-line err-line">⚡ malformed <b>tool_call</b> <span class="thinking" style="font-size:10px">[missing action name]</span></div>'
+    thinking_m = _re.search(r'"thinking"\s*:\s*"((?:[^"\\]|\\.)*)"', body)
+    thinking = thinking_m.group(1) if thinking_m else ""
+    note = '<span class="thinking" style="font-size:10px"> [arguments truncated — malformed tool_call]</span>'
+    return thinking, f'<div class="tool-line">⚡ <b>{esc(name_m.group(1))}</b>{note}</div>'
+
+
 def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
-    """Parse an action-protocol JSON response and return (json_thinking, action_html).
+    """Parse an action-protocol response and return (json_thinking, action_html).
 
     Returns None if content is not a valid action-protocol response.
     """
-    obj = _try_parse_json(content)
+    obj = _try_parse_action_obj(content)
     if obj is None:
         return None
-    action = obj.get("action")
+    function = obj.get("function") if isinstance(obj.get("function"), dict) else {}
+    action = obj.get("action") or obj.get("tool") or obj.get("name") or function.get("name")
     if not action:
         return None
 
     json_thinking = (obj.get("thinking") or "").strip()
     action_html = f'<div class="tool-line">⚡ <b>{esc(action)}</b></div>'
-    args = obj.get("args") or {}
+    args = obj.get("args")
+    if args is None:
+        args = obj.get("arguments", obj.get("parameters", function.get("arguments", {})))
+    if isinstance(args, str):
+        args = _try_parse_json(args) or {"value": args}
+    if not isinstance(args, dict):
+        args = {"value": args}
     if args:
         rows = ""
         for k, v in args.items():
@@ -360,6 +395,8 @@ def _model_output_html(e: Dict[str, Any]) -> str:
                     body += ah
             else:
                 fallback = _action_from_broken_json(content)
+                if fallback is None:
+                    fallback = _action_from_broken_tool_call(content)
                 if fallback is not None:
                     jt, ah = fallback
                     if jt and not thinking:
@@ -370,10 +407,14 @@ def _model_output_html(e: Dict[str, Any]) -> str:
 
     # For model_verification: parse and display the verdict prominently
     if phase == "model_verification" and content:
-        obj = _try_parse_json(content)
-        if obj and obj.get("action") == "verify":
-            passed = bool(obj.get("args", {}).get("passed", False))
-            reason = obj.get("args", {}).get("reason", "")
+        obj = _try_parse_action_obj(content)
+        action = obj.get("action") or obj.get("name") if obj else None
+        args = obj.get("args") if obj else {}
+        if obj and args is None:
+            args = obj.get("arguments", {})
+        if obj and action == "verify":
+            passed = bool((args or {}).get("passed", False))
+            reason = (args or {}).get("reason", "")
             v_cls = "verdict-pass" if passed else "verdict-fail"
             v_icon = "✅" if passed else "❌"
             v_word = "PASSED" if passed else "FAILED"

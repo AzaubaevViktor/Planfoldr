@@ -3,7 +3,7 @@ File name: `model_q16_byuser_tool_call_protocol.md`
 
 ## Status
 
-Current status: active
+Current status: done
 Blocked by: none
 Description: Change the model-facing protocol so models are taught to invoke tools with
 `<tool_call>` envelopes instead of only being told to emit bare JSON objects.
@@ -85,3 +85,22 @@ should prove real tool calls execute through that envelope.
 - Created from user request: "научить модель в процессе работы ИСПОЛЬЗОВАТЬ ТУЛЫ ЧЕРЕЗ
   `<tool_call>`".
 - Parser support exists in `src/planfoldr/model.py`, but prompts still primarily teach bare JSON.
+- Implemented on 2026-06-10:
+  - `src/planfoldr/cycle.py` now presents `<tool_call>{"name":"...","arguments":...}</tool_call>`
+    as the primary model-facing action protocol in `_PROTOCOL`, action references, reformat hints,
+    and model-verification instructions. The cycle no longer forces provider `fmt="json"` for
+    action calls, so local models can emit the envelope they are taught to use.
+  - `src/planfoldr/model.py::parse_action` now prefers `<tool_call>` envelopes when present,
+    preserves legacy bare JSON compatibility for migration, parses stringified `arguments`, and
+    returns reformat errors that explicitly ask for `<tool_call>`.
+  - `src/planfoldr/visibility/web.py` renders `<tool_call>` model outputs as readable action
+    blocks in Streaming Log / Models views, including malformed-envelope diagnostics without raw
+    fallback dumps.
+  - Focused tests added for parser compatibility and malformed envelopes, prompt contents, a
+    `file_edit` → `bash` → `finish` cycle driven by `<tool_call>`, static Streaming Log rendering,
+    and generated `model_io.jsonl` / `visibility/index.html` from a real stub run.
+
+Verification evidence:
+- `.venv/bin/python -m pytest tests/test_model.py tests/test_cycle_stub.py tests/test_visibility.py -q`
+  passed with `39 passed, 1 skipped`.
+- `.venv/bin/python -m pytest -q` passed with `114 passed, 1 skipped`.

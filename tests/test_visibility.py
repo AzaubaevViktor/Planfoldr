@@ -1,3 +1,4 @@
+import json
 import socket
 import time
 from pathlib import Path
@@ -58,6 +59,29 @@ def test_stream_log_renders_entries_and_goal_header():
     assert html.index("build the thing") < html.index('class="cyc"')  # goal precedes the log entries
     assert 'class="cyc"' in html and "<details" in html  # expandable executions
     assert "__SNAPSHOT__" in html
+
+
+def test_stream_log_renders_tool_call_envelope_as_action_block():
+    content = '<tool_call>{"name":"file_edit","arguments":{"path":"demo.txt","content":"ok\\n"},"thinking":"write demo"}</tool_call>'
+    snap = {"scenario": {"name": "demo", "goal": "render tool calls"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
+                     "content": content, "thinking": "", "tokens": 12}]}
+    html = render_stream_log_html(embedded=snap)
+    assert "<b>file_edit</b>" in html
+    assert "demo.txt" in html
+    assert "write demo" in html
+    assert "&lt;tool_call&gt;" not in html
+
+
+def test_stream_log_renders_malformed_tool_call_without_raw_dump():
+    content = '<tool_call>{"name":"bash","arguments":{"cmd":"pytest "bad""}}</tool_call>'
+    snap = {"scenario": {"name": "demo", "goal": "render malformed tool calls"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
+                     "content": content, "thinking": "", "tokens": 12}]}
+    html = render_stream_log_html(embedded=snap)
+    assert "<b>bash</b>" in html
+    assert "malformed tool_call" in html
+    assert "&lt;tool_call&gt;" not in html
 
 
 def test_tickets_page_shows_comments_history_and_evidence():
@@ -178,3 +202,34 @@ def test_run_writes_all_pages_analysis_and_model_io(tmp_path):
     # Streaming start preserved: the first model output content is present in the log page.
     tickets_page = (vis / "tickets.html").read_text()
     assert "developer-1" in tickets_page and "create file alpha.txt" in tickets_page
+
+
+def test_tool_call_run_writes_readable_model_io_and_index(tmp_path):
+    state = {"top": 0, "wrote": False}
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return '<tool_call>{"name":"finish","arguments":{}}</tool_call>'
+        if "PHASE: model_verification" in text:
+            return '<tool_call>{"name":"verify","arguments":{"passed":true,"reason":"alpha.txt exists"}}</tool_call>'
+        if "PHASE: changes" in text and "(orchestration)" in text:
+            state["top"] += 1
+            if state["top"] == 1:
+                return ('<tool_call>{"name":"create_ticket","arguments":{"id":"developer-1","type":"code",'
+                        '"title":"impl alpha","goal":"create file alpha.txt","checks":[{"kind":"command",'
+                        '"spec":"test -f alpha.txt"}]}}</tool_call>')
+            return '<tool_call>{"name":"finish","arguments":{}}</tool_call>'
+        if "PHASE: changes" in text and not state["wrote"]:
+            state["wrote"] = True
+            return '<tool_call>{"name":"file_edit","arguments":{"path":"alpha.txt","content":"ok\\n"}}</tool_call>'
+        return '<tool_call>{"name":"finish","arguments":{}}</tool_call>'
+
+    result = run_scenario(E2E.base_scenario(commands=["test -f alpha.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_tool_call_vis", model_adapter=StubModel(stub))
+    assert result.status == "done", result.reason
+    run = Path(result.run_dir)
+    model_io = [json.loads(line)["content"] for line in (run / "model_io.jsonl").read_text().splitlines()]
+    index = (run / "visibility" / "index.html").read_text()
+    assert any("<tool_call>" in content and '"name":"file_edit"' in content for content in model_io)
+    assert "<b>file_edit</b>" in index and "alpha.txt" in index

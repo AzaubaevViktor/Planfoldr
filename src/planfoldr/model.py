@@ -6,8 +6,9 @@ see other cycles' memory, and does not read its own score (scores live in the Sc
 runtime selects via `ModelRegistry.select`).
 
 Reuses the proven streaming + provider token-counting approach from v1
-(`v1/src/planfoldr/executors.py` OllamaModelAdapter), adapted to a single-action JSON envelope so
-the cycle is model-agnostic instead of depending on a provider-specific tool-call token.
+(`v1/src/planfoldr/executors.py` OllamaModelAdapter), adapted to a single-action `<tool_call>`
+envelope so the cycle is model-agnostic instead of depending on a provider-specific tool-call
+token.
 """
 
 from __future__ import annotations
@@ -70,16 +71,23 @@ class Action:
 
 
 def parse_action(text: str) -> Action:
-    """Parse a model reply into a single action. JSON-first (whole text, then an embedded object),
-    with a `<tool_call>` fallback so a range of local models can drive the cycle."""
+    """Parse a model reply into a single action.
+
+    The preferred protocol is a `<tool_call>...</tool_call>` envelope. Legacy bare JSON remains
+    accepted during migration so older tests and model transcripts continue to replay.
+    """
     text = (text or "").strip()
-    obj = _try_json(text)
+    obj = None
+    if "<tool_call" in text:
+        obj = _parse_tool_call(text)
+        if obj is None:
+            return Action(action="", raw=text, error="malformed <tool_call>; reply with exactly one <tool_call> JSON envelope")
+    if obj is None:
+        obj = _try_json(text)
     if obj is None:
         obj = _extract_json_object(text)
-    if obj is None:
-        obj = _parse_tool_call(text)
     if not isinstance(obj, dict):
-        return Action(action="", raw=text, error="no JSON action object found")
+        return Action(action="", raw=text, error="no action found; reply with exactly one <tool_call> JSON envelope")
     function = obj.get("function") if isinstance(obj.get("function"), dict) else {}
     action = obj.get("action") or obj.get("tool") or obj.get("name") or function.get("name")
     args = obj.get("args")
@@ -90,7 +98,7 @@ def parse_action(text: str) -> Action:
     thinking = obj.get("thinking", "") or ""
     if not action:
         return Action(action="", args=obj if isinstance(obj, dict) else {}, thinking=thinking,
-                      raw=text, error="missing 'action' field")
+                      raw=text, error="missing action/name; reply with exactly one <tool_call> JSON envelope")
     return Action(
         action=str(action).strip(),
         args=args if isinstance(args, dict) else {"value": args},
