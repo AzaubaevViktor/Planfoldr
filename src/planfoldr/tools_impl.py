@@ -11,7 +11,6 @@ from __future__ import annotations
 import difflib
 import os
 import re
-import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -99,20 +98,17 @@ def handle_file_edit(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
 
 
 def run_command(cmd: str, *, cwd: Path, timeout: float, budget: Optional[Budget] = None) -> Dict[str, Any]:
-    """Run a shell command in `cwd` with a minimal environment. Used by the bash tool and by
-    command verification. A malformed command (e.g. unbalanced quotes), a missing binary or a
-    timeout becomes a clean failure result -- it never crashes the run."""
+    """Run a shell command in `cwd` with a minimal environment. Uses shell=True so compound
+    operators (&&, ||, pipes) work as expected. A missing binary, syntax error, or timeout
+    becomes a clean failure result -- it never crashes the run."""
     if budget is not None:
         budget.consume(Metric.COMMAND_RUNS, 1)
-    try:
-        argv = shlex.split(cmd)
-    except ValueError as exc:
-        return {"exit_code": -1, "stdout": "", "stderr": f"command parse error: {exc}", "status": "failure"}
-    if not argv:
+    if not cmd.strip():
         return {"exit_code": -1, "stdout": "", "stderr": "empty command", "status": "failure"}
     try:
         completed = subprocess.run(
-            argv,
+            cmd,
+            shell=True,
             cwd=str(cwd),
             env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
             capture_output=True, text=True, timeout=timeout, check=False,

@@ -51,13 +51,26 @@ def code_stub(state=None):
 
 def test_run_command_never_crashes_on_bad_input(tmp_path):
     from planfoldr.tools_impl import run_command
-    # Unbalanced quotes used to crash the whole run via shlex.split -> now a clean failure.
+    # Unbalanced quotes: shell handles this as a syntax error, exits non-zero.
     bad = run_command('python3 -c "print(', cwd=tmp_path, timeout=5)
-    assert bad["status"] == "failure" and "parse error" in bad["stderr"]
+    assert bad["status"] == "failure"
     missing = run_command("definitely_not_a_real_binary_xyz", cwd=tmp_path, timeout=5)
     assert missing["status"] == "failure"
     empty = run_command("   ", cwd=tmp_path, timeout=5)
     assert empty["status"] == "failure"
+
+
+def test_run_command_shell_operators_work(tmp_path):
+    from planfoldr.tools_impl import run_command
+    # && and || must work as shell operators, not be passed as filename arguments.
+    ok = run_command("true && true", cwd=tmp_path, timeout=5)
+    assert ok["status"] == "success"
+    fail = run_command("false || false", cwd=tmp_path, timeout=5)
+    assert fail["status"] == "failure"
+    # A compound grep check — the original failure pattern from the hardening sweep.
+    (tmp_path / "calc.py").write_text("def add(a, b): return a + b\ndef subtract(a, b): return a - b\n")
+    compound = run_command("grep -q 'def add(' calc.py && grep -q 'def subtract(' calc.py", cwd=tmp_path, timeout=5)
+    assert compound["status"] == "success"
 
 
 def test_full_code_cycle_runs_four_phases_and_completes(tmp_path):

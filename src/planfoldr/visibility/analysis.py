@@ -91,6 +91,20 @@ def _sections(snap: Dict[str, Any]) -> List[Tuple[str, List[str]]]:
     if false_ver:
         signatures.append(f"{len(false_ver)} false verification(s): a model claimed pass without passing evidence.")
 
+    # False-negative model verification: ticket failed even though all command checks passed.
+    false_neg = [
+        tid for tid, t in tickets.items()
+        if t.get("status") == "failed"
+        and any(e.get("status") == "success" for e in t.get("evidence", []))
+        and not any(e.get("status") == "failure" for e in t.get("evidence", []))
+        and t.get("attempt_count", 0) >= t.get("max_attempts", 3)
+    ]
+    if false_neg:
+        signatures.append(
+            f"False-negative model verification on {false_neg}: all command checks passed but "
+            "the model said 'not satisfied' every attempt, exhausting retries."
+        )
+
     if not signatures:
         signatures.append("No failure signatures detected — clean run.")
 
@@ -136,6 +150,11 @@ def _sections(snap: Dict[str, Any]) -> List[Tuple[str, List[str]]]:
         suggestions.append("Right-size budgets or reduce model calls per ticket to avoid soft-stops.")
     if false_ver:
         suggestions.append("Harden the model-verification gate so a pass requires real command evidence.")
+    if false_neg:
+        suggestions.append(
+            "Model over-rejected passing work. Strengthen the model_verification prompt to trust "
+            "exit=0 command evidence; show stdout explicitly in the proof so the model sees the output."
+        )
     if not suggestions:
         suggestions.append("Nothing actionable — keep escalating task difficulty.")
 

@@ -207,7 +207,12 @@ class Cycle:
             if check.kind != "command":
                 continue
             result = run_command(check.spec, cwd=self.workspace, timeout=self._tool_ctx.command_timeout, budget=self.budget)
-            self.ticket.add_evidence(check_index=idx, status=result["status"], proof=f"$ {check.spec}\nexit={result['exit_code']}\n{result['stderr'][:400]}")
+            proof = f"$ {check.spec}\nexit={result['exit_code']}"
+            if result.get("stdout"):
+                proof += f"\nstdout: {result['stdout'][:300]}"
+            if result.get("stderr"):
+                proof += f"\nstderr: {result['stderr'][:300]}"
+            self.ticket.add_evidence(check_index=idx, status=result["status"], proof=proof)
             # Record the command as a traceable event (who/when/cmd/exit) for Visibility.
             self.audit.emit(
                 EventType.TOOL_INVOKED, ticket_id=self.ticket.id, cycle_id=self.execution_id,

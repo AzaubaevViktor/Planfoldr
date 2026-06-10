@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO = ROOT / "examples" / "todo_local.yaml"
+SCENARIO = ROOT / "examples" / "todo_local_l05.yaml"
 
 REFERENCE = '''
 import json, os, sys
