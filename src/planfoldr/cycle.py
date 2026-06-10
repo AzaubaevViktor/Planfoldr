@@ -46,24 +46,31 @@ PHASES_BY_TYPE: Dict[str, List[str]] = {
 DEFAULT_PHASES = [CONTEXT, CHANGES, COMMAND_VERIFY, MODEL_VERIFY]
 
 _PROTOCOL = (
-    "Respond with ONE JSON object and nothing else: "
-    '{"thinking": "<one short sentence>", "action": "<name>", "args": {...}}. '
-    "Keep 'thinking' to a single brief sentence. Never wrap it in markdown."
+    "Respond with exactly ONE tool call envelope and nothing else:\n"
+    '<tool_call>{"name":"<action>", "arguments": {...}, "thinking":"<one short sentence>"}</tool_call>\n'
+    "Keep 'thinking' to a single brief sentence. Never wrap the tool call in markdown. "
+    "Legacy bare JSON actions are accepted only for migration; prefer <tool_call>."
 )
 
 _ACTION_REFERENCE = {
-    "file_edit": '{"action":"file_edit","args":{"path":"relative/file.py","content":"<FULL file content>"}} — creates/overwrites a file in the workspace',
-    "bash": '{"action":"bash","args":{"cmd":"<shell command>"}} — run a command in the workspace (use rarely; do not repeat read-only commands)',
-    "create_ticket": '{"action":"create_ticket","args":{"type":"code|tests|research|fix|verify","title":"...","goal":"<concrete goal>","dependencies":["<ticket-id>"],"checks":[{"kind":"command","spec":"<shell test that exits 0 on success>"}]}}',
-    "update_ticket": '{"action":"update_ticket","args":{"finding":"<evidence/notes>","status":"note"}}',
-    "comment": '{"action":"comment","args":{"text":"<comment>","summon":"<@role to call, optional>"}}',
-    "write_context": '{"action":"write_context","args":{"section":"<name>","content":"..."}}',
-    "read_context": '{"action":"read_context","args":{"section":"<name>"}}',
-    "request_decision": '{"action":"request_decision","args":{"question":"<ask @human>"}}',
-    "request_context": '{"action":"request_context","args":{"question":"<ask parent>"}}',
-    "verify": '{"action":"verify","args":{"passed":true,"reason":"<why the evidence proves the goal>"}}',
-    "plan": '{"action":"plan","args":{"notes":"<short plan>"}}',
-    "finish": '{"action":"finish","args":{}} — use when the GOAL is achieved',
+    "file_edit": (
+        '<tool_call>{"name":"file_edit","arguments":{"path":"relative/file.py","content":"<FULL file content>"}}</tool_call>'
+        ' — create or replace a file (full content; required for new files and full rewrites);'
+        ' to make targeted edits to an EXISTING file use patch mode instead:'
+        ' <tool_call>{"name":"file_edit","arguments":{"path":"relative/file.py","patch":"--- a/file.py\\n+++ b/file.py\\n@@ -N,M +N,M @@\\n context\\n-removed line\\n+added line\\n context"}}</tool_call>'
+        ' (unified diff; patch= fails if file does not exist or context lines do not match)'
+    ),
+    "bash": '<tool_call>{"name":"bash","arguments":{"cmd":"<shell command>"}}</tool_call> — run a command in the workspace (use rarely; do not repeat read-only commands)',
+    "create_ticket": '<tool_call>{"name":"create_ticket","arguments":{"type":"code|tests|research|fix|verify","title":"...","goal":"<concrete goal>","dependencies":["<ticket-id>"],"checks":[{"kind":"command","spec":"<shell test that exits 0 on success>"}]}}</tool_call>',
+    "update_ticket": '<tool_call>{"name":"update_ticket","arguments":{"finding":"<evidence/notes>","status":"note"}}</tool_call>',
+    "comment": '<tool_call>{"name":"comment","arguments":{"text":"<comment>","summon":"<@role to call, optional>"}}</tool_call>',
+    "write_context": '<tool_call>{"name":"write_context","arguments":{"section":"<name>","content":"..."}}</tool_call>',
+    "read_context": '<tool_call>{"name":"read_context","arguments":{"section":"<name>"}}</tool_call>',
+    "request_decision": '<tool_call>{"name":"request_decision","arguments":{"question":"<ask @human>"}}</tool_call>',
+    "request_context": '<tool_call>{"name":"request_context","arguments":{"question":"<ask parent>"}}</tool_call>',
+    "verify": '<tool_call>{"name":"verify","arguments":{"passed":true,"reason":"<why the evidence proves the goal>"}}</tool_call>',
+    "plan": '<tool_call>{"name":"plan","arguments":{"notes":"<short plan>"}}</tool_call>',
+    "finish": '<tool_call>{"name":"finish","arguments":{}}</tool_call> — use when the GOAL is achieved',
 }
 
 
@@ -243,7 +250,7 @@ class Cycle:
             user=(
                 f"PHASE: model_verification. Judge whether the goal is met by the evidence.\n"
                 f"Goal: {self.ticket.goal}\nCriteria: {criteria}\nEvidence: {evidence_repr}\n"
-                'Respond {"action":"verify","args":{"passed":true|false,"reason":"..."}}.'
+                'Respond <tool_call>{"name":"verify","arguments":{"passed":true|false,"reason":"..."}}</tool_call>.'
             ),
             allowed={"verify"},
         )
@@ -277,7 +284,7 @@ class Cycle:
             action = self._one_action(phase, user=self._changes_user(phase, allowed, last_result), allowed=allowed)
             if action.error and reformat_left > 0:
                 reformat_left -= 1
-                last_result = {"protocol_error": action.error, "hint": "Reply with exactly one JSON action object."}
+                last_result = {"protocol_error": action.error, "hint": "Reply with exactly one <tool_call>...</tool_call> envelope."}
                 continue
             if action.action in {"finish", ""}:
                 return
@@ -337,7 +344,7 @@ class Cycle:
                 self.stream_sink({"phase": phase, "event": event, "cycle_id": self.execution_id,
                                   "ticket_id": self.ticket.id, **fields})
 
-        response = self.model.generate(messages, fmt="json", progress=progress)
+        response = self.model.generate(messages, progress=progress)
         # Emit the FULL assembled output (thinking + content) so the report never loses the start
         # of a stream (the per-token chunks above are for live terminal/WS only).
         if self.stream_sink is not None:
@@ -405,11 +412,12 @@ class Cycle:
             + (f"CONSTRAINTS: {constraints}\n" if constraints else "")
             + self._checks_block()
             + f"CONTEXT: {self.local_memory.get('context', {})}\n"
-            "The workspace is the current directory and may be empty; CREATE the files needed to "
-            "achieve the GOAL using file_edit (provide the full file content). NEVER write files "
-            "with bash (no echo/printf/cat/tee redirects) — use file_edit. Use bash ONLY to run "
-            "tests or commands. Do not repeat read-only commands. When ALL acceptance checks pass, "
-            "respond with finish.\n"
+            "The workspace is the current directory and may be empty. Use file_edit to manage files: "
+            "provide full content to create a new file or do a full rewrite; use the 'patch' arg "
+            "with a unified diff to make targeted edits to existing files without rewriting them. "
+            "NEVER write files with bash (no echo/printf/cat/tee redirects) — use file_edit. "
+            "Use bash ONLY to run tests or commands. Do not repeat read-only commands. "
+            "When ALL acceptance checks pass, respond with finish.\n"
             f"ACTION REFERENCE (choose exactly ONE):\n{ref}\n"
             f"Last tool result: {last_result}\n"
             f"{_PROTOCOL}"

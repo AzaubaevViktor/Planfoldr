@@ -12,7 +12,7 @@ from planfoldr.toolset import ToolRegistry, Toolset
 from planfoldr.tools_impl import register_default_tools
 
 
-def build(tmp_path, *, stub, ticket, budget_limits=None, on_create_ticket=None):
+def build(tmp_path, *, stub, ticket, budget_limits=None, on_create_ticket=None, stream_sink=None):
     audit = AuditLog()
     reg = register_default_tools(ToolRegistry())
     toolset = Toolset(["file_edit", "bash"], registry=reg)
@@ -26,7 +26,7 @@ def build(tmp_path, *, stub, ticket, budget_limits=None, on_create_ticket=None):
         ticket=ticket, role=role, model_config=ModelConfig("stub", provider="stub"),
         model_adapter=StubModel(stub), budget=budget, audit=audit, toolset=toolset,
         workspace=workspace, graph=TicketGraph(audit=audit), score_system=ScoreSystem(audit=audit),
-        on_create_ticket=on_create_ticket, max_iterations=6,
+        on_create_ticket=on_create_ticket, stream_sink=stream_sink, max_iterations=6,
     )
     return cycle, audit, workspace
 
@@ -92,6 +92,66 @@ def test_checks_block_appears_in_changes_prompt(tmp_path):
     assert "ACCEPTANCE CHECKS" in captured[0]
     assert "test -f solution.py" in captured[0]
     assert "finish" in captured[0]
+
+
+def test_tool_call_protocol_appears_in_system_and_changes_prompts(tmp_path):
+    captured = {"system": [], "user": []}
+
+    def stub(messages):
+        captured["system"].append(messages[0]["content"])
+        captured["user"].append(messages[-1]["content"])
+        return code_stub()(messages)
+
+    ticket = new_ticket("dev-1", title="solution", type="code", goal="write solution.py",
+                        created_by="orchestrator",
+                        checks=[Check(kind="command", spec="test -f solution.py")])
+    cycle, _, _ = build(tmp_path, stub=stub, ticket=ticket)
+    cycle.run()
+    system_prompt = "\n".join(captured["system"])
+    changes_prompt = "\n".join(u for u in captured["user"] if "PHASE: changes" in u)
+    verify_prompt = "\n".join(u for u in captured["user"] if "PHASE: model_verification" in u)
+
+    assert "<tool_call>" in system_prompt
+    assert "Legacy bare JSON actions are accepted only for migration" in system_prompt
+    assert "Respond with ONE JSON object" not in system_prompt
+    assert '<tool_call>{"name":"file_edit"' in changes_prompt
+    assert '<tool_call>{"name":"finish"' in changes_prompt
+    assert 'Respond <tool_call>{"name":"verify"' in verify_prompt
+
+
+def test_tool_call_cycle_executes_file_edit_bash_and_finish(tmp_path):
+    steps = {"changes": 0}
+    stream_events = []
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return '<tool_call>{"name":"finish","arguments":{},"thinking":"context ready"}</tool_call>'
+        if "PHASE: changes" in text:
+            steps["changes"] += 1
+            if steps["changes"] == 1:
+                return '<tool_call>{"name":"file_edit","arguments":{"path":"solution.py","content":"VALUE = 42\\n"},"thinking":"write file"}</tool_call>'
+            if steps["changes"] == 2:
+                return '<tool_call>{"name":"bash","arguments":{"cmd":"test -f solution.py && grep -q VALUE solution.py"},"thinking":"check file"}</tool_call>'
+            return '<tool_call>{"name":"finish","arguments":{},"thinking":"done"}</tool_call>'
+        if "PHASE: model_verification" in text:
+            return '<tool_call>{"name":"verify","arguments":{"passed":true,"reason":"tool_call file edit and bash evidence passed"},"thinking":"verified"}</tool_call>'
+        return '<tool_call>{"name":"finish","arguments":{}}</tool_call>'
+
+    ticket = new_ticket("dev-1", title="solution", type="code", goal="write solution.py with VALUE=42",
+                        created_by="orchestrator",
+                        checks=[Check(kind="command", spec="test -f solution.py && grep -q VALUE solution.py")])
+    cycle, audit, ws = build(tmp_path, stub=stub, ticket=ticket, stream_sink=stream_events.append)
+    result = cycle.run()
+
+    assert result.status == Status.DONE
+    assert (ws / "solution.py").read_text() == "VALUE = 42\n"
+    assert any(e.get("status") == "success" for e in ticket.evidence)
+    tool_events = [e.payload for e in audit.events() if e.event_type == EventType.TOOL_INVOKED]
+    assert [p["tool"] for p in tool_events if p["tool"] in {"file_edit", "bash"}] == ["file_edit", "bash"]
+    model_outputs = [e for e in stream_events if e.get("event") == "model_output"]
+    assert any("<tool_call>" in e.get("content", "") and '"name":"file_edit"' in e.get("content", "")
+               for e in model_outputs)
 
 
 def test_full_code_cycle_runs_four_phases_and_completes(tmp_path):
@@ -195,3 +255,70 @@ def test_child_cycle_does_not_close_parent(tmp_path):
     result = cycle.run()
     assert result.status == Status.DONE and child.status == Status.DONE
     assert parent.status == Status.INCOMING  # the child never touched the parent/project
+
+
+def test_file_edit_patch_modifies_existing_file(tmp_path):
+    """file_edit with a unified diff patch edits an existing file; metrics reflect only the changed lines."""
+    patch_text = (
+        "--- a/target.py\n"
+        "+++ b/target.py\n"
+        "@@ -1,3 +1,3 @@\n"
+        " line1\n"
+        "-line2\n"
+        "+line2_patched\n"
+        " line3\n"
+    )
+    state = {"patched": False}
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return {"action": "finish", "args": {}}
+        if "PHASE: changes" in text:
+            if not state["patched"]:
+                state["patched"] = True
+                return {"action": "file_edit", "args": {"path": "target.py", "patch": patch_text}}
+            return {"action": "finish", "args": {}}
+        if "PHASE: model_verification" in text:
+            return {"action": "verify", "args": {"passed": True, "reason": "patch applied"}}
+        return {"action": "finish", "args": {}}
+
+    ticket = new_ticket("dev-1", title="patch test", type="code", goal="patch target.py",
+                        created_by="orchestrator")
+    cycle, audit, workspace = build(tmp_path, stub=stub, ticket=ticket)
+    (workspace / "target.py").write_text("line1\nline2\nline3\n")
+
+    result = cycle.run()
+
+    assert result.status == Status.DONE
+    assert (workspace / "target.py").read_text() == "line1\nline2_patched\nline3\n"
+    tool_events = [
+        e for e in audit.events()
+        if e.event_type == EventType.TOOL_INVOKED and e.payload.get("tool") == "file_edit"
+    ]
+    assert tool_events, "file_edit tool event not recorded in audit"
+    r = tool_events[0].payload["result"]
+    assert r["action"] == "modified"
+    assert r["lines_added"] == 1
+    assert r["lines_removed"] == 1
+
+
+def test_patch_mode_documented_in_changes_prompt(tmp_path):
+    """The changes-phase prompt mentions both full-content and patch modes for file_edit."""
+    captured = []
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: changes" in text:
+            captured.append(text)
+        return code_stub()(messages)
+
+    ticket = new_ticket("dev-1", title="t", type="code", goal="write solution.py",
+                        created_by="orchestrator")
+    cycle, _, _ = build(tmp_path, stub=stub, ticket=ticket)
+    cycle.run()
+    assert captured, "changes prompt was never captured"
+    prompt = captured[0]
+    assert "patch" in prompt, "patch mode not mentioned in changes prompt"
+    assert "content" in prompt, "full-content mode not mentioned in changes prompt"
+    assert "existing" in prompt.lower(), "prompt should clarify patch is for existing files"
