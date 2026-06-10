@@ -49,6 +49,19 @@ def code_stub(state=None):
     return stub
 
 
+def assert_ticket_command_success(ticket, command):
+    matches = [e for e in ticket.evidence if f"$ {command}" in e.get("proof", "")]
+    assert matches, f"missing command evidence for {command}\navailable evidence: {ticket.evidence}"
+    evidence = matches[-1]
+    assert evidence.get("status") == "success", (
+        f"command failed for ticket {ticket.id}\ncommand: {command}\n{evidence.get('proof', '')}"
+    )
+    assert "exit=0" in evidence.get("proof", ""), (
+        f"command did not record exit=0 for ticket {ticket.id}\n"
+        f"command: {command}\n{evidence.get('proof', '')}"
+    )
+
+
 def test_run_command_never_crashes_on_bad_input(tmp_path):
     from planfoldr.tools_impl import run_command
     # Unbalanced quotes: shell handles this as a syntax error, exits non-zero.
@@ -145,6 +158,7 @@ def test_tool_call_cycle_executes_file_edit_bash_and_finish(tmp_path):
     result = cycle.run()
 
     assert result.status == Status.DONE
+    assert_ticket_command_success(ticket, "test -f solution.py && grep -q VALUE solution.py")
     assert (ws / "solution.py").read_text() == "VALUE = 42\n"
     assert any(e.get("status") == "success" for e in ticket.evidence)
     tool_events = [e.payload for e in audit.events() if e.event_type == EventType.TOOL_INVOKED]
@@ -160,6 +174,7 @@ def test_full_code_cycle_runs_four_phases_and_completes(tmp_path):
     cycle, audit, ws = build(tmp_path, stub=code_stub(), ticket=ticket)
     result = cycle.run()
     assert result.status == Status.DONE
+    assert_ticket_command_success(ticket, "test -f solution.py")
     assert (ws / "solution.py").read_text() == "VALUE = 42\n"
     phases = [e.payload["phase"] for e in audit.events() if e.event_type == EventType.CYCLE_PHASE_COMPLETED]
     assert phases == [CONTEXT, "changes", COMMAND_VERIFY, MODEL_VERIFY]

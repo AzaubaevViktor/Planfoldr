@@ -12,7 +12,7 @@ from pathlib import Path
 from planfoldr.budget import Metric
 from planfoldr.model import StubModel
 from planfoldr.orchestrator import run_scenario
-from planfoldr.scenario import ModelSettings, Scenario
+from planfoldr.scenario import ModelSettings, Scenario, load_scenario
 
 
 def make_e2e_stub():
@@ -57,19 +57,172 @@ def base_scenario(**over):
     )
 
 
+def final_command_evidence(result, command):
+    tickets = json.loads((Path(result.run_dir) / "tickets.json").read_text())
+    verify = tickets.get("scenario-verify", {})
+    matches = [e for e in verify.get("evidence", []) if f"$ {command}" in e.get("proof", "")]
+    assert matches, (
+        f"missing scenario final-verification command evidence\n"
+        f"run_dir: {result.run_dir}\ncommand: {command}\n"
+        f"available evidence: {verify.get('evidence', [])}"
+    )
+    return matches[-1]
+
+
+def assert_final_command_success(result, command, *, stdout_contains=None, example=None):
+    evidence = final_command_evidence(result, command)
+    proof = evidence.get("proof", "")
+    label = f"{example}\n" if example else ""
+    assert evidence.get("status") == "success", (
+        f"{label}final verification command failed\n"
+        f"run_dir: {result.run_dir}\ncommand: {command}\n{proof}"
+    )
+    assert "exit=0" in proof, (
+        f"{label}final verification command did not record exit=0\n"
+        f"run_dir: {result.run_dir}\ncommand: {command}\n{proof}"
+    )
+    if stdout_contains is not None:
+        assert stdout_contains in proof, (
+            f"{label}final verification command stdout missing marker {stdout_contains!r}\n"
+            f"run_dir: {result.run_dir}\ncommand: {command}\n{proof}"
+        )
+
+
 def test_full_scenario_completes_and_persists(tmp_path):
     result = run_scenario(base_scenario(), runs_dir=tmp_path, run_id="test_run_e2e",
                           model_adapter=StubModel(make_e2e_stub()))
     assert result.status == "done", result.reason
+    assert_final_command_success(result, "test -f alpha.txt")
+    assert_final_command_success(result, "test -f beta.txt")
     # Tickets were created dynamically via create_ticket and both completed.
     assert result.tickets["developer-1"] == "done" and result.tickets["developer-2"] == "done"
     ws = Path(result.run_dir) / "workspace"
+    # Secondary artifact inspection; command evidence above is the acceptance proof.
     assert (ws / "alpha.txt").exists() and (ws / "beta.txt").exists()
     # Artifacts persisted for replay/inspection.
     for name in ["audit.jsonl", "graph.json", "scores.json", "tickets.json", "result.json"]:
         assert (Path(result.run_dir) / name).exists()
     # Budget was metered in real time.
     assert result.budget[Metric.TOKENS] > 0
+
+
+CALC_EXAMPLE_CONTENT = """\
+def add(a, b):
+    return a + b
+
+
+def subtract(a, b):
+    return a - b
+"""
+
+
+TODO_EXAMPLE_CONTENT = """\
+import json
+import sys
+from pathlib import Path
+
+
+def list_tasks(path="todos.json"):
+    p = Path(path)
+    if not p.exists():
+        return []
+    return json.loads(p.read_text())
+
+
+def _save(tasks, path):
+    Path(path).write_text(json.dumps(tasks))
+
+
+def add(title, path="todos.json"):
+    tasks = list_tasks(path)
+    next_id = max([task["id"] for task in tasks], default=0) + 1
+    tasks.append({"id": next_id, "title": title, "done": False})
+    _save(tasks, path)
+    return next_id
+
+
+def complete(task_id, path="todos.json"):
+    tasks = list_tasks(path)
+    found = False
+    for task in tasks:
+        if task["id"] == int(task_id):
+            task["done"] = True
+            found = True
+    _save(tasks, path)
+    return found
+
+
+def remove(task_id, path="todos.json"):
+    tasks = list_tasks(path)
+    kept = [task for task in tasks if task["id"] != int(task_id)]
+    _save(kept, path)
+    return len(kept) != len(tasks)
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[0] == "add":
+        print(add(argv[1]))
+    elif argv[0] == "list":
+        for task in list_tasks():
+            done = "x" if task["done"] else " "
+            print(f"{task['id']} [{done}] {task['title']}")
+    elif argv[0] == "done":
+        complete(int(argv[1]))
+    elif argv[0] == "rm":
+        remove(int(argv[1]))
+    else:
+        raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def example_file_stub(filename, content):
+    state = {"top_step": 0, "wrote": False}
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return {"action": "finish", "args": {}}
+        if "PHASE: model_verification" in text:
+            return {"action": "verify", "args": {"passed": True, "reason": "command evidence passed"}}
+        if "PHASE: changes" in text:
+            if "(orchestration)" in text:
+                steps = [
+                    {"action": "create_ticket", "args": {"id": "developer-1", "type": "code",
+                        "title": f"implement {filename}", "goal": f"create file {filename}",
+                        "checks": [{"kind": "command", "spec": f"test -f {filename}"}]}},
+                    {"action": "finish", "args": {}},
+                ]
+                i = state["top_step"]
+                state["top_step"] = i + 1
+                return steps[min(i, len(steps) - 1)]
+            if not state["wrote"]:
+                state["wrote"] = True
+                return {"action": "file_edit", "args": {"path": filename, "content": content}}
+            return {"action": "finish", "args": {}}
+        return {"action": "finish", "args": {}}
+
+    return stub
+
+
+def test_example_yaml_verification_commands_run_through_scenario_commands(tmp_path):
+    examples = [
+        ("examples/calc_local_l01.yaml", "calc.py", CALC_EXAMPLE_CONTENT, ["ok"]),
+        ("examples/todo_local_l05.yaml", "todo.py", TODO_EXAMPLE_CONTENT,
+         ["crud-ok", "persist-ok", "cli-ok"]),
+    ]
+    for example, filename, content, markers in examples:
+        scenario = load_scenario(example)
+        result = run_scenario(scenario, runs_dir=tmp_path, run_id=f"test_run_{scenario.name}",
+                              model_adapter=StubModel(example_file_stub(filename, content)))
+        assert result.status == "done", f"{example}\nrun_dir: {result.run_dir}\nreason: {result.reason}"
+        assert len(scenario.verification_commands) == len(markers), example
+        for command, marker in zip(scenario.verification_commands, markers):
+            assert_final_command_success(result, command, stdout_contains=marker, example=example)
 
 
 def test_dependency_resolved_via_graph(tmp_path):

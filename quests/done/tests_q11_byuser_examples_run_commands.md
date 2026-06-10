@@ -3,7 +3,7 @@ File name: `tests_q11_byuser_examples_run_commands.md`
 
 ## Status
 
-Current status: active
+Current status: completed
 Blocked by: none
 Description: Update scenario/example tests so behavioral examples are verified by running files
 with commands, not by importing modules as a shortcut.
@@ -92,3 +92,35 @@ pass while the executable interface is broken.
 
 - Created from user request: "Все примеры для тестов надо чтобы проверял не импорт модуля, а запуск
   файла с командами".
+- Existing examples were preserved unchanged. The implementation changed the test layer so command
+  execution evidence is the primary proof, with direct file/object inspection left only as
+  secondary diagnostics.
+- Command runner choice:
+  - Unit command behavior stays covered through `planfoldr.tools_impl.run_command` in
+    `tests/test_cycle_stub.py`.
+  - Cycle-level proof uses `Cycle._phase_command_verification`, which records each command in
+    `ticket.evidence` with command text, exit code, stdout, and stderr.
+  - Scenario/example proof uses `run_scenario` and the final `scenario-verify` ticket, so
+    verification commands are executed exactly through the runtime surface a scenario uses.
+- Added `assert_ticket_command_success` in `tests/test_cycle_stub.py`; command evidence is now
+  asserted before direct file reads in the file-edit/bash and full-code-cycle tests.
+- Added `final_command_evidence` and `assert_final_command_success` in `tests/test_e2e_stub.py`.
+  Failure messages include run directory, command, status, exit, stdout, and stderr proof.
+- Added `test_example_yaml_verification_commands_run_through_scenario_commands` in
+  `tests/test_e2e_stub.py`. It loads real example YAML files, has the StubModel create the target
+  files, and asserts the example verification commands pass via the final verification ticket.
+
+| example | intended command proof | previous test proof | replacement |
+| --- | --- | --- | --- |
+| `examples/calc_local_l01.yaml` | scenario command prints `ok` after exercising `calc.py` | no direct example-YAML command test | `run_scenario(load_scenario(...))` writes `calc.py`; `scenario-verify` evidence must contain the exact command, `exit=0`, and stdout marker `ok` |
+| `examples/todo_local_l05.yaml` | scenario commands drive `python3 todo.py add/list/done/rm` and print `crud-ok`, `persist-ok`, `cli-ok` | no direct example-YAML command test | `run_scenario(load_scenario(...))` writes `todo.py`; `scenario-verify` evidence must contain each exact YAML command, `exit=0`, and the expected stdout marker |
+| stub e2e scenario (`base_scenario`) | final commands `test -f alpha.txt` and `test -f beta.txt` | direct workspace file existence was the primary assertion | `scenario-verify` evidence for both commands is asserted first; workspace file checks remain secondary artifact inspection |
+| cycle command tests | ticket check commands such as `test -f solution.py && grep -q VALUE solution.py` | direct file reads and generic success evidence | exact command evidence with `exit=0` is asserted before direct file reads |
+
+- Failure readability was inspected with a scratch broken calc run under
+  `runs/test_run_examples_q11_broken_calc`: the final verification failed and `scenario-verify`
+  evidence showed the exact `python3 -c ...` command, `exit=1`, and stderr traceback.
+- Focused verification:
+  `.venv/bin/python -m pytest tests/test_e2e_stub.py tests/test_cycle_stub.py -q` -> 24 passed.
+- Full verification:
+  `.venv/bin/python -m pytest -q` -> 118 passed, 1 skipped.
