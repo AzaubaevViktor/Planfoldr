@@ -1,0 +1,23 @@
+[
+  {
+    "model": "gemma4:26b-mlx",
+    "run_id": "sweep_todo_local_l05_gemma4_26b_mlx",
+    "returncode": 0,
+    "stderr_tail": "",
+    "crashed": false,
+    "wall_seconds": 734.2,
+    "run_dir": "/Users/v-korovin/Projects/Planfoldr/runs/2026-06-10_14-58-34__sweep_todo_local_l05_gemma4_26b_mlx",
+    "status": "done",
+    "cycles_run": 1,
+    "tickets": {
+      "orchestration-0": "done",
+      "developer-1": "done",
+      "scenario-verify": "done"
+    },
+    "reason": null,
+    "tokens_used": 42080.0,
+    "artifacts_ok": true,
+    "verify_pass": true,
+    "verify_detail": "all verification commands pass"
+  }
+]

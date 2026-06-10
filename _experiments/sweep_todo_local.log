@@ -1,0 +1,21 @@
+
+===== gemma4:26b-mlx =====
+Traceback (most recent call last):
+  File "/Users/v-korovin/Projects/Planfoldr/_experiments/model_sweep.py", line 116, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/v-korovin/Projects/Planfoldr/_experiments/model_sweep.py", line 104, in main
+    rec = run_one(scenario_path, model)
+  File "/Users/v-korovin/Projects/Planfoldr/_experiments/model_sweep.py", line 91, in run_one
+    ok, why = verify(run_dir, scenario_path)
+              ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/v-korovin/Projects/Planfoldr/_experiments/model_sweep.py", line 32, in verify
+    scen = yaml.safe_load(scenario_path.read_text())
+                          ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py", line 787, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'examples/todo_local.yaml'

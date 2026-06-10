@@ -1,0 +1,42 @@
+[
+  {
+    "model": "gemma4:26b-mlx",
+    "run_id": "sweep_gemma4_26b_mlx",
+    "returncode": 0,
+    "stderr_tail": "",
+    "crashed": false,
+    "wall_seconds": 360.2,
+    "status": "done",
+    "cycles_run": 1,
+    "tickets": {
+      "orchestration-0": "done",
+      "developer-1": "done",
+      "scenario-verify": "done"
+    },
+    "reason": null,
+    "tokens_used": 16673.0,
+    "artifacts_ok": true,
+    "verify_pass": true,
+    "verify_detail": "all verification commands pass"
+  },
+  {
+    "model": "qwen3:30b-a3b",
+    "run_id": "sweep_qwen3_30b_a3b",
+    "returncode": 0,
+    "stderr_tail": "",
+    "crashed": false,
+    "wall_seconds": 498.7,
+    "status": "done",
+    "cycles_run": 3,
+    "tickets": {
+      "orchestration-0": "done",
+      "developer-1": "failed",
+      "scenario-verify": "done"
+    },
+    "reason": "verified; note: 1 spawned ticket(s) failed: ['developer-1']",
+    "tokens_used": 33975.0,
+    "artifacts_ok": true,
+    "verify_pass": true,
+    "verify_detail": "all verification commands pass"
+  }
+]

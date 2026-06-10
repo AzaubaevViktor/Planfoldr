@@ -1,0 +1,24 @@
+
+===== gemma4:26b-mlx =====
+{
+  "status": "done",
+  "verify_pass": true,
+  "crashed": false,
+  "cycles_run": 1,
+  "tokens_used": 16673.0,
+  "wall_seconds": 360.2,
+  "artifacts_ok": true
+}
+
+===== qwen3:30b-a3b =====
+{
+  "status": "done",
+  "verify_pass": true,
+  "crashed": false,
+  "cycles_run": 3,
+  "tokens_used": 33975.0,
+  "wall_seconds": 498.7,
+  "artifacts_ok": true
+}
+
+===== phi4:14b =====
