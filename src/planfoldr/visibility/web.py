@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import html
 import json
+import re as _re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,13 +31,14 @@ TERMINAL_STATUSES = {"done", "failed", "budget_exceeded", "error"}
 
 
 def _refresh_meta(snap: Any) -> str:
-    """Auto-refresh tag only while the run is live. Once the run reaches a terminal state the page
-    is static and can never change, so a periodic reload would do nothing but re-render every
-    <details> at its default state and collapse whatever the reader had expanded."""
+    """Returns "1" if the run is live (auto-refresh should be active), "0" otherwise.
+
+    Used as window.__LIVE__ in the page script; the actual reload is driven by a JS setTimeout so
+    that the pause button can cancel it reliably (removing a <meta http-equiv=refresh> after the
+    browser has already started the timer does not cancel it in all browsers).
+    """
     status = snap.get("status") if isinstance(snap, dict) else None
-    if status in TERMINAL_STATUSES:
-        return ""
-    return f'<meta http-equiv="refresh" content="{REFRESH_SECONDS}" id="refresh-meta">'
+    return "0" if status in TERMINAL_STATUSES else "1"
 
 
 def _norm(embedded: Any) -> Tuple[dict, list]:
@@ -220,14 +222,50 @@ def _tool_html(payload: Dict[str, Any]) -> str:
     return f'<details class="tool"><summary>{summary}</summary><div class="evt">{body}</div></details>'
 
 
+def _strip_think_tags(s: str) -> str:
+    """Remove <think>...</think> blocks and stray </think> tags emitted by some models."""
+    s = _re.sub(r"<think>.*?</think>", "", s, flags=_re.DOTALL)
+    return s.replace("</think>", "").replace("<think>", "").strip()
+
+
+def _try_parse_json(s: str) -> Optional[dict]:
+    """Parse JSON, stripping think-tags and repairing truncated objects."""
+    s = _strip_think_tags(s)
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+    for closing in ("}", "}}", "}}}"):
+        try:
+            return json.loads(s + closing)
+        except Exception:
+            pass
+    return None
+
+
+def _action_from_broken_json(s: str) -> Optional[Tuple[str, str]]:
+    """Regex fallback when JSON is malformed (e.g. unescaped quotes in args).
+
+    Extracts at least the action name and thinking so the block is not a raw dump.
+    """
+    s = _strip_think_tags(s)
+    action_m = _re.search(r'"action"\s*:\s*"([^"]+)"', s)
+    if not action_m:
+        return None
+    action = action_m.group(1)
+    thinking_m = _re.search(r'"thinking"\s*:\s*"((?:[^"\\]|\\.)*)"', s)
+    thinking = thinking_m.group(1) if thinking_m else ""
+    note = '<span class="thinking" style="font-size:10px"> [args truncated — malformed JSON]</span>'
+    return thinking, f'<div class="tool-line">⚡ <b>{esc(action)}</b>{note}</div>'
+
+
 def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
     """Parse an action-protocol JSON response and return (json_thinking, action_html).
 
     Returns None if content is not a valid action-protocol response.
     """
-    try:
-        obj = json.loads(content)
-    except Exception:
+    obj = _try_parse_json(content)
+    if obj is None:
         return None
     action = obj.get("action")
     if not action:
@@ -269,7 +307,39 @@ def _model_output_html(e: Dict[str, Any]) -> str:
                f'<span class="model-badge">{esc(model)}</span> · '
                f'<span class="tok-count">{_fmt_tokens(tokens)} tok</span>')
 
+    allowed_actions = e.get("allowed_actions") or []
+    context_data = e.get("context_data") or {}
+    inp = e.get("input") or {}
+    inp_system = (inp.get("system") or "").strip()
+    inp_user = (inp.get("user") or "").strip()
     body = ""
+    # Tools available — always visible as badges
+    if allowed_actions:
+        badges = " ".join(f'<span class="action-badge">{esc(a)}</span>' for a in allowed_actions)
+        body += f'<div class="model-ctx-row">🔧 <span class="ctx-label">tools:</span> {badges}</div>'
+    # Context/information available — table, open by default
+    if context_data:
+        ctx_rows = ""
+        for k, v in context_data.items():
+            if v is None or v == [] or v == {}:
+                continue
+            if isinstance(v, list):
+                val_html = esc(", ".join(str(i) for i in v)) if v else "<i>—</i>"
+            elif isinstance(v, dict):
+                val_html = "<br>".join(f"<b>{esc(kk)}</b>: {esc(str(vv))}" for kk, vv in v.items()) or "<i>—</i>"
+            else:
+                val_html = f'<pre class="pre-input">{esc(str(v))}</pre>' if len(str(v)) > 80 else esc(str(v))
+            ctx_rows += f'<tr><th class="ctx-key">{esc(k)}</th><td>{val_html}</td></tr>'
+        if ctx_rows:
+            body += f'<details class="model-input" open><summary>📋 context</summary><table>{ctx_rows}</table></details>'
+    # Raw prompts — collapsed by default, available for deep inspection
+    if inp_system or inp_user:
+        inp_body = ""
+        if inp_system:
+            inp_body += f'<div class="out-label">system</div><pre class="pre-input">{esc(inp_system)}</pre>'
+        if inp_user:
+            inp_body += f'<div class="out-label">user</div><pre class="pre-input">{esc(inp_user)}</pre>'
+        body += f'<details class="model-input"><summary>📄 raw prompt</summary>{inp_body}</details>'
     if thinking:
         body += f'<div class="thinking">💭 {esc(thinking)}</div>'
     if content:
@@ -280,21 +350,34 @@ def _model_output_html(e: Dict[str, Any]) -> str:
                 body += f'<div class="thinking">💭 {esc(json_thinking)}</div>'
             body += action_html
         else:
-            body += f'<pre class="model-content">{esc(content)}</pre>'
+            # Model emitted multiple JSON actions on separate lines
+            blocks = [_render_action_content(ln.strip()) for ln in content.splitlines() if ln.strip()]
+            blocks = [b for b in blocks if b is not None]
+            if blocks:
+                for i, (jt, ah) in enumerate(blocks):
+                    if jt and (i > 0 or not thinking):
+                        body += f'<div class="thinking">💭 {esc(jt)}</div>'
+                    body += ah
+            else:
+                fallback = _action_from_broken_json(content)
+                if fallback is not None:
+                    jt, ah = fallback
+                    if jt and not thinking:
+                        body += f'<div class="thinking">💭 {esc(jt)}</div>'
+                    body += ah
+                else:
+                    body += f'<pre class="model-content">{esc(content)}</pre>'
 
     # For model_verification: parse and display the verdict prominently
     if phase == "model_verification" and content:
-        try:
-            obj = json.loads(content)
-            if obj.get("action") == "verify":
-                passed = bool(obj.get("args", {}).get("passed", False))
-                reason = obj.get("args", {}).get("reason", "")
-                v_cls = "verdict-pass" if passed else "verdict-fail"
-                v_icon = "✅" if passed else "❌"
-                v_word = "PASSED" if passed else "FAILED"
-                body += f'<div class="{v_cls}">{v_icon} <b>{v_word}</b>: {esc(reason)}</div>'
-        except Exception:
-            pass
+        obj = _try_parse_json(content)
+        if obj and obj.get("action") == "verify":
+            passed = bool(obj.get("args", {}).get("passed", False))
+            reason = obj.get("args", {}).get("reason", "")
+            v_cls = "verdict-pass" if passed else "verdict-fail"
+            v_icon = "✅" if passed else "❌"
+            v_word = "PASSED" if passed else "FAILED"
+            body += f'<div class="{v_cls}">{v_icon} <b>{v_word}</b>: {esc(reason)}</div>'
 
     return f'<details class="model-call" open><summary>{summary}</summary>{body}</details>'
 
@@ -302,7 +385,7 @@ def _model_output_html(e: Dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # Streaming log renderer
 # --------------------------------------------------------------------------- #
-def _log_entry_html(e: Dict[str, Any]) -> str:
+def _log_entry_html(e: Dict[str, Any], cycle_starts: Optional[Dict[str, str]] = None) -> str:
     """Render a single log entry. model_output events carry full model responses."""
     # Full model response (assembled from stream; never truncated)
     if e.get("type") == "model_output":
@@ -331,10 +414,27 @@ def _log_entry_html(e: Dict[str, Any]) -> str:
             tokens = int(b.get("tokens_used", 0))
             files = int(b.get("file_changes", 0))
             cmds = int(b.get("command_runs", 0))
+            gpu_h = float(b.get("gpu_ram_hours", 0.0))
+            money = float(b.get("money_spent", 0.0))
             spawned = p.get("spawned", [])
             sp_txt = f' · spawned: {esc(", ".join(spawned))}' if spawned else ""
-            return (f'<div class="cycle-footer status-{esc(status)}">■ {esc(status)} · '
-                    f'{_fmt_tokens(tokens)} tokens · {files} file changes · {cmds} cmd runs{sp_txt}</div>'
+            cid = e.get("cycle_id", "")
+            ts_end = e.get("timestamp", "")
+            ts_start = (cycle_starts or {}).get(cid, "")
+            dur_txt = ""
+            if ts_start and ts_end:
+                try:
+                    from datetime import datetime as _dt
+                    t0 = _dt.fromisoformat(ts_start.replace("Z", "+00:00"))
+                    t1 = _dt.fromisoformat(ts_end.replace("Z", "+00:00"))
+                    dur_txt = f' · ⏱ {_fmt_duration((t1 - t0).total_seconds())}'
+                except Exception:
+                    pass
+            date_txt = f' · {esc(ts_end[:16].replace("T", " "))}' if ts_end else ""
+            money_txt = f' · ${money:.4f}' if money else ""
+            gpu_txt = f' · {gpu_h:.4f} gpu·ram·h' if gpu_h else ""
+            return (f'<div class="cycle-footer status-{esc(status)}">■ {esc(status)}{date_txt}{dur_txt} · '
+                    f'{_fmt_tokens(tokens)} tok{money_txt} · {files} files · {cmds} cmds{gpu_txt}{sp_txt}</div>'
                     f'</details>')
 
         if et == "cycle.phase_completed":
@@ -405,6 +505,48 @@ def _log_entry_html(e: Dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Live status panel
+# --------------------------------------------------------------------------- #
+def _render_live_status(snap: Dict[str, Any]) -> str:
+    """Sticky banner showing currently running cycles; empty string when the run is terminal."""
+    overall = snap.get("status", "running")
+    if overall in TERMINAL_STATUSES:
+        return ""
+    cycles = snap.get("cycles") or {}
+    running = [c for c in cycles.values() if c.get("status") == "running"]
+    if not running:
+        # Nothing explicitly running — show generic "initialising" hint
+        return '<div class="live-status">⟳ <b>Initialising…</b></div>'
+    _PHASE_VERBS = {
+        "context_exploration": "exploring context",
+        "changes": "making changes",
+        "command_verification": "running verification commands",
+        "model_verification": "model verifying",
+    }
+    parts = []
+    for c in running:
+        tid = c.get("ticket", "?")
+        model = c.get("model", "?")
+        role = c.get("role", "?")
+        current_phase = c.get("current_phase")
+        last_phase = c.get("phase")
+        if current_phase:
+            phase_txt = f'⟳ <b>{esc(_PHASE_VERBS.get(current_phase, current_phase))}</b>'
+        elif last_phase:
+            phase_txt = f'✓ {esc(last_phase)} → waiting for next phase'
+        else:
+            phase_txt = "⟳ starting…"
+        tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
+        parts.append(
+            f'ticket {tid_link} · '
+            f'<span class="model-badge">{esc(model)}</span> · '
+            f'<span class="role-badge">{esc(role)}</span> · '
+            f'{phase_txt}'
+        )
+    return '<div class="live-status">' + " &nbsp;|&nbsp; ".join(parts) + "</div>"
+
+
+# --------------------------------------------------------------------------- #
 # Pages
 # --------------------------------------------------------------------------- #
 def render_stream_log_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
@@ -419,10 +561,17 @@ def render_stream_log_html(embedded: Any = None, ws_port: Optional[int] = None) 
         + (f'<div class="goal"><b>Verification:</b> {esc(", ".join(sc.get("verification_commands", [])))}</div>' if sc.get("verification_commands") else "")
         + "</header>"
     )
-    entries = "".join(_log_entry_html(e) for e in log)
-    body = f'{header}<h2>Streaming Log <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h2><div id="log">{entries}</div>'
+    cycle_starts = {
+        e.get("cycle_id"): e.get("timestamp", "")
+        for e in log
+        if e.get("type") == "audit" and e.get("event_type") == "cycle.started" and e.get("cycle_id")
+    }
+    entries = "".join(_log_entry_html(e, cycle_starts) for e in log)
+    live = _render_live_status(snap)
+    body = f'{header}{live}<h2>Streaming Log <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h2><div id="log">{entries}</div>'
     return _PAGE.format(title="Planfoldr — Streaming Log", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
-                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script=_WS_SCRIPT)
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script=_WS_SCRIPT,
+                        refresh_ms=REFRESH_SECONDS * 1000)
 
 
 def render_state_view_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
@@ -448,7 +597,8 @@ def render_state_view_html(embedded: Any = None, ws_port: Optional[int] = None) 
     body = (f'<h1>State View <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h1>'
             f'<nav class="anchors">{" · ".join(f"<a href=#{s}>{s}</a>" for s in SLICES)}</nav>{sections}')
     return _PAGE.format(title="Planfoldr — State View", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
-                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="")
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="",
+                        refresh_ms=REFRESH_SECONDS * 1000)
 
 
 def _render_tickets_table(tickets: Dict[str, Any]) -> str:
@@ -614,13 +764,15 @@ def render_tickets_html(embedded: Any = None, ws_port: Optional[int] = None) -> 
     snap, _ = _norm(embedded)
     tickets = snap.get("tickets", {})
     graph = snap.get("graph", {})
+    cycles = snap.get("cycles", {})
     tree = _ticket_tree(tickets, graph)
-    detail = "".join(_ticket_detail_html(t) for t in tickets.values())
+    detail = "".join(_ticket_detail_html(t, cycles) for t in tickets.values())
     body = (f'<h1>Tickets <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h1>'
             f'<section id="ticket-tree"><h2>Structure</h2>{tree}</section>'
             f'<section id="ticket-details"><h2>Every ticket</h2>{detail}</section>')
     return _PAGE.format(title="Planfoldr — Tickets", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
-                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="")
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="",
+                        refresh_ms=REFRESH_SECONDS * 1000)
 
 
 def _ticket_tree(tickets: Dict[str, Any], graph: Dict[str, Any]) -> str:
@@ -641,7 +793,23 @@ def _ticket_tree(tickets: Dict[str, Any], graph: Dict[str, Any]) -> str:
     return f'<ul>{"".join(build(r) for r in dict.fromkeys(roots))}</ul>'
 
 
-def _ticket_detail_html(t: Dict[str, Any]) -> str:
+def _ticket_detail_html(t: Dict[str, Any], cycles: Optional[Dict[str, Any]] = None) -> str:
+    tid_val = t.get("id", "")
+    model_usage: Dict[str, Dict[str, int]] = {}
+    for cyc in (cycles or {}).values():
+        if cyc.get("ticket") == tid_val:
+            m = cyc.get("model", "?")
+            r = cyc.get("role", "?")
+            model_usage.setdefault(m, {}).setdefault(r, 0)
+            model_usage[m][r] += 1
+    if model_usage:
+        parts = [
+            f'<span class="model-badge">{esc(m)}</span> ({esc(", ".join(f"{r}×{n}" for r, n in sorted(rs.items())))})'
+            for m, rs in sorted(model_usage.items())
+        ]
+        model_html = " · ".join(parts)
+    else:
+        model_html = "<i>—</i>"
     history = t.get("metadata", {}).get("change_history", [])
     hist_rows = _render_status_history(history)
     comments = t.get("comments", [])
@@ -672,7 +840,7 @@ def _ticket_detail_html(t: Dict[str, Any]) -> str:
         f'<details id="t_{esc(t.get("id"))}" class="ticket"><summary>{esc(t.get("id"))} '
         f'[{esc(t.get("type"))}] <span class="status-{esc(t.get("status"))}">{esc(t.get("status"))}</span> — {esc(t.get("title"))}</summary>'
         f'<div class="evt"><b>Goal:</b> {esc(t.get("goal"))}</div>'
-        f'<div class="evt"><b>Role:</b> {esc(t.get("role"))} · <b>Queue:</b> {esc(t.get("queue"))} · '
+        f'<div class="evt"><b>Role:</b> {esc(t.get("role"))} · <b>Model(s):</b> {model_html} · <b>Queue:</b> {esc(t.get("queue"))} · '
         f'<b>Attempts:</b> {esc(t.get("attempt_count"))}/{esc(t.get("max_attempts"))} · '
         f'<b>spawned_by:</b> {spawned_html} · <b>deps:</b> {deps_html}</div>'
         f'<h4>Checks</h4>{checks}<h4>Evidence</h4>{evidence}'
@@ -683,16 +851,19 @@ def _ticket_detail_html(t: Dict[str, Any]) -> str:
 def _render_status_history(history: List[Dict[str, Any]]) -> str:
     if not history:
         return "<i>none</i>"
-    head = ("<tr><th>when</th><th>who</th><th>from</th><th>to</th><th>why (proof / cause)</th></tr>")
+    head = ("<tr><th>when</th><th>who</th><th>model</th><th>from</th><th>to</th><th>why (proof / cause)</th></tr>")
     rows = ""
     for h in history:
         to = h.get("to", "")
         proof = (h.get("proof") or "").strip()
         cause = (h.get("cause") or "").strip()
         why = proof or cause or ""
+        model = h.get("model") or ""
+        model_cell = f'<span class="model-badge">{esc(model)}</span>' if model else "<i>—</i>"
         rows += (f'<tr>'
                  f'<td>{esc(str(h.get("at", ""))[:19])}</td>'
                  f'<td><b>{esc(h.get("actor"))}</b></td>'
+                 f'<td>{model_cell}</td>'
                  f'<td>{esc(h.get("from"))}</td>'
                  f'<td class="status-{esc(to)}">{esc(to)}</td>'
                  f'<td>{esc(why)}</td>'
@@ -719,7 +890,126 @@ def render_kb_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
     body = (f'<h1>Knowledge Base <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h1>'
             f'<section id="kb">{sections}</section>')
     return _PAGE.format(title="Planfoldr — Knowledge Base", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
-                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="")
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="",
+                        refresh_ms=REFRESH_SECONDS * 1000)
+
+
+def _render_cycle_trace(cycle_log: List[Dict[str, Any]]) -> str:
+    """Render the model outputs and tool calls for one cycle (for models.html)."""
+    parts = []
+    for e in cycle_log:
+        t = e.get("type")
+        et = e.get("event_type", "")
+        if t == "model_output":
+            parts.append(_model_output_html(e))
+        elif t == "audit" and et == "tool.invoked":
+            parts.append(_tool_html(e.get("payload") or {}))
+    return "".join(parts) or "<i>no outputs recorded</i>"
+
+
+def render_models_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
+    snap, log = _norm(embedded)
+    scores = snap.get("scores") or {}
+    cycles = snap.get("cycles") or {}
+    tickets = snap.get("tickets") or {}
+    sc = snap.get("scenario") or {}
+
+    # Index log entries by cycle_id
+    log_by_cycle: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in log:
+        cid = entry.get("cycle_id")
+        if cid:
+            log_by_cycle.setdefault(cid, []).append(entry)
+
+    # Files generated per model (from file_edit tool events)
+    files_by_model: Dict[str, List[str]] = {}
+    for entry in log:
+        if entry.get("type") == "audit" and entry.get("event_type") == "tool.invoked":
+            p = entry.get("payload") or {}
+            if p.get("tool") == "file_edit":
+                cid = entry.get("cycle_id", "")
+                m = (cycles.get(cid) or {}).get("model", "?")
+                path = (p.get("args") or {}).get("path") or (p.get("result") or {}).get("path")
+                if path and path not in files_by_model.get(m, []):
+                    files_by_model.setdefault(m, []).append(path)
+
+    all_models = sorted({*scores.keys(), *(c.get("model", "") for c in cycles.values() if c.get("model"))})
+
+    sc_name = sc.get("name", "")
+    goal_text = sc.get("goal", "")
+
+    body = (f'<h1>Models <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h1>'
+            f'<section id="scores-summary"><details open><summary>Score Summary</summary>'
+            f'{_render_models(snap)}</details></section>')
+
+    for mid in all_models:
+        score = scores.get(mid) or {}
+        gs = round(score.get("global_score", 0), 3)
+        gs_cls = "score-pos" if gs >= 0 else "score-neg"
+        tickets_count = score.get("tickets") or 0
+
+        # Tickets this model touched
+        model_tids = sorted({cyc.get("ticket") for cyc in cycles.values()
+                              if cyc.get("model") == mid and cyc.get("ticket")})
+        ticket_parts = []
+        for tid in model_tids:
+            t = tickets.get(tid) or {}
+            st = t.get("status", "?")
+            tlink = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
+            ticket_parts.append(f'{tlink} <span class="status-{esc(st)}">{esc(st)}</span>')
+        tickets_html = ("<div class='evt small'>Tickets: " + " · ".join(ticket_parts) + "</div>"
+                        if ticket_parts else "")
+
+        # Environment: scenario name + goal + generated files
+        goal_short = goal_text[:120] + ("…" if len(goal_text) > 120 else "")
+        env_html = ""
+        if sc_name:
+            env_html = (f'<div class="evt small">Scenario: <b>{esc(sc_name)}</b>'
+                        + (f' — {esc(goal_short)}' if goal_short else "") + "</div>")
+        gen_files = files_by_model.get(mid, [])
+        if gen_files:
+            env_html += ("<div class='evt small'>Generated: "
+                         + " ".join(f"<code>{esc(f)}</code>" for f in gen_files) + "</div>")
+
+        # Cycles with full trace under collapsibles (кат)
+        model_cycles = sorted([(cid, cyc) for cid, cyc in cycles.items() if cyc.get("model") == mid],
+                               key=lambda x: x[0])
+        cycles_html = ""
+        for cid, cyc in model_cycles:
+            tid = cyc.get("ticket", "")
+            role = cyc.get("role", "?")
+            cyc_status = cyc.get("status", "?")
+            tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>' if tid else "<i>—</i>"
+            cyc_link = f'<a href="index.html#exec_{esc(cid)}">{esc(cid[:14])}</a>'
+            trace = _render_cycle_trace(log_by_cycle.get(cid, []))
+            sum_txt = (f'▶ {cyc_link} · ticket {tid_link} · '
+                       f'<span class="role-badge">{esc(role)}</span> · '
+                       f'<span class="status-{esc(cyc_status)}">{esc(cyc_status)}</span>')
+            cycles_html += (f'<details class="cyc"><summary>{sum_txt}</summary>'
+                            f'<div style="margin-left:12px">{trace}</div></details>')
+        if not cycles_html:
+            cycles_html = "<i>no cycles recorded</i>"
+
+        mid_slug = esc(mid.replace(":", "-").replace("/", "-").replace(".", "-"))
+        body += (
+            f'<section id="model-{mid_slug}">'
+            f'<details open><summary>'
+            f'<span class="model-badge">{esc(mid)}</span> · '
+            f'score: <span class="{gs_cls}">{gs:+.3f}</span> · '
+            f'tickets: {esc(tickets_count)}'
+            f'</summary>'
+            f'{env_html}{tickets_html}'
+            f'<h3>Cycles &amp; Outputs</h3>'
+            f'{cycles_html}'
+            f'</details></section>'
+        )
+
+    if not all_models:
+        body += "<i>No model activity yet.</i>"
+
+    return _PAGE.format(title="Planfoldr — Models", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
+                        snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0,
+                        preserve=_PRESERVE_SCRIPT, script="", refresh_ms=REFRESH_SECONDS * 1000)
 
 
 PAGES = {
@@ -727,6 +1017,7 @@ PAGES = {
     "state.html": render_state_view_html,
     "tickets.html": render_tickets_html,
     "kb.html": render_kb_html,
+    "models.html": render_models_html,
 }
 
 
@@ -756,9 +1047,10 @@ class VisibilityServer:
         self.ws_port = self.ws.start()
         server = self
         route = {
-            "/": "index.html", "/state": "state.html", "/tickets": "tickets.html", "/kb": "kb.html",
+            "/": "index.html", "/state": "state.html", "/tickets": "tickets.html",
+            "/kb": "kb.html", "/models": "models.html",
             "/index.html": "index.html", "/state.html": "state.html",
-            "/tickets.html": "tickets.html", "/kb.html": "kb.html",
+            "/tickets.html": "tickets.html", "/kb.html": "kb.html", "/models.html": "models.html",
         }
 
         class Handler(BaseHTTPRequestHandler):
@@ -786,6 +1078,8 @@ class VisibilityServer:
                     self._send(f.read_text())
                 elif page == "state.html":
                     self._send(render_state_view_html(ws_port=server.ws_port))
+                elif page == "models.html":
+                    self._send(render_models_html(ws_port=server.ws_port))
                 else:
                     self._send(render_stream_log_html(ws_port=server.ws_port))
 
@@ -811,11 +1105,11 @@ class VisibilityServer:
 
 
 _NAV = ('<nav class="top"><a href="index.html">Streaming Log</a> · <a href="state.html">State</a> · '
-        '<a href="tickets.html">Tickets</a> · <a href="kb.html">Knowledge Base</a></nav>')
+        '<a href="tickets.html">Tickets</a> · <a href="kb.html">Knowledge Base</a> · '
+        '<a href="models.html">Models</a></nav>')
 
 _PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>{title}</title>
-{refresh_meta}
 <style>
  body{{background:#0b0e14;color:#cdd6f4;font:13px/1.5 ui-monospace,Menlo,monospace;margin:0;padding:16px}}
  h1{{font-size:17px;margin:.2em 0}} h2{{font-size:14px;color:#89b4fa}} h4{{margin:.4em 0;color:#94e2d5}}
@@ -858,39 +1152,45 @@ _PAGE = """<!doctype html>
  .score-pos{{color:#a6e3a1}} .score-neg{{color:#f38ba8}}
  /* thinking */
  .thinking{{color:#9399b2;border-left:2px solid #313244;padding:2px 8px;margin:2px 0;white-space:pre-wrap}}
+ /* prompt input & context */
+ .model-input summary{{color:#6c7086;font-size:11px}} .model-input{{margin:2px 0 4px}}
+ .pre-input{{background:#0d1117;border-radius:4px;padding:6px 8px;margin:2px 0 4px;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#6c7086}}
+ .model-ctx-row{{padding:2px 0;margin:2px 0;font-size:11px;color:#a6adc8}}
+ .ctx-label{{color:#6c7086}} .ctx-key{{color:#6c7086;font-size:11px;white-space:nowrap;width:1%}}
+ .action-badge{{background:#2a1e0a;color:#fab387;border:1px solid #3a2a0a;padding:0 4px;border-radius:3px;font-size:11px;margin-right:2px}}
  /* cycle footer */
  .cycle-footer{{border-left:2px solid #45475a;padding:2px 8px;margin:4px 0;font-size:11px;color:#a6adc8}}
  /* refresh toggle */
  .rf-btn{{background:#1a2a3a;border:1px solid #313244;color:#89b4fa;padding:2px 8px;border-radius:4px;cursor:pointer;font:12px ui-monospace,monospace;margin-left:8px;vertical-align:middle}}
  .rf-btn:hover{{background:#2a3a4a}}
+ /* live status banner */
+ .live-status{{border:1px solid #45475a;border-radius:6px;padding:6px 10px;margin:8px 0;background:#11151f;color:#f9e2af;font-size:12px}}
 </style></head><body>
 {nav}
 {body}
-<script>window.__SNAPSHOT__={snapshot};window.__WS_PORT__={ws_port};
+<script>window.__SNAPSHOT__={snapshot};window.__WS_PORT__={ws_port};window.__LIVE__={refresh_meta};
 {preserve}
 {script}
+var __rfTimer=null;
+function _startRefresh(){{if(window.__LIVE__&&!__rfTimer)__rfTimer=setTimeout(function(){{location.reload();}},{refresh_ms});}}
+function _stopRefresh(){{if(__rfTimer){{clearTimeout(__rfTimer);__rfTimer=null;}}}}
 function toggleRefresh(){{
-  var m=document.getElementById('refresh-meta');
   var b=document.getElementById('rf-btn');
-  if(!m){{b.textContent='⏸ pause refresh';return;}}
-  if(m.parentNode){{
-    m.parentNode.removeChild(m);b.textContent='▶ resume refresh';
+  if(__rfTimer){{
+    _stopRefresh();
+    b.textContent='▶ resume refresh';
     try{{sessionStorage.setItem('pf_rf_paused','1');}}catch(e){{}}
   }}else{{
-    var nm=document.createElement('meta');nm.httpEquiv='refresh';nm.content=m.content;nm.id='refresh-meta';document.head.appendChild(nm);
+    _startRefresh();
     b.textContent='⏸ pause refresh';
     try{{sessionStorage.removeItem('pf_rf_paused');}}catch(e){{}}
   }}
 }}
 (function(){{
-  try{{
-    if(sessionStorage.getItem('pf_rf_paused')==='1'){{
-      var m=document.getElementById('refresh-meta');
-      if(m&&m.parentNode){{m.parentNode.removeChild(m);}}
-      var b=document.getElementById('rf-btn');
-      if(b){{b.textContent='▶ resume refresh';}}
-    }}
-  }}catch(e){{}}
+  var paused=false;try{{paused=sessionStorage.getItem('pf_rf_paused')==='1';}}catch(e){{}}
+  var b=document.getElementById('rf-btn');
+  if(paused){{if(b)b.textContent='▶ resume refresh';}}
+  else{{_startRefresh();}}
 }})();
 </script>
 </body></html>

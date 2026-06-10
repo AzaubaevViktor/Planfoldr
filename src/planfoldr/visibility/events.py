@@ -45,7 +45,8 @@ class VisibilityState:
     def _model_output(self, e: Dict[str, Any]) -> None:
         cid = e.get("cycle_id")
         entry = {"phase": e.get("phase"), "model": e.get("model"), "thinking": e.get("thinking", ""),
-                 "content": e.get("content", ""), "tokens": e.get("tokens")}
+                 "content": e.get("content", ""), "tokens": e.get("tokens"), "input": e.get("input"),
+                 "allowed_actions": e.get("allowed_actions"), "context_data": e.get("context_data")}
         cyc = self.cycles.get(cid)
         if cyc is not None:
             cyc.setdefault("outputs", []).append(entry)
@@ -75,8 +76,11 @@ class VisibilityState:
             self.cycles[cid] = {"id": cid, "ticket": tid, "model": p.get("model"), "role": p.get("role"),
                                 "parent": p.get("parent_cycle_id"), "phase": None, "status": "running",
                                 "stream": ""}
+        elif et == "cycle.phase_started" and cid in self.cycles:
+            self.cycles[cid]["current_phase"] = p.get("phase")
         elif et == "cycle.phase_completed" and cid in self.cycles:
             self.cycles[cid]["phase"] = p.get("phase")
+            self.cycles[cid]["current_phase"] = None
             if isinstance(p.get("budget"), dict):
                 self.budgets[cid] = p["budget"]
         elif et == "cycle.completed" and cid in self.cycles:
