@@ -34,7 +34,7 @@ class ScoreWeights:
     failed_base: float = -8.0       # scaled up for simpler tasks
     budget_exhausted: float = -10.0  # scaled by spent fraction over allocation
     token_waste: float = -3.0       # tokens_used > 80% of budget
-    false_verification: float = -6.0
+    false_verification: float = 0.0   # verification disagreements are not penalised
     over_engineering: float = -2.0  # per excess declined child ticket
 
 

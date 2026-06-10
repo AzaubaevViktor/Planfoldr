@@ -34,6 +34,7 @@ class EventType:
     TICKET_COMMENT_ADDED = "comment.added"
 
     CYCLE_STARTED = "cycle.started"
+    CYCLE_PHASE_STARTED = "cycle.phase_started"
     CYCLE_PHASE_COMPLETED = "cycle.phase_completed"
     CYCLE_COMPLETED = "cycle.completed"
 

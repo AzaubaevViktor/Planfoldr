@@ -69,7 +69,10 @@ class Check:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Check":
-        return cls(kind=d["kind"], spec=d["spec"], required=bool(d.get("required", True)))
+        spec = d["spec"]
+        if isinstance(spec, str) and spec.startswith("$ "):
+            spec = spec[2:]
+        return cls(kind=d["kind"], spec=spec, required=bool(d.get("required", True)))
 
 
 @dataclass
@@ -160,6 +163,7 @@ class Ticket:
         audit: Optional[AuditLog] = None,
         proof: Optional[str] = None,
         cause: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> None:
         allowed = VALID_TRANSITIONS.get(self.status, set())
         if to not in allowed:
@@ -176,7 +180,7 @@ class Ticket:
         if to == Status.DECLINED:
             self.decline_cause = cause
         self.metadata.setdefault("change_history", []).append({
-            "from": frm, "to": to, "actor": actor, "at": now_iso(), "proof": proof, "cause": cause,
+            "from": frm, "to": to, "actor": actor, "model": model, "at": now_iso(), "proof": proof, "cause": cause,
         })
         if audit is not None:
             audit.emit(

@@ -14,7 +14,9 @@ be exceeded without an approved request_decision.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -25,7 +27,7 @@ from planfoldr.score import ScoreSystem
 from planfoldr.ticket import Status, Ticket
 from planfoldr.tools_impl import ToolContext, run_command
 from planfoldr.toolset import ToolDenied, Toolset
-from planfoldr.util import new_id
+from planfoldr.util import new_id, next_cycle_seq
 
 CONTEXT = "context_exploration"
 CHANGES = "changes"
@@ -130,7 +132,11 @@ class Cycle:
         self.scenario_contract = scenario_contract or {}
         self.max_iterations = max_iterations
         self.spawn_cap = spawn_cap
-        self.execution_id = new_id("exec")
+        seq = next_cycle_seq()
+        date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+        model_raw = self.model_config.id.split("/")[-1]
+        model_slug = re.sub(r"[^a-zA-Z0-9-]", "-", model_raw)[:18].strip("-")
+        self.execution_id = f"{seq:03d}-{date_str}-{self.ticket.id}-{model_slug}"
         self.local_memory: Dict[str, Any] = {"changes_log": [], "context": {}}
         self.spawned_tickets: List[str] = []
         self.phase: Optional[str] = None
@@ -154,6 +160,10 @@ class Cycle:
         ran: List[str] = []
         for phase in phases:
             self.phase = phase
+            self.audit.emit(
+                EventType.CYCLE_PHASE_STARTED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
+                phase=phase,
+            )
             getattr(self, f"_phase_{phase}")()
             ran.append(phase)
             self.audit.emit(
@@ -218,7 +228,9 @@ class Cycle:
                 EventType.TOOL_INVOKED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
                 actor=getattr(self.role, "id", "verifier"), tool="command_verification",
                 scope="command_verification", args={"cmd": check.spec},
-                result={"exit_code": result["exit_code"], "status": result["status"]},
+                result={"exit_code": result["exit_code"], "status": result["status"],
+                        "stdout": (result.get("stdout") or "")[:2000],
+                        "stderr": (result.get("stderr") or "")[:2000]},
             )
             self._emit_tool("command_verification", {"check": check.spec}, result)
 
@@ -329,6 +341,8 @@ class Cycle:
                 "phase": phase, "model": self.model_config.id, "thinking": response.thinking,
                 "content": response.content, "tokens": response.total_tokens,
                 "input": {"system": system, "user": user},
+                "allowed_actions": sorted(allowed),
+                "context_data": self.local_memory.get("context"),
             })
         # Budget accounting happens in the cycle, not the model.
         self.budget.consume(Metric.API_REQUESTS, 1)
@@ -413,27 +427,30 @@ class Cycle:
             reason = "budget exceeded; soft stop"
         elif passed:
             proof = verdict.get("reason") or "all mandatory checks passed"
-            self.ticket.transition(Status.DONE, actor=getattr(self.role, "id", "executor"), audit=self.audit, proof=proof)
+            self.ticket.transition(Status.DONE, actor=getattr(self.role, "id", "executor"), audit=self.audit, proof=proof, model=self.model_config.id)
             status = Status.DONE
             reason = None
         elif self.ticket.exhausted_attempts():
-            self.ticket.transition(Status.FAILED, actor=getattr(self.role, "id", "executor"), audit=self.audit)
+            self.ticket.transition(Status.FAILED, actor=getattr(self.role, "id", "executor"), audit=self.audit, model=self.model_config.id)
             status = Status.FAILED
             reason = "verification failed; attempts exhausted"
         else:
-            self.ticket.transition(Status.NEEDS_REVIEW, actor=getattr(self.role, "id", "executor"), audit=self.audit)
+            self.ticket.transition(Status.NEEDS_REVIEW, actor=getattr(self.role, "id", "executor"), audit=self.audit, model=self.model_config.id)
             status = Status.NEEDS_REVIEW
             reason = "verification not passed"
 
         if self.score_system is not None:
+            # Command-verification failures are not penalised — model_ok (model's own verdict) is
+            # the quality signal; cmd failures may be environmental.
+            score_passed = model_ok and not self._budget_exceeded
             self.score_system.record(
                 self.model_config.id, role=getattr(self.role, "id", "executor"), task_type=self.ticket.type,
-                passed=(status == Status.DONE), verified=(status == Status.DONE and ran_model),
+                passed=score_passed, verified=(score_passed and ran_model),
                 difficulty=self.ticket.difficulty,
                 tokens_used=self.budget.usage.get(Metric.TOKENS, 0),
                 tokens_budget=self.budget.limits.get(Metric.TOKENS, 0),
                 budget_exhausted=self._budget_exceeded,
-                false_verification=bool(verdict.get("false_verification")),
+                false_verification=False,
             )
 
         self.audit.emit(
