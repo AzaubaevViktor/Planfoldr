@@ -72,6 +72,52 @@ def _line_changes(before: str, after: str) -> tuple[int, int]:
     return added, removed
 
 
+def apply_unified_patch(original: str, patch_text: str) -> str:
+    """Apply a unified diff to *original* and return the patched text.
+
+    Skips file-header lines (---, +++). Raises ToolError if a hunk's context
+    lines don't match the source.
+    """
+    result = original.splitlines(keepends=True)
+    patch_lines = patch_text.splitlines(keepends=True)
+    i = 0
+    while i < len(patch_lines) and not patch_lines[i].startswith("@@"):
+        i += 1
+    offset = 0
+    while i < len(patch_lines):
+        if not patch_lines[i].startswith("@@"):
+            i += 1
+            continue
+        m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", patch_lines[i])
+        if not m:
+            i += 1
+            continue
+        old_start = int(m.group(1))
+        i += 1
+        hunk_old: List[str] = []
+        hunk_new: List[str] = []
+        while i < len(patch_lines) and not patch_lines[i].startswith("@@"):
+            hl = patch_lines[i]
+            if hl.startswith(" "):
+                hunk_old.append(hl[1:])
+                hunk_new.append(hl[1:])
+            elif hl.startswith("-"):
+                hunk_old.append(hl[1:])
+            elif hl.startswith("+"):
+                hunk_new.append(hl[1:])
+            i += 1
+        pos = old_start - 1 + offset
+        actual = result[pos : pos + len(hunk_old)]
+        if [l.rstrip("\n\r") for l in actual] != [l.rstrip("\n\r") for l in hunk_old]:
+            raise ToolError(
+                f"patch hunk at line {old_start} does not match source: "
+                f"expected {hunk_old!r}, got {actual!r}"
+            )
+        result[pos : pos + len(hunk_old)] = hunk_new
+        offset += len(hunk_new) - len(hunk_old)
+    return "".join(result)
+
+
 def handle_file_edit(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
     path = args.get("path")
     if not path:
@@ -85,7 +131,12 @@ def handle_file_edit(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
         action = "deleted"
         content = ""
     else:
-        content = str(args.get("content", ""))
+        if args.get("patch"):
+            if not target.exists():
+                raise ToolError("file_edit: cannot apply patch to a non-existent file")
+            content = apply_unified_patch(before, args["patch"])
+        else:
+            content = str(args.get("content", ""))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         added, removed = _line_changes(before, content)
@@ -151,6 +202,18 @@ def handle_create_ticket(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, An
 
 
 def handle_update_ticket(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+    if args.get("patch"):
+        from planfoldr.ticket import Check  # local import to avoid circular at module level
+        _MUTABLE = {"title", "priority", "tools", "accesses", "budget", "max_attempts", "difficulty", "metadata", "checks"}
+        forbidden = set(args["patch"]) - _MUTABLE
+        if forbidden:
+            raise ToolError(f"update_ticket: cannot patch immutable fields {sorted(forbidden)}")
+        for k, v in args["patch"].items():
+            if k == "checks":
+                ctx.ticket.checks = [Check.from_dict(c) if isinstance(c, dict) else c for c in v]
+            else:
+                setattr(ctx.ticket, k, v)
+        return {"ok": True, "patched": sorted(args["patch"])}
     finding = args.get("finding") or args.get("evidence") or args.get("note", "")
     ctx.ticket.evidence.append({"status": args.get("status", "note"), "proof": finding, "via": "update_ticket"})
     return {"ok": True, "evidence_count": len(ctx.ticket.evidence)}
@@ -162,7 +225,12 @@ def handle_write_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, An
     section = args["section"]
     if section not in ctx.knowledge_base.sections:
         ctx.knowledge_base.create_section(section, write_roles={ctx.role.id if ctx.role else "*"})
-    version = ctx.knowledge_base.write(section, str(args.get("content", "")), role=ctx.role.id if ctx.role else "*")
+    if args.get("patch"):
+        existing = ctx.knowledge_base.read(section, role=ctx.role.id if ctx.role else "*") or ""
+        content = apply_unified_patch(existing, args["patch"])
+    else:
+        content = str(args.get("content", ""))
+    version = ctx.knowledge_base.write(section, content, role=ctx.role.id if ctx.role else "*")
     return {"section": section, "version": version}
 
 
@@ -171,6 +239,22 @@ def handle_read_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any
         raise ToolError("no knowledge base in this context")
     content = ctx.knowledge_base.read(args["section"], role=ctx.role.id if ctx.role else "*")
     return {"section": args["section"], "content": content}
+
+
+def handle_update_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+    """Apply a unified-diff patch to an existing KB section; never replaces the full content."""
+    if ctx.knowledge_base is None:
+        raise ToolError("no knowledge base in this context")
+    patch_text = args.get("patch")
+    if not patch_text:
+        raise ToolError("update_context requires 'patch'")
+    section = args["section"]
+    if section not in ctx.knowledge_base.sections:
+        ctx.knowledge_base.create_section(section, write_roles={ctx.role.id if ctx.role else "*"})
+    existing = ctx.knowledge_base.read(section, role=ctx.role.id if ctx.role else "*") or ""
+    content = apply_unified_patch(existing, patch_text)
+    version = ctx.knowledge_base.write(section, content, role=ctx.role.id if ctx.role else "*")
+    return {"section": section, "version": version}
 
 
 def handle_comment(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
@@ -200,6 +284,7 @@ DEFAULT_HANDLERS = {
     "update_ticket": ("base", handle_update_ticket),
     "comment": ("base", handle_comment),
     "write_context": ("base", handle_write_context),
+    "update_context": ("base", handle_update_context),
     "read_context": ("base", handle_read_context),
     "request_decision": ("base", handle_request_decision),
     "request_context": ("base", handle_request_decision),

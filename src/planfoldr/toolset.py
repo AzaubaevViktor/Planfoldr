@@ -30,6 +30,7 @@ META = "meta"
 BASE_TOOLS: Set[str] = {
     "read_context",
     "write_context",
+    "update_context",
     "create_ticket",
     "update_ticket",
     "request_context",
