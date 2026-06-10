@@ -232,7 +232,7 @@ class Cycle:
                         "stdout": (result.get("stdout") or "")[:2000],
                         "stderr": (result.get("stderr") or "")[:2000]},
             )
-            self._emit_tool("command_verification", {"check": check.spec}, result)
+            self._emit_tool("command_verification", {"action": "command_verification", "check": check.spec}, result)
 
     def _phase_model_verification(self) -> None:
         model_checks = [c for c in self.ticket.checks if c.kind == "model"]
@@ -270,6 +270,7 @@ class Cycle:
         repeats = 0
         no_progress = 0
         seen_tickets: set = set()
+        path_edits: Dict[str, int] = {}
         for _ in range(max_iterations):
             if self.budget.blocked:
                 return
@@ -314,6 +315,10 @@ class Cycle:
                 tid = result.get("ticket_id")
                 productive = tid not in seen_tickets
                 seen_tickets.add(tid)
+            elif action.action == "file_edit":
+                fp = action.args.get("path", "")
+                path_edits[fp] = path_edits.get(fp, 0) + 1
+                productive = path_edits[fp] <= 2
             no_progress = 0 if productive else no_progress + 1
             if no_progress >= 2:
                 self.local_memory.setdefault("notes", []).append("stopped: no further progress")
@@ -450,7 +455,7 @@ class Cycle:
                 tokens_used=self.budget.usage.get(Metric.TOKENS, 0),
                 tokens_budget=self.budget.limits.get(Metric.TOKENS, 0),
                 budget_exhausted=self._budget_exceeded,
-                false_verification=False,
+                false_verification=self.local_memory.get("verdict", {}).get("false_verification", False),
             )
 
         self.audit.emit(

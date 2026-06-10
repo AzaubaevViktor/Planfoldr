@@ -71,7 +71,8 @@ class TerminalStream:
     def _tool(self, e: Dict[str, Any]) -> None:
         call = e.get("call", {})
         result = e.get("result", {})
-        summary = result.get("path") or result.get("ticket_id") or result.get("exit_code")
+        ec = result.get("exit_code")
+        summary = result.get("path") or result.get("ticket_id") or (f"exit={ec}" if ec is not None else None)
         self._line(f"\n│  🔧 [{call.get('action')}] → {summary if summary is not None else _short(result)}")
         self._last_kind = None
 

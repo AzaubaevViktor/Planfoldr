@@ -161,7 +161,7 @@ def run_command(cmd: str, *, cwd: Path, timeout: float, budget: Optional[Budget]
             cmd,
             shell=True,
             cwd=str(cwd),
-            env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
+            env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""), "PYTHONPATH": str(cwd)},
             capture_output=True, text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
