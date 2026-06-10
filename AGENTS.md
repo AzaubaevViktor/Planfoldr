@@ -74,3 +74,63 @@ PYTHONPYCACHEPREFIX=/private/tmp/planfoldr-pycache .venv/bin/python -m compileal
 - Keep filesystem allowlists aligned with rendered runtime paths before creating permission checks.
 - For trace/report work, preserve manifest-backed artifacts and keep `trace/report_data.json` refresh-friendly.
 - For model traces, treat raw streaming responses as diagnostics. Prefer human-readable files such as assembled content/thinking output and `stream.jsonl` for replay or inspection.
+
+---
+
+## User Preferences (synthesized from conversation history)
+
+These rules come directly from user feedback across sessions. Follow them without needing to be reminded.
+
+### TODO / Task Planning Format
+
+- **TODOs must be super-detailed.** Every item = a concrete, unambiguous action with enough detail to execute without asking back.
+- **After every TODO item, add a `Verify:` block** — specific, observable steps to confirm it was done correctly (e.g. which command to run, what output to look for, what file to inspect, what field to check).
+- **At the end of any TODO list, add a `Final Verification` block** — an end-to-end check that covers the whole set of tasks together, not just individual items.
+
+Example structure:
+```
+TODO:
+1. Add date prefix to run folder names (format: YYYY-MM-DD_<run_id>)
+   Verify: run a scenario, check that runs/ contains a folder starting with today's date
+
+2. Update interface.md to document run folder naming
+   Verify: open interface.md, confirm the naming convention section exists and mentions date prefix
+
+Final Verification:
+- Run a full e2e scenario, confirm run folder has date prefix
+- Open the generated HTML report, confirm it renders the run_id with the date
+- Run pytest -q, all tests pass
+```
+
+### Visibility & Output
+
+- Output must look like a coding agent's output — structured, readable, not a wall of JSON.
+- **No raw JSON in any user-facing output.** Render it as formatted JSON, a table, or prose.
+- For each model call, show: `source`, `context`, `input`.
+- During generation: stream output live. If the model is thinking, put it in a **collapsible `thinking` block**, then show the content response below it.
+- After generation: show final output, updated context (collapsible), **diff from original context**, status (collapsible), **budget spent / remaining**, **wall-clock time**.
+- `stderr` from bash commands must be shown human-readably — not wrapped in a JSON field. See `interface.md`.
+- During `model_verification` steps, show what is being checked — not a silent spinner.
+- Add a **date prefix** to run folder names (e.g. `2026-06-10_my-run`) so runs are navigable by date in the filesystem.
+
+### Architecture Vision
+
+The system is an agent harness where models execute tickets in nested loops:
+
+- **Basic loop**: context update (model + context interaction) → changes (model + tools) → verification (run something) + verification (model again).
+- **Loops are nested**: one loop can spawn batches of sub-loops.
+- **Each loop = a ticket.** A ticket has: goal, scope, constraints, budget, links to other tickets, access to specific tools. New tickets can be created while a ticket is being worked.
+- **Queues are processed by models with different roles** (e.g. developer, security reviewer). The same code can be handed off: a developer ticket creates a "security" ticket to close auth holes.
+- **One role can dynamically create new roles** as the work demands it.
+
+### Example Scenarios
+
+- Test with **real tasks**, not toy problems (calculator is not enough; use todo-list app, file server, SQLite query engine, etc.).
+- When building a difficulty ladder, make **10 different projects with increasing complexity** — not 10 variations of the same project.
+- Include scenarios at multiple file-count scales: ~1 file, ~10 files, ~20 files, ~100 files.
+- Use level suffixes in example filenames: `_l01`, `_l02`, … `_l16`.
+
+### Doc Integrity
+
+- When recompiling or rewriting a document, verify that **every line from the original exists in the output**. Run a diff; do not assume content survived.
+- Never silently drop content from PHASE_*.md, interface.md, or quest files when editing them.
