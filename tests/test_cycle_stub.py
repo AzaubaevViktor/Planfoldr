@@ -49,6 +49,17 @@ def code_stub(state=None):
     return stub
 
 
+def test_run_command_never_crashes_on_bad_input(tmp_path):
+    from planfoldr.tools_impl import run_command
+    # Unbalanced quotes used to crash the whole run via shlex.split -> now a clean failure.
+    bad = run_command('python3 -c "print(', cwd=tmp_path, timeout=5)
+    assert bad["status"] == "failure" and "parse error" in bad["stderr"]
+    missing = run_command("definitely_not_a_real_binary_xyz", cwd=tmp_path, timeout=5)
+    assert missing["status"] == "failure"
+    empty = run_command("   ", cwd=tmp_path, timeout=5)
+    assert empty["status"] == "failure"
+
+
 def test_full_code_cycle_runs_four_phases_and_completes(tmp_path):
     ticket = new_ticket("dev-1", title="solution", type="code", goal="write solution.py with VALUE=42",
                         created_by="orchestrator", checks=[Check(kind="command", spec="test -f solution.py")])

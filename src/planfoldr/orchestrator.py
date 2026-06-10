@@ -171,11 +171,17 @@ class Orchestrator:
     def run(self) -> RunResult:
         self.audit.emit(EventType.SCENARIO_STARTED, scenario=self.scenario.name, goal=self.scenario.goal_text,
                         budget=dict(self.scenario.budget))
-        self._seed_base_queues()
-        self._write_report()  # HTML report exists from the very start of the run
-        self._run_top_cycle()
-        self._executor_loop()
-        status, reason = self._final_verification()
+        try:
+            self._seed_base_queues()
+            self._write_report()  # HTML report exists from the very start of the run
+            self._run_top_cycle()
+            self._executor_loop()
+            status, reason = self._final_verification()
+        except Exception as exc:  # noqa: BLE001 -- a crash must still leave inspectable artifacts
+            import traceback
+            status, reason = "error", f"run crashed: {exc}"
+            self.audit.emit(EventType.SCENARIO_COMPLETED, scenario=self.scenario.name, status="error",
+                            reason=reason, traceback=traceback.format_exc()[-2000:])
         self._status = status
         self.audit.emit(EventType.SCENARIO_COMPLETED, scenario=self.scenario.name, status=status, reason=reason)
         result = RunResult(

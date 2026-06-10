@@ -100,15 +100,27 @@ def handle_file_edit(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
 
 def run_command(cmd: str, *, cwd: Path, timeout: float, budget: Optional[Budget] = None) -> Dict[str, Any]:
     """Run a shell command in `cwd` with a minimal environment. Used by the bash tool and by
-    command verification."""
-    completed = subprocess.run(
-        shlex.split(cmd),
-        cwd=str(cwd),
-        env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
-        capture_output=True, text=True, timeout=timeout, check=False,
-    )
+    command verification. A malformed command (e.g. unbalanced quotes), a missing binary or a
+    timeout becomes a clean failure result -- it never crashes the run."""
     if budget is not None:
         budget.consume(Metric.COMMAND_RUNS, 1)
+    try:
+        argv = shlex.split(cmd)
+    except ValueError as exc:
+        return {"exit_code": -1, "stdout": "", "stderr": f"command parse error: {exc}", "status": "failure"}
+    if not argv:
+        return {"exit_code": -1, "stdout": "", "stderr": "empty command", "status": "failure"}
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"exit_code": -1, "stdout": "", "stderr": f"command timed out after {timeout}s", "status": "failure"}
+    except (OSError, ValueError) as exc:
+        return {"exit_code": -1, "stdout": "", "stderr": f"command error: {exc}", "status": "failure"}
     return {
         "exit_code": completed.returncode,
         "stdout": completed.stdout[-4000:],
