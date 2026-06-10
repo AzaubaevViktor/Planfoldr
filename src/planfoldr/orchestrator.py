@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -113,7 +114,11 @@ class Orchestrator:
     ) -> None:
         self.scenario = scenario
         self.run_id = run_id or new_id("run")
-        self.run_dir = Path(runs_dir) / self.run_id
+        # Prefix the run directory with a sortable timestamp so the runs/ folder is chronologically
+        # navigable in a file tree (newest sorts last). run_id stays the logical id used in audit
+        # and result fields; result.run_dir carries this full path for anyone locating the files.
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.run_dir = Path(runs_dir) / f"{stamp}__{self.run_id}"
         self.workspace = self.run_dir / "workspace"
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.audit = AuditLog(self.run_dir / "audit.jsonl")
@@ -163,6 +168,10 @@ class Orchestrator:
                           cost_per_token=scenario.model.cost_per_token, options=scenario.model.options)
         adapter = model_adapter or OllamaModel(scenario.model.name, options=scenario.model.options)
         self.model_registry.register(cfg, adapter)
+        for em in scenario.extra_models:
+            em_cfg = ModelConfig(id=em.name, provider=em.provider, parameter_count=em.parameter_count,
+                                 cost_per_token=em.cost_per_token, options=em.options)
+            self.model_registry.register(em_cfg, OllamaModel(em.name, options=em.options))
         self.ps_provider = _ollama_ps if scenario.model.provider == "ollama" else None
 
         self._allowed_paths = self._resolve_accesses()

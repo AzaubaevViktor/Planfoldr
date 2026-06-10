@@ -1,0 +1,61 @@
+# Expression evaluator (l10) with model rotation experiment.
+# Planner: gemma4:26b-mlx (primary — used for the top decomposition cycle).
+# Executors rotate between phi4:14b and batiai/qwen3.5-9b:q6 based on the score system.
+name: expr_rotation_local
+goal: >
+  Build a small integer/real arithmetic expression evaluator, split across FOUR cooperating
+  Python files in the workspace (stdlib only). The split is mandatory:
+    1. lexer.py        -- tokenize(src: str) -> list  turns "2 + 3*4" into a token sequence
+                          covering integers, the operators + - * /, and parentheses ( ).
+    2. expr_parser.py  -- parse(tokens) -> AST  builds an abstract syntax tree from the lexer's
+                          tokens, honouring precedence (* and / bind tighter than + and -) and
+                          LEFT associativity, with parentheses overriding precedence.
+    3. evaluator.py    -- evaluate(ast) -> number  walks the AST and computes the value. Division
+                          is true division (7/2 == 3.5). Division by zero must raise
+                          ZeroDivisionError -- never return 0 or a wrong number.
+    4. calc.py         -- calc(src: str) -> number  the entry point: it must WIRE the pipeline,
+                          i.e. evaluate(parse(tokenize(src))). It must import and call the other
+                          three modules, not re-implement them inline.
+  expr_parser depends on the token shape produced by lexer; evaluator depends on the AST shape
+  produced by expr_parser; calc depends on all three. Agree the token/AST contract once and keep
+  it consistent across the files.
+budget:
+  tokens: 300000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import calc, lexer, expr_parser, evaluator; print('modules-ok')\""
+    - "python3 -c \"import inspect, calc; s=inspect.getsource(calc); assert all(k in s for k in ('tokenize','parse','evaluate')); print('wired-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('42')==42; print('literal-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('2+3*4')==14; print('prec-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('7/2')==3.5; print('true-div-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('3-5')==-2; print('negative-result-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('10-2-3')==5; print('sub-assoc-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('12/4/3')==1.0; print('div-assoc-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('(2+3)*4')==20; print('paren-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('2*(3+4*5)')==46; print('prec-inside-paren-ok')\""
+    - "python3 -c \"import calc; assert calc.calc('100/4*(3+2)-10*2')==105.0; print('compound-ok')\""
+    - "python3 -c \"import calc\ntry:\n    calc.calc('1/0')\n    raise AssertionError('ZeroDivisionError not raised')\nexcept ZeroDivisionError:\n    print('divzero-ok')\""
+  criteria:
+    - "The implementation is genuinely split across lexer.py, expr_parser.py, evaluator.py and calc.py -- not collapsed into one file, and calc.py wires the other three rather than re-implementing them."
+    - "Left-associativity is implemented as a general rule in the parser. div-assoc-ok: 12/4/3 must equal 1.0; sub-assoc-ok: 10-2-3 must equal 5."
+    - "Division is true (/) throughout: 7/2==3.5 and 12/4/3==1.0."
+    - "ZeroDivisionError propagates out of calc.calc('1/0') unmodified."
+
+# Primary model — used for planning (top decomposition cycle).
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000
+
+# Extra models — registered in the score-system pool; executor loop rotates among all three
+# based on accumulated scores (more params = higher initial base score).
+extra_models:
+  - provider: ollama
+    name: phi4:14b
+    parameter_count: 14000000000
+  - provider: ollama
+    name: batiai/qwen3.5-9b:q6
+    parameter_count: 9000000000
