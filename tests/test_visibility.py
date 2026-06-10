@@ -588,3 +588,100 @@ def test_analysis_shows_final_verification_and_failed_tickets(tmp_path):
     # Signatures section: explicitly names the failed ticket id
     assert "developer-1" in analysis, "analysis.md must name the failing ticket id"
     assert "Failed spawned tickets" in analysis, "analysis.md must have a 'Failed spawned tickets' signature"
+
+
+# -- live streaming log HTML correctness ---------------------------------------
+
+def test_stream_log_properly_closes_open_cycle_block():
+    """A cycle that has started but not yet completed must produce well-formed HTML:
+    the <details class="cyc"> block must be explicitly closed so subsequent content is
+    not nested inside it.
+
+    Verify: render_stream_log_html with a cycle.started but no cycle.completed must
+    NOT leave an unclosed <details> — every opening <details class="cyc"> must have a
+    matching </details>.
+    """
+    snap = {
+        "scenario": {"name": "demo", "goal": "well-formed html"},
+        "status": "running",
+        "cycles": {
+            "c1": {"id": "c1", "ticket": "dev-1", "model": "stub", "role": "developer",
+                   "current_phase": "changes", "status": "running", "live": "", "live_thinking": ""},
+        },
+        "log": [
+            {"type": "audit", "event_type": "cycle.started", "cycle_id": "c1", "ticket_id": "dev-1",
+             "payload": {"model": "stub", "role": "developer"}, "seq": 1, "timestamp": "t"},
+        ],
+    }
+    page = visible_page(render_stream_log_html(embedded=snap))
+    # Count opening and closing tags for cycle details blocks
+    open_tags = page.count('class="cyc"')
+    # Each opening <details … class="cyc"> must have a matching </details>
+    # Simplest check: the page must be valid enough that no cyc block is left dangling.
+    # The fix adds </details> for each unclosed cycle, so the count should balance.
+    assert open_tags >= 1, "cycle block must be present"
+    # After the cycle block summary, there must be a </details> somewhere — verify the
+    # rendered HTML does NOT end without closing the cycle block.
+    assert page.count("</details>") >= open_tags, (
+        "every <details class='cyc'> must have a matching </details>: "
+        f"found {open_tags} opens but only {page.count('</details>')} closes"
+    )
+
+
+def test_stream_log_embeds_live_text_inside_open_cycle_block():
+    """When a cycle is running and has live stream text, render_stream_log_html must embed
+    that text as a live-preview block inside the open cycle <details>, so the streaming log
+    shows in-progress generation text on every page refresh.
+
+    Verify: snap with a running cycle that has non-empty live text → page contains both the
+    cycle block AND the live text from the cycle's live field, and the live text appears
+    AFTER the cycle.started summary (i.e. inside the cycle block, not somewhere else).
+    """
+    s = VisibilityState()
+    feed(s, "scenario.started", scenario="demo", goal="live in log")
+    feed(s, "cycle.started", ticket_id="dev-1", cycle_id="c1", model="stub", role="developer")
+    feed(s, "cycle.phase_started", ticket_id="dev-1", cycle_id="c1", phase="changes")
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "content", "text": "def hello_world():"})
+    snap = s.snapshot()
+    snap.update({"scenario": {"name": "demo", "goal": "live in log"}, "status": "running",
+                 "log": s.recent_log()})
+    page = visible_page(render_stream_log_html(embedded=snap))
+    # Cycle block present
+    assert 'class="cyc"' in page
+    # Live text is in the page
+    assert "def hello_world():" in page
+    # Live text must also appear INSIDE the cycle block (after cycle summary), not only in
+    # the sticky live-preview section above the log.  Search starting from the cycle position.
+    cyc_pos = page.index('class="cyc"')
+    text_pos_in_log = page.find("def hello_world():", cyc_pos)
+    assert text_pos_in_log != -1, (
+        "live text must appear inside the open cycle block in the streaming log section"
+    )
+
+
+def test_live_cleared_on_model_output():
+    """After a model_output event arrives, the cycle's live and live_thinking fields must
+    be empty — the full response is now in the log and the stale streaming preview should
+    not bleed into the next generation turn.
+
+    Verify: cycle.started → stream chunks → model_output → snapshot cycles live fields
+    are both empty strings.
+    """
+    s = VisibilityState()
+    feed(s, "cycle.started", ticket_id="dev-1", cycle_id="c1", model="stub", role="developer")
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "thinking", "text": "chain of thought"})
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "content", "text": '{"action":"finish"}'})
+    # Confirm live text exists before model_output
+    pre = s.snapshot()["cycles"]["c1"]
+    assert pre["live_thinking"] == "chain of thought"
+    assert pre["live"] == '{"action":"finish"}'
+    # Now deliver model_output (the assembled full response)
+    s.ingest({"event": "model_output", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "model": "stub", "thinking": "chain of thought",
+              "content": '{"action":"finish"}', "tokens": 5})
+    post = s.snapshot()["cycles"]["c1"]
+    assert post["live"] == "", "live must be cleared after model_output"
+    assert post["live_thinking"] == "", "live_thinking must be cleared after model_output"

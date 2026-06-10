@@ -65,6 +65,8 @@ class VisibilityState:
         cyc = self.cycles.get(cid)
         if cyc is not None:
             cyc.setdefault("outputs", []).append(entry)
+            cyc["live"] = ""           # clear streaming preview — full response is now in the log
+            cyc["live_thinking"] = ""  # clear thinking preview
             self._set_activity(
                 "waiting_next_phase", "ожидание следующей фазы",
                 model=cyc.get("model"), phase=e.get("phase"),

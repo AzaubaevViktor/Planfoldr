@@ -704,7 +704,47 @@ def render_stream_log_html(embedded: Any = None, ws_port: Optional[int] = None) 
         for e in log
         if e.get("type") == "audit" and e.get("event_type") == "cycle.started" and e.get("cycle_id")
     }
-    entries = "".join(_log_entry_html(e, cycle_starts) for e in log)
+    # Build log HTML tracking which cycle <details> blocks are open.
+    # Cycles that have started but not yet completed leave an unclosed <details class="cyc">
+    # tag — close each one, embedding the live stream text inside it so the streaming log
+    # shows in-progress generation every time the page auto-refreshes.
+    cycles_snap = snap.get("cycles") or {}
+    open_cycle_ids: List[str] = []
+    parts: List[str] = []
+    for e in log:
+        h = _log_entry_html(e, cycle_starts)
+        if h:
+            parts.append(h)
+        if e.get("type") == "audit":
+            et = e.get("event_type", "")
+            cid = e.get("cycle_id", "")
+            if et == "cycle.started" and cid:
+                open_cycle_ids.append(cid)
+            elif et == "cycle.completed" and cid in open_cycle_ids:
+                open_cycle_ids.remove(cid)
+    for cid in open_cycle_ids:
+        c = cycles_snap.get(cid) or {}
+        live_text = (c.get("live") or "").strip()
+        live_think = (c.get("live_thinking") or "").strip()
+        if live_text or live_think:
+            body = ""
+            if live_think:
+                body += _internal_thinking_html(live_think[-500:])
+            if live_text:
+                body += f'<div class="model-prose live-model-text">{esc(live_text[-2000:])}</div>'
+            phase = c.get("current_phase") or ""
+            model = c.get("model", "?")
+            phase_icon = _PHASE_ICONS.get(phase, "⟳")
+            summary = (
+                f'{phase_icon} <span class="phase-name">⟳ {esc(phase or "generating")}</span> · '
+                f'<span class="model-badge">{esc(model)}</span>'
+            )
+            parts.append(
+                f'<details class="model-call live-preview" open>'
+                f'<summary>{summary}</summary>{body}</details>'
+            )
+        parts.append('</details>')  # close the open <details class="cyc">
+    entries = "".join(parts)
     live = _render_live_status(snap)
     previews = _render_live_previews(snap)
     body = f'{header}{live}{previews}<h2>Streaming Log <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h2><div id="log">{entries}</div>'
