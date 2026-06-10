@@ -1,8 +1,8 @@
 """Cycle (level 5b) -- the base unit of work over a ticket.
 
 Runs four phases in strict order: Context Exploration → Changes → Command Verification → Model
-Verification. Not every ticket type needs all four (research = context + model verify; verify =
-command + model verify), but the order never breaks. The Changes phase is a bounded JSON-action
+Verification. Not every ticket type needs all four (research = context + changes + model verify;
+verify = command + model verify), but the order never breaks. The Changes phase is a bounded JSON-action
 loop where the model drives the allowed tools. Each phase emits a `cycle.phase_completed` event.
 
 PHASE_3 "Базовый цикл" + PHASE_4 §2. Properties: execution_id, ticket_id, role, model, phase,
@@ -35,7 +35,7 @@ COMMAND_VERIFY = "command_verification"
 MODEL_VERIFY = "model_verification"
 
 PHASES_BY_TYPE: Dict[str, List[str]] = {
-    "research": [CONTEXT, MODEL_VERIFY],
+    "research": [CONTEXT, CHANGES, MODEL_VERIFY],
     "verify": [COMMAND_VERIFY, MODEL_VERIFY],
     "documentation": [CONTEXT, CHANGES, MODEL_VERIFY],
     # The top/orchestration cycle plans and decomposes; it does not verify code itself.
@@ -288,6 +288,14 @@ class Cycle:
                 last_result = {"protocol_error": action.error, "hint": "Reply with exactly one <tool_call>...</tool_call> envelope."}
                 continue
             if action.action in {"finish", ""}:
+                if self._research_needs_implementation_ticket(phase):
+                    last_result = {
+                        "error": (
+                            "research is not complete yet: create a self-contained implementation "
+                            "ticket of type code, tests, fix, or documentation before finish"
+                        )
+                    }
+                    continue
                 return
             # Break out of a model stuck repeating the identical action (e.g. ls -R loops).
             sig = f"{action.action}:{action.args!r}"
@@ -311,6 +319,7 @@ class Cycle:
             except (ToolDenied, Exception) as exc:  # noqa: BLE001 -- surface tool errors back to the model
                 result = {"error": str(exc)}
             self.local_memory["changes_log"].append({"action": action.action, "result": result})
+            self._record_tool_evidence(action.action, result)
             self._emit_tool(phase, {"action": action.action, "args": action.args}, result)
             last_result = result
             # No-progress detection: a model that keeps erroring, or re-creating an existing ticket
@@ -406,11 +415,21 @@ class Cycle:
     def _changes_user(self, phase: str, allowed: set, last_result: Optional[Dict[str, Any]]) -> str:
         ref = "\n".join(f"- {_ACTION_REFERENCE[a]}" for a in sorted(allowed) if a in _ACTION_REFERENCE)
         constraints = self.ticket.metadata.get("constraints") or []
+        research_guidance = ""
+        if self.ticket.type == "research":
+            research_guidance = (
+                "RESEARCH COMPLETION RULE: do not create another research ticket. "
+                "Capture the findings with write_context or update_ticket, then create exactly one "
+                "self-contained implementation ticket (usually type: code) that embeds the result "
+                "image, spec, implementation approach, anti-patterns, and test plan directly in "
+                "its goal. Only call finish after that implementation ticket exists.\n"
+            )
         return (
             f"PHASE: {phase}. You are working on ticket {self.ticket.id} ({self.ticket.type}).\n"
             + self._contract_block()
             + f"GOAL: {self.ticket.goal}\n"
             + (f"CONSTRAINTS: {constraints}\n" if constraints else "")
+            + research_guidance
             + self._checks_block()
             + f"CONTEXT: {self.local_memory.get('context', {})}\n"
             "The workspace is the current directory and may be empty. Use file_edit to manage files: "
@@ -479,6 +498,32 @@ class Cycle:
             output={"summary": reason or "completed", "verdict": verdict, "spawned": self.spawned_tickets},
             reason=reason,
         )
+
+    def _record_tool_evidence(self, action: str, result: Dict[str, Any]) -> None:
+        if not isinstance(result, dict) or result.get("error") or result.get("status") == "rejected":
+            return
+        if action == "create_ticket" and result.get("ticket_id"):
+            ticket_id = result["ticket_id"]
+            ticket_type = result.get("type") or "ticket"
+            title = result.get("title") or ticket_id
+            self.local_memory.setdefault("spawned_ticket_types", {})[ticket_id] = ticket_type
+            self.ticket.add_evidence(
+                check_index=None,
+                status="success",
+                proof=f"created {ticket_type} ticket {ticket_id}: {title}",
+            )
+        elif action == "write_context" and result.get("section"):
+            self.ticket.add_evidence(
+                check_index=None,
+                status="success",
+                proof=f"wrote context section {result['section']} version {result.get('version')}",
+            )
+
+    def _research_needs_implementation_ticket(self, phase: str) -> bool:
+        if self.ticket.type != "research" or phase != CHANGES:
+            return False
+        spawned_types = set((self.local_memory.get("spawned_ticket_types") or {}).values())
+        return not bool(spawned_types & {"code", "tests", "fix", "documentation"})
 
     # -- helpers --------------------------------------------------------------
     def _wrap_create_ticket(self, fn: Optional[Callable[[Dict[str, Any]], str]]):

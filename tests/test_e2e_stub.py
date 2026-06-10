@@ -57,6 +57,20 @@ def base_scenario(**over):
     )
 
 
+def multi_model_scenario(**over):
+    return Scenario(
+        name="e2e_multi_model", goal_text="build alpha file through research",
+        budget=over.get("budget", {Metric.TOKENS: 1_000_000}),
+        verification_commands=over.get("commands", ["test -f alpha.txt"]),
+        verification_criteria=[],
+        model=ModelSettings(provider="stub", name="orchestrator-20b", parameter_count=20e9),
+        extra_models=[
+            ModelSettings(provider="stub", name="worker-14b", parameter_count=14e9),
+            ModelSettings(provider="stub", name="worker-9b", parameter_count=9e9),
+        ],
+    )
+
+
 def final_command_evidence(result, command):
     tickets = json.loads((Path(result.run_dir) / "tickets.json").read_text())
     verify = tickets.get("scenario-verify", {})
@@ -104,6 +118,106 @@ def test_full_scenario_completes_and_persists(tmp_path):
         assert (Path(result.run_dir) / name).exists()
     # Budget was metered in real time.
     assert result.budget[Metric.TOKENS] > 0
+
+
+def test_research_ticket_creates_code_ticket_and_run_continues(tmp_path):
+    state = {"top": 0, "research_changes": 0, "wrote": False}
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return {"action": "finish", "args": {}}
+        if "PHASE: model_verification" in text:
+            return {"action": "verify", "args": {"passed": True, "reason": "evidence supports the goal"}}
+        if "PHASE: changes" in text:
+            if "(orchestration)" in text:
+                steps = [
+                    {"action": "create_ticket", "args": {"id": "research-1", "type": "research",
+                        "title": "research alpha", "goal": "Research alpha.txt and create a code ticket."}},
+                    {"action": "finish", "args": {}},
+                ]
+                i = state["top"]
+                state["top"] = i + 1
+                return steps[min(i, len(steps) - 1)]
+            if "(research)" in text:
+                state["research_changes"] += 1
+                if state["research_changes"] == 1:
+                    return {"action": "write_context", "args": {"section": "alpha",
+                        "content": "alpha.txt result image, spec, implementation approach, anti-patterns, test plan"}}
+                if state["research_changes"] == 2:
+                    return {"action": "create_ticket", "args": {"id": "developer-1", "type": "code",
+                        "title": "implement alpha", "goal": "create file alpha.txt",
+                        "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}}
+                return {"action": "finish", "args": {}}
+            if "(code)" in text and not state["wrote"]:
+                state["wrote"] = True
+                return {"action": "file_edit", "args": {"path": "alpha.txt", "content": "ok\n"}}
+            return {"action": "finish", "args": {}}
+        return {"action": "finish", "args": {}}
+
+    result = run_scenario(base_scenario(commands=["test -f alpha.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_research_to_code", model_adapter=StubModel(stub))
+
+    assert result.status == "done", result.reason
+    assert result.tickets["research-1"] == "done"
+    assert result.tickets["developer-1"] == "done"
+    audit = [json.loads(x) for x in (Path(result.run_dir) / "audit.jsonl").read_text().splitlines()]
+    starts = [e["ticket_id"] for e in audit if e["event_type"] == "cycle.started"]
+    assert "research-1" in starts
+    assert "developer-1" in starts
+    tickets = json.loads((Path(result.run_dir) / "tickets.json").read_text())
+    assert any("created code ticket developer-1" in e.get("proof", "")
+               for e in tickets["research-1"]["evidence"])
+    assert_final_command_success(result, "test -f alpha.txt")
+
+
+def test_rotate_worker_models_uses_extra_models_for_research_and_code(tmp_path):
+    state = {"top": 0, "research": 0, "wrote": False}
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return {"action": "finish", "args": {}}
+        if "PHASE: model_verification" in text:
+            return {"action": "verify", "args": {"passed": True, "reason": "ok"}}
+        if "PHASE: changes" in text:
+            if "(orchestration)" in text:
+                steps = [
+                    {"action": "create_ticket", "args": {"id": "research-1", "type": "research",
+                        "title": "research alpha", "goal": "research alpha and create implementation work"}},
+                    {"action": "finish", "args": {}},
+                ]
+                i = state["top"]
+                state["top"] = i + 1
+                return steps[min(i, len(steps) - 1)]
+            if "(research)" in text:
+                state["research"] += 1
+                if state["research"] == 1:
+                    return {"action": "create_ticket", "args": {"id": "developer-1", "type": "code",
+                        "title": "implement alpha", "goal": "create file alpha.txt",
+                        "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}}
+                return {"action": "finish", "args": {}}
+            if "(code)" in text and not state["wrote"]:
+                state["wrote"] = True
+                return {"action": "file_edit", "args": {"path": "alpha.txt", "content": "ok\n"}}
+            return {"action": "finish", "args": {}}
+        return {"action": "finish", "args": {}}
+
+    result = run_scenario(
+        multi_model_scenario(), runs_dir=tmp_path, run_id="test_run_rotate_workers",
+        model_adapter=StubModel(stub), rotate_worker_models=True,
+    )
+
+    assert result.status == "done", result.reason
+    audit = [json.loads(x) for x in (Path(result.run_dir) / "audit.jsonl").read_text().splitlines()]
+    cycle_models = {
+        (e["ticket_id"], e["payload"]["role"]): e["payload"]["model"]
+        for e in audit
+        if e["event_type"] == "cycle.started"
+    }
+    assert cycle_models[("orchestration-0", "orchestrator")] == "orchestrator-20b"
+    assert cycle_models[("research-1", "research-exec")] == "worker-14b"
+    assert cycle_models[("developer-1", "developer-exec")] == "worker-9b"
 
 
 CALC_EXAMPLE_CONTENT = """\

@@ -111,6 +111,7 @@ class Orchestrator:
         human: Optional[Human] = None,
         stream_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
         max_cycles: int = 40,
+        rotate_worker_models: bool = False,
     ) -> None:
         self.scenario = scenario
         self.run_id = run_id or new_id("run")
@@ -159,6 +160,8 @@ class Orchestrator:
         self.role_registry.register(self.birthgiver)
         self.human = human or Human(default="proceed", audit=self.audit)
         self.max_cycles = max_cycles
+        self.rotate_worker_models = rotate_worker_models
+        self._worker_model_index = 0
         self.tickets: Dict[str, Ticket] = {}
         self._counters: Dict[str, int] = {}
         self._ticket_index: Dict[tuple, str] = {}  # (type, normalized goal) → id, for dedup
@@ -174,7 +177,9 @@ class Orchestrator:
         for em in scenario.extra_models:
             em_cfg = ModelConfig(id=em.name, provider=em.provider, parameter_count=em.parameter_count,
                                  cost_per_token=em.cost_per_token, options=em.options)
-            self.model_registry.register(em_cfg, OllamaModel(em.name, options=em.options))
+            em_adapter = model_adapter if em.provider == "stub" and model_adapter is not None else OllamaModel(
+                em.name, options=em.options)
+            self.model_registry.register(em_cfg, em_adapter)
         self.ps_provider = _ollama_ps if scenario.model.provider == "ollama" else None
 
         self._allowed_paths = self._resolve_accesses()
@@ -299,14 +304,32 @@ class Orchestrator:
         executor = self.role_registry.get(queue.executor_roles[0])
         while True:
             ticket.transition(Status.RUNNING, actor=executor.id, audit=self.audit)
-            model_cfg = self.model_registry.select(executor.id, ticket.type, self.score) or self.model_registry.config_for(
-                self.scenario.model.name)
+            model_cfg = self._select_model(executor.id, ticket.type)
             self.audit.emit(EventType.TICKET_ASSIGNED, ticket_id=ticket.id, role=executor.id, model=model_cfg.id)
             result = self._run_cycle(ticket, queue.id, role=executor, model_cfg=model_cfg)
             self.cycles_run += 1
             if result.status == Status.NEEDS_REVIEW and not ticket.exhausted_attempts() and self.cycles_run < self.max_cycles:
                 continue  # re-attempt until verified or attempts exhausted
             break
+
+    def _select_model(self, role: str, task_type: str) -> ModelConfig:
+        if self.rotate_worker_models and role in {"research-exec", "developer-exec"} and self.scenario.extra_models:
+            for model_id, cfg in self.model_registry.configs.items():
+                self.score.register_model(model_id, cfg.parameter_count)
+            extras = [m.name for m in self.scenario.extra_models if m.name in self.model_registry.configs]
+            if extras:
+                model_id = extras[self._worker_model_index % len(extras)]
+                self._worker_model_index += 1
+                self.audit.emit(
+                    EventType.MODEL_SELECTED,
+                    model=model_id,
+                    role=role,
+                    task_type=task_type,
+                    ranking={m: (1000.0 if m == model_id else 0.0) for m in self.model_registry.candidates()},
+                )
+                return self.model_registry.config_for(model_id)
+        return self.model_registry.select(role, task_type, self.score) or self.model_registry.config_for(
+            self.scenario.model.name)
 
     def _checks_already_satisfied(self, ticket: Ticket) -> bool:
         """If a ticket's required command checks already pass (e.g. an earlier ticket produced the

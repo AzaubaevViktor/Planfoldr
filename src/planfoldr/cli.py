@@ -27,9 +27,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             verification_criteria=scenario.verification_criteria, constraints=scenario.constraints,
             model=ModelSettings(
                 provider=args.provider or scenario.model.provider,
-                name=args.model or scenario.model.name,
-                parameter_count=scenario.model.parameter_count,
-                cost_per_token=scenario.model.cost_per_token, options=scenario.model.options),
+            name=args.model or scenario.model.name,
+            parameter_count=scenario.model.parameter_count,
+            cost_per_token=scenario.model.cost_per_token, options=scenario.model.options),
+            extra_models=scenario.extra_models,
         )
     from planfoldr.orchestrator import Orchestrator
     web = None
@@ -40,7 +41,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"[visibility] streaming log: http://127.0.0.1:{args.port}/   state view: http://127.0.0.1:{args.port}/state")
     sink = web.sink if web is not None else _build_sink(args.visibility)
     orch = Orchestrator(scenario, runs_dir=args.runs_dir, run_id=args.run_id, stream_sink=sink,
-                        max_cycles=args.max_cycles)
+                        max_cycles=args.max_cycles, rotate_worker_models=args.rotate_worker_models)
     if web is not None:
         web.attach_run(orch.run_dir)
     result = orch.run()
@@ -62,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--runs-dir", default="runs")
     run.add_argument("--run-id", default=None)
     run.add_argument("--max-cycles", type=int, default=40)
+    run.add_argument("--rotate-worker-models", action="store_true",
+                     help="round-robin extra_models across research/developer executor cycles")
     run.add_argument("--visibility", default="terminal", choices=["terminal", "web", "none"])
     run.add_argument("--port", type=int, default=8765)
     run.add_argument("--hold", action="store_true", help="keep the web server alive after the run")

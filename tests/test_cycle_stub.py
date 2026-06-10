@@ -2,8 +2,9 @@ from pathlib import Path
 
 from planfoldr.audit import AuditLog, EventType
 from planfoldr.budget import Budget, Metric
-from planfoldr.cycle import CONTEXT, COMMAND_VERIFY, MODEL_VERIFY, Cycle
+from planfoldr.cycle import CHANGES, CONTEXT, COMMAND_VERIFY, MODEL_VERIFY, Cycle
 from planfoldr.graph import TicketGraph
+from planfoldr.knowledge_base import KnowledgeBase
 from planfoldr.model import ModelConfig, StubModel
 from planfoldr.role import Executor
 from planfoldr.score import ScoreSystem
@@ -12,12 +13,15 @@ from planfoldr.toolset import ToolRegistry, Toolset
 from planfoldr.tools_impl import register_default_tools
 
 
-def build(tmp_path, *, stub, ticket, budget_limits=None, on_create_ticket=None, stream_sink=None):
+def build(
+    tmp_path, *, stub, ticket, budget_limits=None, on_create_ticket=None, stream_sink=None,
+    role_id="developer", role_prompt="You are a developer.", can_create=None,
+):
     audit = AuditLog()
     reg = register_default_tools(ToolRegistry())
     toolset = Toolset(["file_edit", "bash"], registry=reg)
-    role = Executor("developer", prompt="You are a developer.", toolset=toolset,
-                    can_create_ticket_types=["tests", "research"])
+    role = Executor(role_id, prompt=role_prompt, toolset=toolset,
+                    can_create_ticket_types=can_create or ["tests", "research"])
     budget = Budget(budget_limits or {Metric.TOKENS: 1_000_000}, audit=audit, ticket_id=ticket.id)
     workspace = tmp_path / "ws"
     workspace.mkdir(parents=True, exist_ok=True)
@@ -25,7 +29,8 @@ def build(tmp_path, *, stub, ticket, budget_limits=None, on_create_ticket=None, 
     cycle = Cycle(
         ticket=ticket, role=role, model_config=ModelConfig("stub", provider="stub"),
         model_adapter=StubModel(stub), budget=budget, audit=audit, toolset=toolset,
-        workspace=workspace, graph=TicketGraph(audit=audit), score_system=ScoreSystem(audit=audit),
+        workspace=workspace, graph=TicketGraph(audit=audit), knowledge_base=KnowledgeBase(audit=audit),
+        score_system=ScoreSystem(audit=audit),
         on_create_ticket=on_create_ticket, stream_sink=stream_sink, max_iterations=6,
     )
     return cycle, audit, workspace
@@ -185,18 +190,53 @@ def test_full_code_cycle_runs_four_phases_and_completes(tmp_path):
     assert ticket.status == Status.DONE
 
 
-def test_research_ticket_runs_context_plus_model_verify_only(tmp_path):
+def test_research_ticket_spawns_implementation_before_model_verify(tmp_path):
+    created = {}
+    captured_verify = []
+
+    def on_create(spec):
+        child = new_ticket(spec.get("id", "developer-1"), title=spec.get("title", "implement alpha"),
+                           type=spec.get("type", "code"), goal=spec.get("goal", "create alpha.txt"),
+                           created_by="research-exec", spawned_by=spec.get("spawned_by"))
+        created["child"] = child
+        return child.id
+
+    steps = {"changes": 0}
+
     def stub(messages):
         text = messages[-1]["content"]
         if "PHASE: context_exploration" in text:
             return {"action": "finish", "args": {}}
-        return {"action": "verify", "args": {"passed": True, "reason": "researched"}}
-    ticket = new_ticket("res-1", title="r", type="research", goal="investigate", created_by="orchestrator")
-    cycle, audit, _ = build(tmp_path, stub=stub, ticket=ticket)
+        if "PHASE: changes" in text:
+            assert "RESEARCH COMPLETION RULE" in text
+            steps["changes"] += 1
+            if steps["changes"] == 1:
+                return {"action": "write_context", "args": {"section": "alpha", "content": "spec and test plan"}}
+            if steps["changes"] == 2:
+                return {"action": "create_ticket", "args": {"id": "developer-1", "type": "code",
+                    "title": "implement alpha", "goal": "create alpha.txt from the research findings"}}
+            return {"action": "finish", "args": {}}
+        if "PHASE: model_verification" in text:
+            captured_verify.append(text)
+            return {"action": "verify", "args": {"passed": True, "reason": "research spawned code work"}}
+        return {"action": "finish", "args": {}}
+
+    ticket = new_ticket("research-1", title="r", type="research", goal="investigate alpha",
+                        created_by="orchestrator")
+    cycle, audit, _ = build(
+        tmp_path, stub=stub, ticket=ticket, on_create_ticket=on_create,
+        role_id="research-exec", role_prompt="You are a researcher.",
+        can_create=["documentation", "fix", "code", "tests"],
+    )
     result = cycle.run()
     phases = [e.payload["phase"] for e in audit.events() if e.event_type == EventType.CYCLE_PHASE_COMPLETED]
-    assert phases == [CONTEXT, MODEL_VERIFY]  # no changes / command verification
+    assert phases == [CONTEXT, CHANGES, MODEL_VERIFY]
     assert result.status == Status.DONE
+    assert created["child"].spawned_by == "research-1"
+    assert "developer-1" in result.spawned_tickets
+    assert any("created code ticket developer-1" in e.get("proof", "") for e in ticket.evidence)
+    assert any("wrote context section alpha" in e.get("proof", "") for e in ticket.evidence)
+    assert "created code ticket developer-1" in captured_verify[-1]
 
 
 def test_verify_ticket_runs_command_plus_model_verify_only(tmp_path):
