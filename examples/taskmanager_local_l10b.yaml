@@ -1,0 +1,72 @@
+# Hardening ladder #10b: multi-file task manager CLI — ~8 files, CLI-based verification.
+# Verifies exclusively via command execution (python3 cli.py <subcommand>), not module imports.
+# The harness must decompose into ordered tickets (model -> store -> filter/report -> cli),
+# keep the data contract (Task fields) consistent across files, and survive the dependency graph.
+name: taskmanager_local_l10b
+goal: >
+  Build a task management CLI, split across eight files (stdlib only):
+
+    tasks/__init__.py     — re-exports Task, TaskStore
+    tasks/model.py        — Task dataclass: id (int), title (str), status ("open"|"done"),
+                            priority ("low"|"medium"|"high"), tags (list[str]),
+                            created_at (ISO timestamp str). Method: to_dict() / from_dict(d).
+    tasks/store.py        — TaskStore(path="tasks.json"):
+                              add(title, priority="medium", tags=None) -> Task
+                              get(task_id: int) -> Task | None
+                              list(status=None, priority=None, tag=None) -> list[Task]
+                                  (all three filters are optional; combine with AND)
+                              done(task_id: int) -> bool  (mark done; return False if not found)
+                              remove(task_id: int) -> bool
+                              clear() -> None  (delete all tasks)
+                            Persists tasks as JSON array in the given file.
+                            IDs are auto-incremented integers starting from 1.
+    tasks/filter.py       — filter_tasks(tasks, *, status=None, priority=None, tag=None)
+                            -> list[Task]: applies optional filters; all None = return all.
+    tasks/report.py       — stats(tasks: list[Task]) -> dict: returns
+                            {"total": int, "open": int, "done": int,
+                             "by_priority": {"low": int, "medium": int, "high": int}}.
+    tasks/formatter.py    — format_task(t: Task) -> str: one-line human-readable string,
+                            e.g. "[1] Fix login (high) [open] #backend #auth"
+                            format_stats(s: dict) -> str: multi-line summary.
+    tasks/cli.py          — CLI built with argparse; subcommands:
+                              add <title> [--priority low|medium|high] [--tag TAG …]
+                              list [--done] [--open] [--priority P] [--tag TAG]
+                              done <id>
+                              rm <id>
+                              stats
+                            All output goes to stdout, one task per line for list.
+    cli.py                — thin entry point: `python3 cli.py <subcommand> ...`
+
+  Data file default path for all commands: "tasks.json" in the current directory.
+  The eight files MUST be separate. cli.py must import tasks.cli; it must not
+  re-implement any logic inline.
+
+budget:
+  tokens: 400000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    # Basic CRUD via CLI commands (no module imports)
+    - "rm -f tasks.json && python3 cli.py add 'Fix login bug' --priority high --tag backend --tag auth && echo add1-ok"
+    - "python3 cli.py add 'Write unit tests' --priority medium --tag testing && echo add2-ok"
+    - "python3 cli.py add 'Update README' --priority low && echo add3-ok"
+    - "python3 cli.py list | grep -q 'Fix login' && echo list-ok"
+    - "python3 cli.py list --tag backend | grep -q 'Fix login' && python3 cli.py list --tag backend | grep -qv 'Write unit' && echo tag-filter-ok"
+    - "python3 cli.py list --priority high | grep -q 'Fix login' && echo priority-filter-ok"
+    - "python3 cli.py done 1 && python3 cli.py list --done | grep -q 'Fix login' && echo done-ok"
+    - "python3 cli.py list --open | grep -qv 'Fix login' && echo open-filter-ok"
+    - "python3 cli.py rm 3 && python3 cli.py list | grep -qv 'Update README' && echo rm-ok"
+    - "python3 cli.py stats | grep -q 'total' && echo stats-ok"
+    - "rm -f tasks.json && python3 cli.py add 'Persist test' && python3 cli.py list | grep -q 'Persist test' && echo persist-ok"
+  criteria:
+    - "All eight files exist and are non-stub. cli.py imports tasks.cli; no logic is duplicated."
+    - "IDs are stable integers starting at 1 and never reused (even after rm)."
+    - "Filters combine with AND: --tag backend --priority high returns only tasks matching both."
+    - "done <id> marks status='done'; --done and --open filter by status correctly."
+    - "tasks.json is created/updated on every add/done/rm; a second python3 cli.py list after add sees the persisted task."
+model:
+  provider: ollama
+  name: gemma4:31b
+  parameter_count: 31000000000
