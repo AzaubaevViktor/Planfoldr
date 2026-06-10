@@ -1,127 +1,135 @@
-# Task tools_q10c_byuser_shell_permissions: Tool permissions and shell execution hardening
+# Task tools_q10c_byuser_shell_permissions: Права инструментов и защита выполнения команд
 File name: `tools_q10c_byuser_shell_permissions.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: runtime_q10a_byuser_status_score
-Description: Make the least-privilege toolset claim true and harden shell execution without
-breaking compound acceptance commands.
+Текущий статус: active
+Блокирован: runtime_q10a_byuser_status_score
+Описание: Убедиться, что принцип минимальных привилегий реально соблюдается, и ужесточить
+выполнение команд не ломая составные acceptance-команды.
 
-## Goal
+## Цель
 
-Clarify which tools are universal, which tools are role/phase scoped, and how shell commands are
-allowed to run. Verification commands must remain useful, but file writes, command ambiguity, and
-permission drift should be explicit and tested.
+Уточнить, какие инструменты универсальны, какие привязаны к роли/фазе, и как разрешается
+выполнение команд в оболочке. Верификационные команды должны оставаться полезными, но запись
+файлов, неоднозначность команд и расползание привилегий должны быть явными и протестированными.
 
-## Necessary Conditions
+## Необходимые условия
 
-- Tool permissions match docs and tests for orchestration, developer, research, verification,
-  security, and birthgiver roles.
-- Role-specific tool denial is audited and tested.
-- Shell execution keeps `&&`, `||`, and pipes working for acceptance checks.
-- Shell execution has a documented and tested threat model: cwd allowlist, minimal environment,
-  timeout, captured stdout/stderr, and rejected obvious file writes through `bash`.
-- Precheck short-circuiting is auditable when a ticket is marked done without a model cycle.
+- Права инструментов соответствуют документации и тестам для ролей orchestration, developer,
+  research, verification, security и birthgiver.
+- Отказ в конкретных инструментах по роли проверяется аудитом и тестами.
+- Выполнение в оболочке сохраняет работоспособность `&&`, `||` и пайпов в acceptance-проверках.
+- Выполнение в оболочке имеет задокументированную и протестированную модель угроз: allowlist cwd,
+  минимальное окружение, timeout, захват stdout/stderr и отклонение очевидных записей через bash.
+- Короткое замыкание предпроверки проверяемо в аудите, когда тикет помечен done без цикла модели.
 
 ## TODO
 
 ### RnD
 
-1. Inspect `PHASE_4_local.md`, `ARCHITECTURE.md`, `src/planfoldr/toolset.py`,
-   `src/planfoldr/role.py`, and `src/planfoldr/orchestrator.py::BASE_ROLES` to determine the
-   intended permission matrix.
+1. Изучить `PHASE_4_local.md`, `ARCHITECTURE.md`, `src/planfoldr/toolset.py`,
+   `src/planfoldr/role.py` и `src/planfoldr/orchestrator.py::BASE_ROLES`, чтобы определить
+   задуманную матрицу привилегий.
 
-   Verify: write a before/after matrix for orchestration, developer, research, verification,
-   security, and birthgiver roles in this quest's Implementation Notes.
+   Верифицировать: написать матрицу «до/после» для ролей orchestration, developer, research,
+   verification, security и birthgiver в Примечаниях к реализации.
 
-2. Inspect `src/planfoldr/tools_impl.py::run_command`, `handle_bash`, `safe_path`, and
-   `tests/test_cycle_stub.py::test_run_command_shell_operators_work` to document the current shell
-   behavior.
+2. Изучить `src/planfoldr/tools_impl.py::run_command`, `handle_bash`, `safe_path` и
+   `tests/test_cycle_stub.py::test_run_command_shell_operators_work`, чтобы задокументировать
+   текущее поведение оболочки.
 
-   Verify: record how cwd, env, timeout, stdout/stderr capture, `shell=True`, and write rejection
-   currently work.
+   Верифицировать: зафиксировать, как сейчас работают cwd, env, timeout, захват stdout/stderr,
+   `shell=True` и отклонение записи.
 
-3. Inspect `src/planfoldr/orchestrator.py::_checks_already_satisfied` and
-   `tests/test_e2e_stub.py::test_precheck_short_circuits_already_satisfied_ticket` to understand
-   how precheck short-circuiting is currently represented.
+3. Изучить `src/planfoldr/orchestrator.py::_checks_already_satisfied` и
+   `tests/test_e2e_stub.py::test_precheck_short_circuits_already_satisfied_ticket`, чтобы понять,
+   как в текущем виде представлено короткое замыкание предпроверки.
 
-   Verify: identify the missing audit/report evidence for a ticket completed by precheck.
+   Верифицировать: выявить отсутствующие доказательства в аудите/отчёте для тикета,
+   закрытого предпроверкой.
 
-### Implementation
+### Реализация
 
-4. Decide whether `create_ticket`, `update_ticket`, `write_context`, and `request_decision` are
-   universal base tools or role/phase-specific tools; then update `BASE_TOOLS`, role construction,
-   docs, and tests to match that decision.
+4. Решить, являются ли `create_ticket`, `update_ticket`, `write_context` и `request_decision`
+   универсальными базовыми инструментами или инструментами конкретной роли/фазы; затем обновить
+   `BASE_TOOLS`, построение ролей, документацию и тесты согласно этому решению.
 
-   Verify: `tests/test_toolset.py` asserts the final permission matrix directly, including at
-   least one denied role/tool pair that should not be allowed.
+   Верифицировать: `tests/test_toolset.py` напрямую проверяет итоговую матрицу привилегий,
+   включая хотя бы одну пару роль/инструмент с отказом, которой быть не должно.
 
-5. Keep compound acceptance commands working while documenting the shell threat model in code
-   comments or docs. Do not break existing `&&`, `||`, and pipe-based checks.
+5. Сохранить работоспособность составных acceptance-команд, документируя модель угроз оболочки
+   в комментариях или документации. Не ломать существующие проверки с `&&`, `||` и пайпами.
 
-   Verify: `test_run_command_shell_operators_work` still passes and a doc/comment names the
-   deliberate reason compound shell syntax is supported.
+   Верифицировать: `test_run_command_shell_operators_work` по-прежнему проходит, и в
+   документации/комментарии названа намеренная причина поддержки составного синтаксиса.
 
-6. Strengthen bash write rejection for patterns that matter in this project, without pretending
-   regex can fully sandbox a shell. The main control remains workspace cwd, allowlisted cwd, minimal
-   env, timeout, and preferring `file_edit` for writes.
+6. Усилить отклонение записей bash для паттернов, актуальных в этом проекте, не претендуя
+   на полную sandbox-изоляцию через regex. Основной контроль: workspace cwd, allowlist cwd,
+   минимальное окружение, timeout и предпочтение `file_edit` для записей.
 
-   Verify: add focused tests for rejected obvious write patterns and allowed read/check commands.
+   Верифицировать: добавить сфокусированные тесты для отклонённых очевидных паттернов записи
+   и разрешённых команд чтения/проверки.
 
-7. Make command stderr visible to downstream reporting. Ensure command results retain stderr in
-   structured form and that verification/tool events include enough stderr for report rendering.
+7. Сделать stderr команд видимым для downstream-отчётности. Убедиться, что результаты команд
+   сохраняют stderr в структурированном виде и что события верификации/инструментов содержат
+   достаточно stderr для рендеринга отчёта.
 
-   Verify: add a test command that exits nonzero with stderr and assert the command result and
-   emitted audit/tool event contain the stderr text.
+   Верифицировать: добавить тест с командой, которая завершается ненулевым кодом со stderr,
+   и проверить, что результат команды и излучённое событие аудита/инструмента содержат текст stderr.
 
-8. Make precheck short-circuiting auditable. When `_checks_already_satisfied` marks a ticket done
-   without a model cycle, emit a specific audit event or structured note with command, exit code,
-   status, and proof source.
+8. Сделать короткое замыкание предпроверки проверяемым в аудите. Когда
+   `_checks_already_satisfied` помечает тикет done без цикла модели, испустить специфическое
+   событие аудита или структурированную заметку с командой, кодом выхода, статусом и
+   источником доказательства.
 
-   Verify: update `test_precheck_short_circuits_already_satisfied_ticket` to assert short-circuit
-   evidence appears in audit and in `tickets.json` or the ticket report page.
+   Верифицировать: обновить
+   `test_precheck_short_circuits_already_satisfied_ticket` так, чтобы доказательство
+   короткого замыкания присутствовало в аудите и в `tickets.json` или на странице отчёта.
 
-### Verification
+### Верификация
 
-9. Run the focused tool and cycle tests:
+9. Запустить сфокусированные тесты инструментов и цикла:
    `.venv/bin/python -m pytest tests/test_toolset.py tests/test_cycle_stub.py -q`.
 
-   Verify: all focused tests pass, including permission denials and shell behavior.
+   Верифицировать: все сфокусированные тесты проходят, включая отказы в привилегиях
+   и поведение оболочки.
 
-10. Run the focused e2e precheck test:
+10. Запустить сфокусированный e2e-тест предпроверки:
     `.venv/bin/python -m pytest tests/test_e2e_stub.py::test_precheck_short_circuits_already_satisfied_ticket -q`.
 
-    Verify: the precheck ticket still skips a model cycle and now leaves inspectable audit/report
-    evidence.
+    Верифицировать: тикет предпроверки по-прежнему пропускает цикл модели и теперь
+    оставляет инспектируемые доказательства в аудите/отчёте.
 
-11. Run the full default suite:
+11. Запустить полный набор тестов:
     `.venv/bin/python -m pytest -q`.
 
-    Verify: the full suite passes; record any optional skip count.
+    Верифицировать: полный набор проходит; записать число опциональных пропусков.
 
-12. Inspect generated artifacts from a precheck run: `audit.jsonl`, `tickets.json`, and
-    `visibility/tickets.html`.
+12. Проверить сгенерированные артефакты предпроверочного запуска: `audit.jsonl`,
+    `tickets.json` и `visibility/tickets.html`.
 
-    Verify: precheck command, exit code/status, ticket id, and proof source are visible.
+    Верифицировать: команда предпроверки, код выхода/статус, id тикета и источник
+    доказательства видны.
 
-## Final Verification
+## Финальная верификация
 
-- Re-read this quest and confirm every TODO item has implementation evidence or a concrete defer
-  note.
-- Re-read toolset/shell examples and confirm no pretty examples were removed or weakened.
-- Run focused tool/cycle/e2e tests and `.venv/bin/python -m pytest -q`.
-- Inspect precheck artifacts directly.
-- Move this quest to `quests/done/` only in the same commit that implements and verifies the fixes.
+- Перечитать этот квест и подтвердить, что каждый пункт TODO имеет доказательство реализации
+  или конкретную заметку об отложении.
+- Перечитать примеры toolset/shell и подтвердить, что ни один красивый пример не был удалён
+  или ослаблен.
+- Запустить сфокусированные тесты инструментов/цикла/e2e и `.venv/bin/python -m pytest -q`.
+- Напрямую проверить артефакты предпроверки.
+- Переместить квест в `quests/done/` только в том же коммите, что реализует и верифицирует исправления.
 
-## Implementation Notes
+## Примечания к реализации
 
-- Split from the original aggregate runtime-hardening quest so permissions and shell behavior can
-  be changed without mixing them into status/scoring work.
-- Risk anchors:
-  - `src/planfoldr/toolset.py::BASE_TOOLS` currently gives every role broad base capabilities.
-  - `src/planfoldr/tools_impl.py::run_command` intentionally uses `shell=True` so compound checks
-    work.
-  - `src/planfoldr/tools_impl.py::handle_bash` rejects only obvious write commands.
-  - `src/planfoldr/orchestrator.py::_checks_already_satisfied` marks tickets done without a model
-    cycle but needs stronger audit/report evidence.
+- Выделено из исходного агрегированного квеста runtime-hardening, чтобы права доступа
+  и поведение оболочки можно было изменять независимо от статусов/очков.
+- Точки риска:
+  - `src/planfoldr/toolset.py::BASE_TOOLS` в текущем виде даёт каждой роли широкие базовые возможности.
+  - `src/planfoldr/tools_impl.py::run_command` намеренно использует `shell=True`, чтобы
+    составные проверки работали.
+  - `src/planfoldr/tools_impl.py::handle_bash` отклоняет только очевидные команды записи.
+  - `src/planfoldr/orchestrator.py::_checks_already_satisfied` помечает тикеты done без
+    цикла модели, но нуждается в более весомых доказательствах в аудите/отчёте.

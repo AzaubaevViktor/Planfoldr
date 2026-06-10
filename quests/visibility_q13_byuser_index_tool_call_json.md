@@ -1,71 +1,77 @@
-# Task visibility_q13_byuser_index_tool_call_json: Render tool_call envelopes in index
+# Task visibility_q13_byuser_index_tool_call_json: Рендеринг конвертов tool_call в index
 File name: `visibility_q13_byuser_index_tool_call_json.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: visibility_q12_byuser_index_model_json_fallback
-Description: Model output that uses `<tool_call>{...}</tool_call>` can fall through the Streaming
-Log renderer and appear as raw envelope text or JSON.
+Текущий статус: active
+Блокирован: visibility_q12_byuser_index_model_json_fallback
+Описание: Вывод модели с `<tool_call>{...}</tool_call>` может провалиться сквозь рендерер
+Streaming Log и отобразиться как сырой текст конверта или JSON.
 
-## Goal
+## Цель
 
-Teach `index.html` rendering to parse and display `<tool_call>` model responses as first-class
-tool/action blocks, not as raw JSON-like text.
+Научить рендерер `index.html` разбирать и отображать ответы модели в формате `<tool_call>`
+как первоклассные блоки инструмента/действия, а не как сырой JSON-текст.
 
-## Necessary Conditions
+## Необходимые условия
 
-- `<tool_call>` envelopes must render as the same readable action/tool blocks as JSON action
-  envelopes.
-- Tool name, arguments, summary, and malformed-argument notes must be visible without raw JSON.
-- Parser behavior must stay aligned with `planfoldr.model.parse_action`, which already has a
-  `<tool_call>` fallback.
+- Конверты `<tool_call>` должны рендериться теми же читаемыми блоками действия/инструмента,
+  что и JSON-конверты действий.
+- Имя инструмента, аргументы, краткое описание и заметки о некорректных аргументах должны
+  быть видны без сырого JSON.
+- Поведение парсера должно согласовываться с `planfoldr.model.parse_action`, у которого уже
+  есть fallback для `<tool_call>`.
 
 ## TODO
 
 ### RnD
 
-1. Inspect `src/planfoldr/model.py::parse_action` and `_parse_tool_call` to understand accepted
-   `<tool_call>` formats.
+1. Изучить `src/planfoldr/model.py::parse_action` и `_parse_tool_call`, чтобы понять
+   принимаемые форматы конверта `<tool_call>`.
 
-   Verify: record the accepted envelope shapes and argument field names.
+   Верифицировать: записать принимаемые формы конверта и имена полей аргументов.
 
-2. Inspect `src/planfoldr/visibility/web.py::_render_action_content` and
-   `_model_output_html` to find why `<tool_call>` content is not rendered like an action.
+2. Изучить `src/planfoldr/visibility/web.py::_render_action_content` и
+   `_model_output_html`, чтобы найти, почему содержимое `<tool_call>` не рендерится
+   как действие.
 
-   Verify: create a minimal `<tool_call>` sample that currently reaches the raw model fallback.
+   Верифицировать: создать минимальный пример `<tool_call>`, который в текущем виде
+   попадает в fallback сырой модели.
 
-### Implementation
+### Реализация
 
-3. Add a Streaming Log renderer path for `<tool_call>` envelopes that reuses the readable action
-   table rendering.
+3. Добавить в Streaming Log путь рендеринга для конвертов `<tool_call>`, повторно
+   использующий читаемый рендеринг таблицы действий.
 
-   Verify: add a visibility test where model content is a `<tool_call>` envelope; assert
-   `index.html` shows the action/tool name and arguments but not the raw `<tool_call>` JSON.
+   Верифицировать: добавить тест видимости, где содержимое модели — конверт `<tool_call>`;
+   проверить, что `index.html` показывает имя действия/инструмента и аргументы,
+   но не сырой JSON `<tool_call>`.
 
-4. Handle malformed `<tool_call>` arguments with a readable diagnostic block.
+4. Обработать некорректные аргументы `<tool_call>` читаемым диагностическим блоком.
 
-   Verify: add a malformed-envelope test and assert the output labels the issue without dumping
-   raw JSON in the default view.
+   Верифицировать: добавить тест с некорректным конвертом и убедиться, что вывод
+   называет проблему без сырого JSON в представлении по умолчанию.
 
-### Verification
+### Верификация
 
-5. Run visibility and model parsing tests:
+5. Запустить тесты видимости и разбора модели:
    `.venv/bin/python -m pytest tests/test_visibility.py tests/test_model.py -q`.
 
-   Verify: tests pass and the parser/rendering expectations match.
+   Верифицировать: тесты проходят и ожидания парсера/рендеринга совпадают.
 
-6. Run a stub scenario that emits a `<tool_call>` response and inspect `visibility/index.html`.
+6. Запустить stub-сценарий, который выдаёт ответ `<tool_call>`, и проверить
+   `visibility/index.html`.
 
-   Verify: the action appears as a readable block, not raw envelope text.
+   Верифицировать: действие отображается читаемым блоком, а не сырым текстом конверта.
 
-## Final Verification
+## Финальная верификация
 
-- Confirm `<tool_call>` rendering matches model parser behavior.
-- Run focused tests and full suite.
-- Inspect generated `visibility/index.html` directly before moving this quest to `quests/done/`.
+- Подтвердить, что рендеринг `<tool_call>` согласован с поведением парсера модели.
+- Запустить сфокусированные тесты и полный набор.
+- Напрямую проверить сгенерированный `visibility/index.html` перед перемещением
+  этого квеста в `quests/done/`.
 
-## Implementation Notes
+## Примечания к реализации
 
-- Found while searching `index.html` JSON leaks: `_model_output_html` renders JSON actions, but not
-  `<tool_call>` envelopes even though `model.parse_action` accepts them.
+- Обнаружено при поиске утечек JSON в `index.html`: `_model_output_html` рендерит
+  JSON-действия, но не конверты `<tool_call>`, хотя `model.parse_action` их принимает.

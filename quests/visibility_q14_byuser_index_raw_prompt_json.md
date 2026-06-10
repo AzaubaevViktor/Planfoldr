@@ -1,74 +1,78 @@
-# Task visibility_q14_byuser_index_raw_prompt_json: Remove raw JSON prompt blocks from index
+# Task visibility_q14_byuser_index_raw_prompt_json: Убрать сырые JSON-блоки промпта из index
 File name: `visibility_q14_byuser_index_raw_prompt_json.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: visibility_q10b_byuser_report_hardening
-Description: `index.html` includes a collapsed raw prompt block whose system/user text contains
-JSON protocol examples, action envelopes, and sometimes JSON-like last-result data.
+Текущий статус: active
+Блокирован: visibility_q10b_byuser_report_hardening
+Описание: `index.html` содержит свёрнутый блок сырого промпта, в тексте system/user которого
+находятся JSON-примеры протокола, конверты действий и иногда JSON-подобные данные last-result.
 
-## Goal
+## Цель
 
-Keep prompt inspection useful without showing raw JSON protocol dumps as the human-facing shape in
-the Streaming Log.
+Сохранить полезность инспекции промпта, не показывая сырые JSON-дампы протокола как
+основную форму в Streaming Log.
 
-## Necessary Conditions
+## Необходимые условия
 
-- The default model-call view should show `source`, `context`, and `input` as structured,
-  human-readable sections.
-- Raw system/user prompt text must not be the primary way to understand a model call.
-- JSON action examples inside prompts must be rendered as command/action reference rows or hidden
-  behind a clearly labelled diagnostic/debug details block.
+- Представление вызова модели по умолчанию должно показывать `source`, `context` и `input`
+  как структурированные, читаемые разделы.
+- Сырой текст system/user-промпта не должен быть основным способом понять вызов модели.
+- JSON-примеры действий внутри промптов должны рендериться как строки справочника
+  команд/действий или скрываться за явно подписанным блоком диагностики/отладки.
 
 ## TODO
 
 ### RnD
 
-1. Inspect `src/planfoldr/visibility/web.py::_model_output_html` raw prompt rendering and
-   `src/planfoldr/cycle.py::_changes_user` prompt construction.
+1. Изучить `src/planfoldr/visibility/web.py::_model_output_html` (рендеринг сырого промпта)
+   и `src/planfoldr/cycle.py::_changes_user` (построение промпта).
 
-   Verify: list the prompt sections that currently put JSON examples into `index.html`: protocol,
-   action reference, acceptance checks, context, and last tool result.
+   Верифицировать: перечислить разделы промпта, которые в текущем виде помещают JSON-примеры
+   в `index.html`: протокол, справочник действий, acceptance-проверки, контекст и last tool result.
 
-2. Inspect `interface.md` for user-facing output requirements around `source`, `context`, `input`,
-   thinking, output, and tool calls.
+2. Изучить `interface.md` на предмет требований к видимому выводу для `source`, `context`,
+   `input`, thinking, output и tool calls.
 
-   Verify: record the expected visible structure in Implementation Notes.
+   Верифицировать: записать ожидаемую видимую структуру в Примечаниях к реализации.
 
-### Implementation
+### Реализация
 
-3. Replace the raw prompt default view with structured prompt metadata: source/model/phase,
-   context table, acceptance checks, available actions, and last tool result summary.
+3. Заменить представление сырого промпта по умолчанию структурированными метаданными вызова:
+   source/model/phase, таблица контекста, acceptance-проверки, доступные действия и сводка
+   last tool result.
 
-   Verify: add a visibility test that renders a model call and asserts these sections appear
-   without raw JSON action examples in the default visible body.
+   Верифицировать: добавить тест видимости, который рендерит вызов модели и проверяет наличие
+   этих разделов без сырых JSON-примеров действий в видимом теле по умолчанию.
 
-4. Keep a diagnostic raw prompt details block only if needed for replay, clearly labelled as debug,
-   collapsed by default, and not used as the primary user-facing view.
+4. Оставить диагностический блок сырого промпта только при необходимости для воспроизведения,
+   явно подписав его как debug, свёрнутым по умолчанию и не используя как основной
+   пользовательский вид.
 
-   Verify: inspect `index.html` and confirm a normal reader can understand the model call without
-   expanding raw prompt details.
+   Верифицировать: проверить `index.html` и убедиться, что обычный читатель может понять
+   вызов модели, не разворачивая детали сырого промпта.
 
-### Verification
+### Верификация
 
-5. Run visibility tests:
+5. Запустить тесты видимости:
    `.venv/bin/python -m pytest tests/test_visibility.py -q`.
 
-   Verify: tests pass and include an assertion against raw prompt JSON in the default view.
+   Верифицировать: тесты проходят и содержат утверждение против сырого JSON промпта
+   в представлении по умолчанию.
 
-6. Run a stub scenario and inspect `visibility/index.html`.
+6. Запустить stub-сценарий и проверить `visibility/index.html`.
 
-   Verify: prompt information is readable as sections, not as raw JSON examples.
+   Верифицировать: информация о промпте читается как разделы, а не как сырые JSON-примеры.
 
-## Final Verification
+## Финальная верификация
 
-- Re-read `interface.md` and confirm the Streaming Log shape matches the examples.
-- Run focused tests and full suite.
-- Inspect generated `visibility/index.html` directly before moving this quest to `quests/done/`.
+- Перечитать `interface.md` и подтвердить, что форма Streaming Log соответствует примерам.
+- Запустить сфокусированные тесты и полный набор.
+- Напрямую проверить сгенерированный `visibility/index.html` перед перемещением
+  этого квеста в `quests/done/`.
 
-## Implementation Notes
+## Примечания к реализации
 
-- Found in `src/planfoldr/visibility/web.py::_model_output_html`: the raw prompt block writes full
-  system/user prompts into `<pre class="pre-input">`, including JSON action references from
-  `src/planfoldr/cycle.py::_ACTION_REFERENCE`.
+- Обнаружено в `src/planfoldr/visibility/web.py::_model_output_html`: блок сырого промпта
+  записывает полные system/user-промпты в `<pre class="pre-input">`, включая JSON-справочники
+  действий из `src/planfoldr/cycle.py::_ACTION_REFERENCE`.

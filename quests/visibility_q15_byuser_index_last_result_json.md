@@ -1,72 +1,76 @@
-# Task visibility_q15_byuser_index_last_result_json: Render last tool result without JSON
+# Task visibility_q15_byuser_index_last_result_json: Рендеринг last tool result без JSON
 File name: `visibility_q15_byuser_index_last_result_json.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: visibility_q14_byuser_index_raw_prompt_json
-Description: The model prompt includes `Last tool result: { ... }`, which can surface in
-`index.html` as Python/JSON-like raw data through the raw prompt block.
+Текущий статус: active
+Блокирован: visibility_q14_byuser_index_raw_prompt_json
+Описание: Промпт модели содержит `Last tool result: { ... }`, который может попасть в
+`index.html` как сырые данные в Python/JSON-подобном виде через блок сырого промпта.
 
-## Goal
+## Цель
 
-Expose last tool result as a structured, readable model input section instead of embedding a raw
-dictionary string inside the prompt text shown in the Streaming Log.
+Показывать last tool result как структурированный, читаемый раздел входных данных модели
+вместо встраивания сырой строки словаря в текст промпта, отображаемый в Streaming Log.
 
-## Necessary Conditions
+## Необходимые условия
 
-- Last tool result should be available to the model and visible to the user.
-- The visible form must be labelled rows: tool/action, status, path/command, stdout/stderr/error,
-  and any short hint.
-- The raw dict/string form must not appear in default `index.html` output.
+- Last tool result должен быть доступен модели и виден пользователю.
+- Видимая форма должна состоять из подписанных строк: tool/action, статус, path/command,
+  stdout/stderr/error и любая краткая подсказка.
+- Сырая строка dict/str не должна появляться в выводе `index.html` по умолчанию.
 
 ## TODO
 
 ### RnD
 
-1. Inspect `src/planfoldr/cycle.py::_changes_user` and `_action_loop` to see how `last_result` is
-   constructed and embedded into the prompt.
+1. Изучить `src/planfoldr/cycle.py::_changes_user` и `_action_loop`, чтобы понять, как
+   `last_result` строится и встраивается в промпт.
 
-   Verify: list the possible last-result shapes for `file_edit`, `bash`, `create_ticket`,
-   rejected bash writes, protocol errors, and tool exceptions.
+   Верифицировать: перечислить возможные формы last-result для `file_edit`, `bash`,
+   `create_ticket`, отклонённых bash-записей, ошибок протокола и исключений инструмента.
 
-2. Inspect `src/planfoldr/visibility/web.py::_model_output_html` to decide where structured
-   `last_result` should be rendered.
+2. Изучить `src/planfoldr/visibility/web.py::_model_output_html`, чтобы определить,
+   где структурированный `last_result` должен рендериться.
 
-   Verify: identify whether `model_output` events need a new structured field instead of only the
-   prompt text.
+   Верифицировать: выяснить, нужно ли событиям `model_output` новое структурированное поле
+   вместо только текста промпта.
 
-### Implementation
+### Реализация
 
-3. Add structured last-result data to model-output events or parse it safely before rendering.
+3. Добавить структурированные данные last-result в события model-output или безопасно
+   разобрать их перед рендерингом.
 
-   Verify: add a focused test where `Last tool result` contains a dict-like result; assert the
-   Streaming Log renders labelled fields and does not show the raw dict text.
+   Верифицировать: добавить сфокусированный тест, где `Last tool result` содержит
+   dict-подобный результат; проверить, что Streaming Log рендерит подписанные поля
+   и не показывает сырой текст dict.
 
-4. Keep the model prompt semantically equivalent while improving human display.
+4. Сохранить семантическую эквивалентность промпта модели, улучшая отображение для человека.
 
-   Verify: compare the model input before/after at a high level and confirm the model still sees
-   the last tool result needed to choose the next action.
+   Верифицировать: сравнить входные данные модели до/после на высоком уровне и убедиться,
+   что модель по-прежнему видит last tool result, необходимый для выбора следующего действия.
 
-### Verification
+### Верификация
 
-5. Run cycle and visibility tests:
+5. Запустить тесты цикла и видимости:
    `.venv/bin/python -m pytest tests/test_cycle_stub.py tests/test_visibility.py -q`.
 
-   Verify: tests pass and include a last-result rendering check.
+   Верифицировать: тесты проходят и включают проверку рендеринга last-result.
 
-6. Run a stub scenario with at least one tool call and inspect `visibility/index.html`.
+6. Запустить stub-сценарий хотя бы с одним вызовом инструмента и проверить `visibility/index.html`.
 
-   Verify: last tool result is readable and no raw `Last tool result: {` text appears by default.
+   Верифицировать: last tool result читается и сырой текст `Last tool result: {` по умолчанию
+   не появляется.
 
-## Final Verification
+## Финальная верификация
 
-- Confirm last tool result remains available to model execution.
-- Run focused tests and full suite.
-- Inspect generated `visibility/index.html` directly before moving this quest to `quests/done/`.
+- Подтвердить, что last tool result по-прежнему доступен при выполнении модели.
+- Запустить сфокусированные тесты и полный набор.
+- Напрямую проверить сгенерированный `visibility/index.html` перед перемещением
+  этого квеста в `quests/done/`.
 
-## Implementation Notes
+## Примечания к реализации
 
-- Found in `src/planfoldr/cycle.py::_changes_user`: `Last tool result: {last_result}` is inserted
-  into the prompt as a raw Python/JSON-like string and can appear in `index.html` through raw prompt
-  rendering.
+- Обнаружено в `src/planfuldr/cycle.py::_changes_user`: `Last tool result: {last_result}`
+  встраивается в промпт как сырая строка Python/JSON-подобного вида и может появляться
+  в `index.html` через рендеринг сырого промпта.

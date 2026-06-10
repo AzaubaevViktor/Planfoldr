@@ -1,131 +1,140 @@
-# Task runtime_q10a_byuser_status_score: Runtime status and score correctness
+# Task runtime_q10a_byuser_status_score: Корректность статусов и очков
 File name: `runtime_q10a_byuser_status_score.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: none
-Description: Make scenario status, ticket status, false verification, and model score agree with
-evidence instead of model confidence.
+Текущий статус: active
+Блокирован: нет
+Описание: Сделать так, чтобы статус сценария, статус тикетов, ложная верификация и очки модели
+соответствовали доказательствам, а не уверенности модели.
 
-## Goal
+## Цель
 
-Close the correctness hole where a run can look successful while spawned tickets failed or command
-evidence contradicted the model's verification verdict.
+Закрыть дыру в корректности: запуск не должен выглядеть успешным, пока дочерние тикеты провалились
+или командное доказательство опровергает вердикт модели.
 
-## Necessary Conditions
+## Необходимые условия
 
-- Scenario status has one explicit source of truth when spawned tickets fail and final verification
-  passes.
-- Default behavior must not silently hide failed required spawned tickets behind a passing final
-  gate.
-- False verification must affect score and status reasoning when the model claims success over
-  failed command evidence.
-- Score success must be derived from the same evidence-backed result used to complete the ticket,
-  not only from the model's self-verdict.
+- Статус сценария имеет единственный явный источник истины, когда дочерние тикеты провалились,
+  а финальная верификация прошла.
+- Поведение по умолчанию не должно молча скрывать провалившиеся обязательные дочерние тикеты
+  за успешно прошедшим финальным шлюзом.
+- Ложная верификация должна влиять на очки и обоснование статуса, когда модель заявляет об
+  успехе вопреки провальным командным доказательствам.
+- Успех в очках должен вычисляться из тех же доказательств, что используются для закрытия тикета,
+  а не только из самовердикта модели.
 
 ## TODO
 
 ### RnD
 
-1. Re-read the runtime status contract in `PHASE_4_local.md`, `ARCHITECTURE.md`, and
-   `interface.md`, then decide what should happen when spawned tickets fail but final verification
-   commands pass.
+1. Перечитать контракт по статусам в `PHASE_4_local.md`, `ARCHITECTURE.md` и `interface.md`,
+   затем решить, что должно происходить, когда дочерние тикеты провалились, но финальные
+   проверочные команды прошли.
 
-   Verify: record the exact section names or bullets that define scenario status, ticket status,
-   final verification, and status visibility in this quest's Implementation Notes.
+   Верифицировать: записать точные названия разделов или пунктов, определяющих статус сценария,
+   статус тикета, финальную верификацию и видимость статуса в Примечаниях к реализации этого квеста.
 
-2. Inspect `src/planfoldr/orchestrator.py` around `_executor_loop`, `_final_verification`,
-   `_run_executor_cycle`, and `_checks_already_satisfied` to map every path that can produce
-   `done`, `failed`, `budget_exceeded`, or `error`.
+2. Изучить `src/planfoldr/orchestrator.py` в районе `_executor_loop`, `_final_verification`,
+   `_run_executor_cycle` и `_checks_already_satisfied`, чтобы нанести на карту каждый путь,
+   который может дать `done`, `failed`, `budget_exceeded` или `error`.
 
-   Verify: add a short status-path note naming the function, branch, status, and evidence source
-   for each path.
+   Верифицировать: добавить краткую заметку для каждого пути с указанием функции, ветки, статуса
+   и источника доказательств.
 
-3. Inspect `src/planfoldr/cycle.py` around `_phase_command_verification`,
-   `_phase_model_verification`, and `_finalize` to map command evidence, model verdict,
-   false-verification detection, attempts, and score recording.
+3. Изучить `src/planfoldr/cycle.py` в районе `_phase_command_verification`,
+   `_phase_model_verification` и `_finalize`, чтобы нанести на карту командные доказательства,
+   вердикт модели, обнаружение ложной верификации, попытки и запись очков.
 
-   Verify: record the current `cmd_ok`, `model_ok`, `passed`, `verdict`, and `ScoreSystem.record`
-   values that make false success possible.
+   Верифицировать: записать текущие значения `cmd_ok`, `model_ok`, `passed`, `verdict`
+   и `ScoreSystem.record`, из-за которых возможен ложный успех.
 
-4. Inspect `src/planfoldr/score.py` and `tests/test_score.py` to identify the intended scoring
-   effects for a failed ticket, budget exhaustion, waste, false verification, and over-spawning.
+4. Изучить `src/planfoldr/score.py` и `tests/test_score.py`, чтобы выявить ожидаемые
+   эффекты на очки при провале тикета, исчерпании бюджета, расточительстве, ложной
+   верификации и сверхдекомпозиции.
 
-   Verify: list the score fields and test names that must change or remain stable.
+   Верифицировать: перечислить поля очков и названия тестов, которые должны измениться
+   или остаться стабильными.
 
-### Implementation
+### Реализация
 
-5. Replace the current "final gate can override failed spawned tickets" behavior with an explicit
-   scenario/runtime policy. The default policy should fail the scenario when any required spawned
-   ticket failed. If final-gate-only success is still desired, it must be opt-in and must put
-   failed ticket ids in the main status reason.
+5. Заменить текущее поведение «финальный шлюз может перекрыть провалившиеся дочерние тикеты»
+   явной политикой. Политика по умолчанию: сценарий проваливается, если провалился хотя бы
+   один обязательный дочерний тикет. Если нужен «успех по одному лишь шлюзу», это должно быть
+   opt-in с указанием id провалившихся тикетов в причине статуса.
 
-   Verify: update `tests/test_e2e_stub.py::test_scenario_done_when_gate_passes_despite_failed_spawned_ticket`
-   so the default case expects `failed`; add a separate opt-in test only if the final-gate-only
-   policy remains supported.
+   Верифицировать: обновить
+   `tests/test_e2e_stub.py::test_scenario_done_when_gate_passes_despite_failed_spawned_ticket`
+   так, чтобы поведение по умолчанию ожидало `failed`; добавить отдельный opt-in тест только
+   если политика «шлюз без проверки дочерних» сохраняется.
 
-6. Wire false verification into scoring. When command verification has failed evidence and model
-   verification says `passed: true`, pass `false_verification=True` to `ScoreSystem.record` and
-   include a false-verification note in the cycle output or ticket transition proof/reason.
+6. Подключить ложную верификацию к очкам. Когда командная верификация дала провальные
+   доказательства, а модельная говорит `passed: true`, передать `false_verification=True`
+   в `ScoreSystem.record` и добавить заметку о ложной верификации в вывод цикла или
+   proof/reason перехода тикета.
 
-   Verify: add a focused cycle test where the model claims success over a failing command; assert
-   the ticket does not complete, the score event records false verification, and the result reason
-   names the false verification.
+   Верифицировать: добавить сфокусированный тест цикла, где модель заявляет успех
+   при провальной команде; проверить, что тикет не закрывается, событие очков фиксирует
+   ложную верификацию, а причина результата называет её.
 
-7. Stop rewarding command-failed tickets as score passes. Compute score success from the same
-   evidence-backed `passed` value used for ticket completion. Preserve separate model-verdict and
-   command-verdict data only if analysis/reporting needs them.
+7. Прекратить засчитывать как успех тикеты, у которых командные проверки провалились.
+   Вычислять успех в очках из тех же доказательно-подкреплённых значений `passed`, что
+   используются для закрытия тикета. Отдельные данные вердикта модели и вердикта команд
+   сохранять только если они нужны для анализа/отчётности.
 
-   Verify: add or update a score/cycle test where command checks fail but model verification
-   passes; assert the score does not record a successful verified run.
+   Верифицировать: добавить или обновить тест очков/цикла, где командные проверки
+   провалились, а модельная верификация прошла; проверить, что очки не фиксируют
+   успешный верифицированный запуск.
 
-8. Make status reasoning stable in persisted artifacts. Ensure `result.json`, `tickets.json`, and
-   `scores.json` contain enough structured information to explain failed spawned tickets, false
-   verification, and score penalties.
+8. Стабилизировать обоснование статусов в персистируемых артефактах. Убедиться, что
+   `result.json`, `tickets.json` и `scores.json` содержат достаточно структурированной
+   информации для объяснения провалившихся дочерних тикетов, ложной верификации и
+   штрафов очков.
 
-   Verify: run a stub scenario that triggers a failed spawned ticket and inspect the three JSON
-   artifacts for status, failed ticket id, and score penalty evidence.
+   Верифицировать: запустить stub-сценарий, который провоцирует провал дочернего тикета,
+   и проверить три JSON-артефакта на наличие статуса, id провалившегося тикета и
+   доказательства штрафа очков.
 
-### Verification
+### Верификация
 
-9. Run the focused status and score tests:
+9. Запустить сфокусированные тесты статусов и очков:
    `.venv/bin/python -m pytest tests/test_cycle_stub.py tests/test_e2e_stub.py tests/test_score.py -q`.
 
-   Verify: all focused tests pass, and the failed-spawned-ticket scenario asserts the new default
-   behavior.
+   Верифицировать: все сфокусированные тесты проходят, и сценарий с провалом дочернего
+   тикета проверяет новое поведение по умолчанию.
 
-10. Run the full default suite:
+10. Запустить полный набор тестов:
     `.venv/bin/python -m pytest -q`.
 
-    Verify: the full suite passes; if optional Ollama tests are skipped, record the skip count and
-    confirm no default test requires a local model.
+    Верифицировать: полный набор проходит; если опциональные Ollama-тесты пропущены,
+    записать их число и подтвердить, что ни один тест по умолчанию не требует локальной модели.
 
-11. Inspect generated artifacts from at least one stub e2e run under `runs/` or pytest's temp run
-    directory: `result.json`, `tickets.json`, and `scores.json`.
+11. Проверить сгенерированные артефакты хотя бы одного stub e2e-запуска под `runs/` или
+    во временной директории pytest: `result.json`, `tickets.json` и `scores.json`.
 
-    Verify: scenario status, failed ticket ids, false-verification markers, and score penalties
-    are present as inspectable structured data.
+    Верифицировать: статус сценария, id провалившихся тикетов, маркеры ложной верификации
+    и штрафы очков присутствуют как инспектируемые структурированные данные.
 
-## Final Verification
+## Финальная верификация
 
-- Re-read this quest and confirm every TODO item has implementation evidence or a concrete defer
-  note.
-- Re-read the relevant docs/examples and confirm no pretty examples were removed or weakened.
-- Run the focused status/score tests and `.venv/bin/python -m pytest -q`.
-- Inspect the generated status/score artifacts directly.
-- Move this quest to `quests/done/` only in the same commit that implements and verifies the fixes.
+- Перечитать этот квест и подтвердить, что каждый пункт TODO имеет доказательство реализации
+  или конкретную заметку об отложении.
+- Перечитать релевантные docs/examples и подтвердить, что ни один красивый пример не был
+  удалён или ослаблен.
+- Запустить сфокусированные тесты статусов/очков и `.venv/bin/python -m pytest -q`.
+- Напрямую проверить сгенерированные артефакты статусов/очков.
+- Переместить квест в `quests/done/` только в том же коммите, что реализует и верифицирует исправления.
 
-## Implementation Notes
+## Примечания к реализации
 
-- Split from the original aggregate runtime-hardening quest so status/scoring can be fixed
-  independently.
-- Risk anchors:
-  - `src/planfoldr/orchestrator.py::_final_verification` currently can return scenario `done`
-    even when spawned tickets failed.
+- Выделено из исходного агрегированного квеста runtime-hardening чтобы статус/очки можно
+  было исправить независимо.
+- Точки риска:
+  - `src/planfoldr/orchestrator.py::_final_verification` в текущем виде может вернуть `done`
+    для сценария даже если дочерние тикеты провалились.
   - `tests/test_e2e_stub.py::test_scenario_done_when_gate_passes_despite_failed_spawned_ticket`
-    currently locks in that permissive behavior.
-  - `src/planfoldr/cycle.py::_phase_model_verification` detects false verification, but
-    `_finalize` currently records `false_verification=False`.
-  - `src/planfoldr/cycle.py::_finalize` currently treats model verdict success as the score
-    success signal even when command evidence failed.
+    в текущем виде закрепляет это разрешительное поведение.
+  - `src/planfoldr/cycle.py::_phase_model_verification` обнаруживает ложную верификацию, но
+    `_finalize` в текущем виде записывает `false_verification=False`.
+  - `src/planfoldr/cycle.py::_finalize` в текущем виде трактует успех вердикта модели как
+    сигнал успеха в очках, даже когда командные доказательства провалились.

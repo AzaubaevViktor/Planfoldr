@@ -1,113 +1,115 @@
-# Task runtime_q21_byuser_developer_cycle_hardening: Hardening developer cycle — iteration waste and context loss
+# Task runtime_q21_byuser_developer_cycle_hardening: Hardening developer cycle — потери итераций и контекста
 File name: `runtime_q21_byuser_developer_cycle_hardening.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: none
-Description: Observed in the 2026-06-10_23-03-17 run (taskmanager_local_l10b / gemma4:31b).
-The developer cycle burned all 8 iterations but wrote only 1 of 8 required files.
-The model re-planned from scratch at every iteration because it couldn't see what it had
-already written. Repeated bash `mkdir` calls and duplicate `file_edit` triggered the
-no-progress detector and killed the loop before any real work was done.
+Текущий статус: active
+Блокирован: нет
+Описание: Наблюдено в запуске 2026-06-10_23-03-17 (taskmanager_local_l10b / gemma4:31b).
+Цикл разработчика сжёг все 8 итераций, но написал лишь 1 из 8 требуемых файлов.
+Модель планировала заново с нуля на каждой итерации, потому что не видела, что уже написала.
+Повторные вызовы `bash mkdir` и дублирующиеся `file_edit` сработали детектор отсутствия
+прогресса и убили цикл прежде, чем была выполнена хоть какая-то реальная работа.
 
-## Concrete failure observed
+## Конкретный наблюдённый сбой
 
-Run `taskmanager_local_l10b.yaml` with `gemma4:31b`, developer-1 cycle:
+Запуск `taskmanager_local_l10b.yaml` с `gemma4:31b`, цикл developer-1:
 
-| Iteration | Action | Result |
+| Итерация | Действие | Результат |
 |---|---|---|
-| 1 | `plan` (context_exploration) | ok, not preserved |
-| 2 | `bash mkdir -p tasks` | exit=0, productive |
-| 3 | `bash mkdir -p tasks` | exit=0, **sig repeat** |
-| 4 | `file_edit tasks/model.py` | created, path_edits=1 |
-| 5 | `bash mkdir -p tasks` | exit=0, productive=False (bash cmd result) |
-| 6 | `file_edit tasks/model.py` | path_edits=2 → productive=False, no_progress=2 → **loop exits** |
+| 1 | `plan` (context_exploration) | ok, не сохранён |
+| 2 | `bash mkdir -p tasks` | exit=0, продуктивно |
+| 3 | `bash mkdir -p tasks` | exit=0, **повтор** |
+| 4 | `file_edit tasks/model.py` | создан, path_edits=1 |
+| 5 | `bash mkdir -p tasks` | exit=0, productive=False |
+| 6 | `file_edit tasks/model.py` | path_edits=2 → productive=False, no_progress=2 → **цикл выходит** |
 
-Result: 8 iterations burned, only `tasks/model.py` written (twice), 7 files missing.
-Score: -12 (failed). No `tasks/filter.py`, `tasks/store.py`, etc. ever created.
+Результат: 8 итераций сожжены, написан только `tasks/model.py` (дважды), 7 файлов отсутствуют.
+Очки: -12 (провал). `tasks/filter.py`, `tasks/store.py` и т.д. — никогда не созданы.
 
-## Root causes
+## Первопричины
 
-### RC-1: Model doesn't see what it has already done in this cycle
+### RC-1: Модель не видит, что уже сделала в этом цикле
 
-`_changes_user` shows only `Last tool result` — the single last action's output.
-The model has no running list of files already written in this cycle. At each new iteration
-it starts over with its full planning thought, re-inventing the same plan, then re-doing the
-first step. The `changes_log` is accumulated in `local_memory` but never surfaced in the prompt.
+`_changes_user` показывает только `Last tool result` — вывод единственного последнего действия.
+У модели нет накопленного списка файлов, уже написанных в этом цикле. На каждой новой итерации
+она начинает заново со своей полной мыслью о планировании, изобретает тот же план, затем
+повторно выполняет первый шаг. `changes_log` накапливается в `local_memory`, но никогда не
+попадает в промпт.
 
-### RC-2: `max_iterations=8` is too low for multi-file tickets
+### RC-2: `max_iterations=8` слишком мало для многофайловых тикетов
 
-An 8-file project needs at minimum 8 `file_edit` actions plus 1 `plan` plus 1 `bash` for
-tests = 10 actions. With any wasted iterations (repeated mkdir, protocol errors, reformat
-retries) the budget runs out mid-way. Planning tickets only get `max_iterations=4`, which is
-fine. But code tickets with many files need headroom.
+Проект из 8 файлов требует минимум 8 действий `file_edit` плюс 1 `plan` плюс 1 `bash` для
+тестов = 10 действий. При любых потерянных итерациях (повторный mkdir, ошибки протокола,
+retry переформатирования) бюджет исчерпывается на полпути. Тикеты планирования получают только
+`max_iterations=4`, что нормально. Но тикеты кода со многими файлами нуждаются в запасе.
 
-### RC-3: No-progress detector penalises consecutive `bash` and re-edit
+### RC-3: Детектор отсутствия прогресса наказывает последовательные `bash` и повторные правки
 
-The no-progress logic marks `bash` calls as `productive=False` when there's no meaningful
-result (e.g. `mkdir` when dir already exists has `exit=0` but no output — same as a
-no-op). This is correct, but the check currently fires on any bash result, including the
-FIRST mkdir that was genuinely needed. Combined with `path_edits[fp] <= 1` (second write to
-a file = unproductive), the detector is too aggressive for iterative development where the
-model might need to fix a file it just created.
+Логика no-progress помечает вызовы `bash` как `productive=False` при отсутствии значимого
+результата (например, `mkdir` когда директория уже существует — exit=0, но нет вывода, как
+no-op). Это правильно, но проверка срабатывает на любом bash-результате, включая первый mkdir,
+который был реально нужен. В сочетании с `path_edits[fp] <= 1` (второй раз пишем в файл =
+непродуктивно) детектор слишком агрессивен для итеративной разработки, где модели может
+понадобиться исправить только что созданный файл.
 
-### RC-4: `plan` output is lost between phases
+### RC-4: Вывод `plan` теряется между фазами
 
-The developer cycle runs `context_exploration` first (1 iteration, `plan` action). The
-plan goes into `local_memory["plan"]`. Then `changes` starts fresh with a new `_changes_user`
-prompt that doesn't include the plan. The model re-plans again at the start of changes,
-burning another iteration on the same output.
+Цикл разработчика сначала запускает `context_exploration` (1 итерация, действие `plan`). План
+попадает в `local_memory["plan"]`. Затем `changes` начинается заново с новым промптом
+`_changes_user`, который не включает план. Модель заново планирует в начале changes, сжигая
+ещё одну итерацию на тот же вывод.
 
-### RC-5: `bash` used for `mkdir` instead of relying on `file_edit`
+### RC-5: `bash` используется для `mkdir` вместо `file_edit`
 
-The prompt allows `bash` but doesn't tell the model that `file_edit` creates parent
-directories automatically. The model wastes 1-3 iterations on `mkdir -p` calls that are
-never needed.
+Промпт разрешает `bash`, но не сообщает модели, что `file_edit` создаёт родительские
+директории автоматически. Модель тратит 1-3 итерации на вызовы `mkdir -p`, которые
+никогда не нужны.
 
-### RC-6: Orchestration creates the same ticket twice in one action loop
+### RC-6: Оркестрация создаёт один и тот же тикет дважды в одном цикле действий
 
-In context_exploration (max_iterations=1) the model did `plan` (one action, loop exits).
-In changes the model created the same ticket twice. Dedup returned `developer-1` for both.
-`spawned_tickets` records `['developer-1', 'developer-1']` — a cosmetic bug, harmless but
-noisy in the report.
+В context_exploration (max_iterations=1) модель делает `plan` (одно действие, цикл выходит).
+В changes модель создала один и тот же тикет дважды. Дедупликация вернула `developer-1` для
+обоих. `spawned_tickets` записывает `['developer-1', 'developer-1']` — косметический баг,
+безвредный, но шумный в отчёте.
 
-## Necessary Conditions
+## Необходимые условия
 
-- A developer cycle working on an 8-file project must be able to write all 8 files before
-  hitting the iteration cap.
-- The model must see a running "changes so far" block in every iteration of the changes
-  loop so it can pick up where it left off without re-planning.
-- The `plan` from context_exploration must be visible in the changes loop.
-- The no-progress detector must allow a model to write a file once, run a verification bash
-  command, and fix the file if the command failed — without counting that as "no progress".
-- `spawned_tickets` must not list the same ticket id twice.
+- Цикл разработчика, работающий над 8-файловым проектом, должен иметь возможность записать
+  все 8 файлов до достижения лимита итераций.
+- Модель должна видеть накопленный блок "изменений до сих пор" в каждой итерации цикла
+  changes, чтобы продолжать с того места, где остановилась, без повторного планирования.
+- `plan` из context_exploration должен быть виден в цикле changes.
+- Детектор отсутствия прогресса должен позволять модели написать файл один раз, запустить
+  верификационную bash-команду и исправить файл при провале команды — без засчитывания
+  этого как "нет прогресса".
+- `spawned_tickets` не должен перечислять один и тот же id тикета дважды.
 
 ## TODO
 
 ### RnD
 
-1. Re-read `src/planfoldr/cycle.py::_changes_user` and `_action_loop` to confirm:
-   (a) which fields from `local_memory` are surfaced in the user prompt,
-   (b) how `changes_log` is built and where it is discarded,
-   (c) what `no_progress` and `path_edits` count exactly.
+1. Перечитать `src/planfoldr/cycle.py::_changes_user` и `_action_loop`, чтобы подтвердить:
+   (a) какие поля из `local_memory` попадают в пользовательский промпт,
+   (b) как строится `changes_log` и где он отбрасывается,
+   (c) что именно считают `no_progress` и `path_edits`.
 
-   Verify: note the exact line numbers and field names.
+   Верифицировать: записать точные номера строк и имена полей.
 
-2. Re-read `src/planfoldr/cycle.py::_phase_context_exploration` and confirm that the
-   `plan` output from context is NOT carried into the changes prompt.
+2. Перечитать `src/planfoldr/cycle.py::_phase_context_exploration` и подтвердить, что вывод
+   `plan` из контекста НЕ переносится в промпт changes.
 
-   Verify: trace `local_memory["plan"]` from set to discard.
+   Верифицировать: проследить `local_memory["plan"]` от установки до отбрасывания.
 
-3. Check `src/planfoldr/orchestrator.py::_run_cycle` for the `max_iterations` values
-   assigned to planning vs code tickets.
+3. Проверить `src/planfoldr/orchestrator.py::_run_cycle` на предмет значений `max_iterations`,
+   присваиваемых тикетам планирования и кода.
 
-   Verify: record the current values for `is_planning` True and False branches.
+   Верифицировать: записать текущие значения для ветвей `is_planning` True и False.
 
-### Implementation
+### Реализация
 
-4. Add a "changes so far" block to `_changes_user`. When `local_memory["changes_log"]`
-   is non-empty, include a compact summary at the top of the user prompt:
+4. Добавить блок "уже сделано" в `_changes_user`. Когда `local_memory["changes_log"]`
+   непуст, включить компактную сводку в верхнюю часть пользовательского промпта:
 
    ```
    ALREADY DONE IN THIS CYCLE:
@@ -115,90 +117,92 @@ noisy in the report.
    - bash mkdir -p tasks → exit=0
    ```
 
-   Show only the action name, path/cmd (truncated to 60 chars), and result status.
-   Cap the list at the last 10 entries to avoid flooding the prompt.
+   Показывать только имя действия, path/cmd (усечённый до 60 символов) и статус результата.
+   Ограничить список последними 10 записями, чтобы не переполнять промпт.
 
-   Verify: add `tests/test_cycle_stub.py::test_changes_user_includes_changes_log` — run
-   a two-action stub sequence, assert the second call's user prompt contains "ALREADY DONE"
-   with the first action listed.
+   Верифицировать: добавить `tests/test_cycle_stub.py::test_changes_user_includes_changes_log` —
+   запустить stub-последовательность из двух действий, убедиться, что пользовательский
+   промпт второго вызова содержит "ALREADY DONE" с первым действием в списке.
 
-5. Carry the `plan` from context_exploration into the changes prompt. When
-   `local_memory.get("plan")` is set, include it as a one-liner at the top of the changes
-   user prompt:
+5. Перенести `plan` из context_exploration в промпт changes. Когда
+   `local_memory.get("plan")` установлен, включить его как однострочник в верхнюю часть
+   пользовательского промпта changes:
 
    ```
-   PLAN: <first plan entry, truncated to 200 chars>
+   PLAN: <первая запись плана, усечённая до 200 символов>
    ```
 
-   Verify: add `tests/test_cycle_stub.py::test_changes_user_includes_plan` — assert the
-   plan text appears in the changes prompt when local_memory["plan"] is set.
+   Верифицировать: добавить `tests/test_cycle_stub.py::test_changes_user_includes_plan` —
+   убедиться, что текст плана появляется в промпте changes, когда `local_memory["plan"]`
+   установлен.
 
-6. Raise `max_iterations` for code/fix/tests tickets to 16 (from 8). Keep planning tickets
-   at 4. Document the rationale in a comment.
+6. Поднять `max_iterations` для тикетов code/fix/tests до 16 (с 8). Оставить тикеты
+   планирования на 4. Задокументировать обоснование в комментарии.
 
-   Verify: update any test that asserts `max_iterations=8`; confirm the e2e stub still
-   terminates in bounded time.
+   Верифицировать: обновить любой тест, утверждающий `max_iterations=8`; убедиться, что
+   e2e stub по-прежнему завершается за ограниченное время.
 
-7. Relax the no-progress detector for `file_edit`:
-   - Allow a file to be edited up to 2 times before counting as unproductive (change
-     `path_edits[fp] <= 1` to `path_edits[fp] <= 2`).
-   - Mark `bash` as productive when `exit_code == 0` AND `stdout` is non-empty, OR when
-     `exit_code != 0` (i.e. a test failure is genuine progress — the model learned something).
-   - Keep the full repeated-identical-action guard (`sig == last_sig` for 2+ in a row).
+7. Смягчить детектор отсутствия прогресса для `file_edit`:
+   - Разрешить редактирование файла до 2 раз до засчитывания как непродуктивного (изменить
+     `path_edits[fp] <= 1` на `path_edits[fp] <= 2`).
+   - Помечать `bash` как продуктивный при `exit_code == 0` И непустом `stdout`, ИЛИ при
+     `exit_code != 0` (т.е. провал теста — реальный прогресс: модель узнала что-то новое).
+   - Сохранить полную защиту от повторяющихся одинаковых действий (`sig == last_sig` 2+ раза подряд).
 
-   Verify: add a focused test where a file_edit on the same path twice counts as productive
-   for the first two writes; assert the third write is unproductive.
+   Верифицировать: добавить сфокусированный тест, где file_edit одного и того же пути дважды
+   считается продуктивным для первых двух записей; убедиться, что третья запись непродуктивна.
 
-8. Add a sentence to `_changes_user` in the ACTION REFERENCE preamble:
-   "file_edit creates parent directories automatically — never use bash mkdir."
+8. Добавить предложение в `_changes_user` в преамбуле ACTION REFERENCE:
+   "file_edit создаёт родительские директории автоматически — никогда не используй bash mkdir."
 
-   Verify: confirm the sentence appears in the prompt text from `_changes_user`.
+   Верифицировать: подтвердить, что предложение появляется в тексте промпта из `_changes_user`.
 
-9. Fix duplicate entry in `spawned_tickets`. In `_wrap_create_ticket`, when dedup returns
-   an existing ticket id (i.e. `fn(spec)` returns an id already in `self.spawned_tickets`),
-   do not append it again.
+9. Исправить дублирующиеся записи в `spawned_tickets`. В `_wrap_create_ticket`, когда
+   дедупликация возвращает существующий id тикета (т.е. `fn(spec)` возвращает id, уже
+   присутствующий в `self.spawned_tickets`), не добавлять его снова.
 
-   Verify: add `tests/test_cycle_stub.py::test_no_duplicate_spawned_ticket_ids` — create
-   the same ticket spec twice via the orchestrator; assert `spawned_tickets` contains the
-   id exactly once and `cycle_result.spawned_tickets` has no duplicates.
+   Верифицировать: добавить `tests/test_cycle_stub.py::test_no_duplicate_spawned_ticket_ids` —
+   создать одну и ту же спецификацию тикета дважды через оркестратор; убедиться, что
+   `spawned_tickets` содержит id ровно один раз и `cycle_result.spawned_tickets` без дублей.
 
-### Verification
+### Верификация
 
-10. Run focused cycle tests:
+10. Запустить сфокусированные тесты цикла:
     `.venv/bin/python -m pytest tests/test_cycle_stub.py -q`.
 
-    Verify: all new tests pass, no existing tests regress.
+    Верифицировать: все новые тесты проходят, существующие тесты не регрессируют.
 
-11. Run full suite:
+11. Запустить полный набор:
     `.venv/bin/python -m pytest -q`.
 
-    Verify: all tests pass.
+    Верифицировать: все тесты проходят.
 
-12. Re-run `taskmanager_local_l10b.yaml` (or any multi-file scenario) with `gemma4:31b`
-    and confirm in the terminal output that:
-    - The "ALREADY DONE" block appears from the second iteration onward.
-    - The developer cycle writes more than 1 file before the loop exits.
-    - `spawned_tickets` in the terminal shows no duplicates.
+12. Перезапустить `taskmanager_local_l10b.yaml` (или любой многофайловый сценарий) с
+    `gemma4:31b` и подтвердить в выводе терминала, что:
+    - Блок "ALREADY DONE" появляется начиная со второй итерации.
+    - Цикл разработчика записывает более 1 файла до выхода из цикла.
+    - `spawned_tickets` в терминале не содержит дублей.
 
-## Final Verification
+## Финальная верификация
 
-- Re-read this quest and confirm every TODO item has implementation evidence or a defer note.
-- Re-read `AGENTS.md` examples and confirm no pretty examples were removed.
-- Run focused cycle tests and `.venv/bin/python -m pytest -q`.
-- In a re-run of the scenario, inspect terminal output and `model_io.jsonl` to confirm the
-  model writes multiple files in one cycle.
-- Move to `quests/done/` only in the same commit that passes all tests and re-run.
+- Перечитать этот квест и подтвердить, что каждый пункт TODO имеет доказательство реализации
+  или конкретную заметку об отложении.
+- Перечитать примеры `AGENTS.md` и подтвердить, что ни один красивый пример не был удалён.
+- Запустить сфокусированные тесты цикла и `.venv/bin/python -m pytest -q`.
+- При перезапуске сценария проверить вывод терминала и `model_io.jsonl`, чтобы убедиться,
+  что модель записывает несколько файлов в одном цикле.
+- Переместить в `quests/done/` только в том же коммите, что проходит все тесты и перезапуск.
 
-## Implementation Notes
+## Примечания к реализации
 
-Observed run: `runs/2026-06-10_23-03-17__run_f47dc88cab3b` (taskmanager_local_l10b / gemma4:31b).
+Наблюдённый запуск: `runs/2026-06-10_23-03-17__run_f47dc88cab3b` (taskmanager_local_l10b / gemma4:31b).
 
-- Tool call sequence in developer-1 changes loop:
-  `mkdir` → `mkdir` → `file_edit model.py` → `mkdir` → `file_edit model.py` → **no_progress=2 exit**
-- Only `runs/.../workspace/tasks/model.py` was written; 7 files missing.
-- `model_io.jsonl` shows thinking_len >> content_len on most iterations — model spends most
-  tokens re-planning rather than executing.
-- Thinking tokens per call: [5514, 3659, 5622, 891, 867, 682, 1450, 2984, 318, 958] — total
-  ~22K chars of thinking for ~10K chars of actual action content.
-- Fix priority: RC-1 (missing changes_log in prompt) and RC-2 (max_iterations too low) have
-  the highest expected impact and are independent of each other.
+- Последовательность вызовов инструментов в цикле changes developer-1:
+  `mkdir` → `mkdir` → `file_edit model.py` → `mkdir` → `file_edit model.py` → **no_progress=2 выход**
+- Был записан только `runs/.../workspace/tasks/model.py`; 7 файлов отсутствуют.
+- `model_io.jsonl` показывает thinking_len >> content_len на большинстве итераций — модель
+  тратит большинство токенов на повторное планирование, а не на выполнение.
+- Токены thinking за вызов: [5514, 3659, 5622, 891, 867, 682, 1450, 2984, 318, 958] — всего
+  ~22K символов thinking против ~10K символов фактического контента действий.
+- Приоритет исправлений: RC-1 (отсутствующий changes_log в промпте) и RC-2 (max_iterations
+  слишком мал) имеют наибольший ожидаемый эффект и независимы друг от друга.

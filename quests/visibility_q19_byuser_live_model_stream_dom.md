@@ -1,156 +1,164 @@
-# Task visibility_q19_byuser_live_model_stream_dom: Stream model output into the page without reload
+# Task visibility_q19_byuser_live_model_stream_dom: Стриминг вывода модели в страницу без перезагрузки
 File name: `visibility_q19_byuser_live_model_stream_dom.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: visibility_q18_byuser_internal_thinking_summary
-Description: The live Visibility page currently opens a WebSocket but its browser handler ignores
-messages, so model generation becomes visible only after auto-refresh or final rendered output.
+Текущий статус: active
+Блокирован: visibility_q18_byuser_internal_thinking_summary
+Описание: Живая страница Visibility открывает WebSocket, но браузерный обработчик игнорирует
+сообщения, поэтому генерация модели становится видна только после авто-обновления или
+окончательного рендеринга вывода.
 
-## Goal
+## Цель
 
-Make live Visibility actually live: while a model is generating, content and thinking chunks should
-append into the visible Streaming Log through WebSocket events without waiting for a page reload.
-The page refresh may remain as a fallback, but it must not be the primary mechanism for seeing
-generation progress.
+Сделать живую Visibility по-настоящему живой: пока модель генерирует, чанки контента и
+thinking должны добавляться в видимый Streaming Log через WebSocket-события без ожидания
+перезагрузки страницы. Перезагрузка страницы может остаться как fallback, но не должна
+быть основным механизмом отображения прогресса генерации.
 
-## Necessary Conditions
+## Необходимые условия
 
-- `ws.onmessage` must parse incoming Visibility events and update the current page DOM.
-- `model_stream_chunk` content chunks must appear immediately in the active cycle/phase live output
-  block.
-- `model_stream_chunk` thinking chunks must appear immediately in a distinct thinking block once
-  `visibility_q18_byuser_internal_thinking_summary` has separated thinking from action summary.
-- `model_output` must replace or reconcile the live preview with the final readable model-output
-  block so the page does not show duplicate or contradictory output.
-- Tool results and audit events that already arrive over the same stream should update visible
-  status/tool sections or trigger a targeted refresh of the affected block, not a blind whole-page
-  reload for every token.
-- Auto-refresh can remain for static-file and reconnect fallback, but a live WebSocket connection
-  must disable or defer timer-based full-page reloads during active generation.
+- `ws.onmessage` должен разбирать входящие Visibility-события и обновлять DOM текущей страницы.
+- Чанки контента `model_stream_chunk` должны немедленно появляться в активном блоке
+  живого вывода цикла/фазы.
+- Чанки thinking `model_stream_chunk` должны немедленно появляться в отдельном блоке thinking,
+  как только `visibility_q18_byuser_internal_thinking_summary` разделит thinking и сводку действий.
+- `model_output` должен заменять или согласовывать живой предпросмотр с финальным читаемым
+  блоком вывода модели, чтобы страница не показывала дублирующийся или противоречивый вывод.
+- Результаты инструментов и события аудита, уже приходящие по тому же потоку, должны обновлять
+  видимые разделы status/tool или запускать целевое обновление затронутого блока, а не слепую
+  полную перезагрузку страницы на каждый токен.
+- Авто-обновление может оставаться для fallback статических файлов и переподключения, но живое
+  WebSocket-соединение должно отключать или откладывать таймерные перезагрузки во время
+  активной генерации.
 
 ## TODO
 
 ### RnD
 
-1. Inspect the current live browser path in `src/planfoldr/visibility/web.py`, especially
-   `VisibilityServer.sink`, `_WS_SCRIPT`, `_render_live_status`, `render_stream_log_html`, and the
-   page refresh script.
+1. Изучить текущий живой браузерный путь в `src/planfoldr/visibility/web.py`: особенно
+   `VisibilityServer.sink`, `_WS_SCRIPT`, `_render_live_status`, `render_stream_log_html`
+   и скрипт обновления страницы.
 
-   Verify: record the exact current behavior in Implementation Notes: WebSocket broadcasts events,
-   browser `ws.onmessage` is a no-op, auto-refresh is responsible for visible updates, and
-   `model_stream_chunk` entries are not persisted into the static log.
+   Верифицировать: записать точное текущее поведение в Примечаниях к реализации: WebSocket
+   рассылает события, браузерный `ws.onmessage` — no-op, авто-обновление отвечает за видимые
+   обновления, записи `model_stream_chunk` не персистируются в статическом логе.
 
-2. Inspect `src/planfoldr/visibility/events.py::VisibilityState.ingest` and `_live_chunk` to map
-   how `model_stream_chunk` events are stored today.
+2. Изучить `src/planfoldr/visibility/events.py::VisibilityState.ingest` и `_live_chunk`,
+   чтобы нанести на карту хранение событий `model_stream_chunk` сегодня.
 
-   Verify: list the fields available to the browser for a chunk: `cycle_id`, `ticket_id`, `phase`,
-   `kind`, and `text`; confirm whether thinking chunks are currently ignored by `_live_chunk`.
+   Верифицировать: перечислить поля, доступные браузеру для чанка: `cycle_id`, `ticket_id`,
+   `phase`, `kind` и `text`; подтвердить, игнорируются ли thinking-чанки в `_live_chunk`.
 
-3. Inspect `src/planfoldr/cycle.py::_one_action` and model adapters in `src/planfoldr/model.py` to
-   confirm which events are emitted during streaming and which event marks final assembled output.
+3. Изучить `src/planfoldr/cycle.py::_one_action` и адаптеры моделей в
+   `src/planfoldr/model.py`, чтобы подтвердить, какие события испускаются при стриминге
+   и какое событие отмечает финальный собранный вывод.
 
-   Verify: write down the event order for one model call: zero or more `model_stream_chunk`
-   events, then one `model_output`, then tool execution/result events when applicable.
+   Верифицировать: записать порядок событий для одного вызова модели: ноль или более событий
+   `model_stream_chunk`, затем одно `model_output`, затем события выполнения инструмента/результата.
 
-4. Inspect `tests/test_visibility.py` and existing WebSocket tests to decide whether the live DOM
-   behavior can be tested with the existing stdlib server tests or needs a small browser/JS
-   harness.
+4. Изучить `tests/test_visibility.py` и существующие WebSocket-тесты, чтобы решить, можно
+   ли тестировать живое DOM-поведение существующими stdlib-серверными тестами или нужна
+   небольшая браузерная/JS-обвязка.
 
-   Verify: name the exact test file and test strategy before implementation, including how the
-   test proves no full-page reload is required for the first visible chunk.
+   Верифицировать: назвать точный файл теста и стратегию тестирования до реализации, включая
+   то, как тест доказывает отсутствие полной перезагрузки страницы для первого видимого чанка.
 
-### Implementation
+### Реализация
 
-5. Add stable DOM anchors to live cycle/model-call areas in `render_stream_log_html` and
-   `_model_output_html`.
+5. Добавить стабильные DOM-якоря к живым областям цикла/вызова модели в
+   `render_stream_log_html` и `_model_output_html`.
 
-   Verify: render a minimal Streaming Log snapshot and assert the HTML contains deterministic
-   element ids or data attributes for cycle id, phase, live content, live thinking, and final model
-   output.
+   Верифицировать: отрендерить минимальный снимок Streaming Log и убедиться, что HTML содержит
+   детерминированные element ids или data-атрибуты для id цикла, фазы, живого контента,
+   living thinking и финального вывода модели.
 
-6. Replace the no-op `ws.onmessage` handler in `_WS_SCRIPT` with a small event dispatcher that
-   parses WebSocket messages and routes them by event type.
+6. Заменить no-op обработчик `ws.onmessage` в `_WS_SCRIPT` небольшим диспетчером событий,
+   который разбирает WebSocket-сообщения и маршрутизирует их по типу события.
 
-   Verify: a JS unit-style test or HTML fixture dispatches a `model_stream_chunk` event to the
-   handler and the expected live output element receives appended text.
+   Верифицировать: JS unit-тест или HTML-фикстура диспетчирует событие `model_stream_chunk`
+   в обработчик и ожидаемый элемент живого вывода получает добавленный текст.
 
-7. Implement live content chunk rendering for `model_stream_chunk` events with `kind=content`.
+7. Реализовать рендеринг живого чанка контента для событий `model_stream_chunk` с `kind=content`.
 
-   Verify: simulate two chunks for the same cycle/phase and assert the browser-visible block shows
-   the concatenated text in order, without raw event data and without replacing earlier chunks from
-   the same model call.
+   Верифицировать: симулировать два чанка для одного цикла/фазы и убедиться, что
+   браузер-видимый блок показывает конкатенированный текст по порядку, без сырых данных
+   событий и без замены предыдущих чанков того же вызова модели.
 
-8. Implement live thinking chunk rendering for `model_stream_chunk` events with `kind=thinking`,
-   using the labels and summary/thinking separation introduced by
+8. Реализовать рендеринг живого thinking-чанка для событий `model_stream_chunk` с `kind=thinking`,
+   используя метки и разделение summary/thinking, введённые
    `visibility_q18_byuser_internal_thinking_summary`.
 
-   Verify: simulate thinking and content chunks for the same model call and assert thinking appears
-   in the thinking area while content appears in the output area; neither area is mislabeled as the
-   final action summary.
+   Верифицировать: симулировать thinking- и content-чанки для одного вызова модели и убедиться,
+   что thinking появляется в области thinking, а контент — в области вывода; ни одна область
+   не подписана как финальная сводка действия.
 
-9. Handle `model_output` events by finalizing the live preview.
+9. Обработать события `model_output` финализацией живого предпросмотра.
 
-   Verify: simulate chunked output followed by `model_output`; assert the final readable model
-   block is present, the live preview is either removed or clearly marked final, and no duplicate
-   content appears in the default view.
+   Верифицировать: симулировать чанковый вывод с последующим `model_output`; убедиться, что
+   финальный читаемый блок модели присутствует, живой предпросмотр либо удалён, либо чётко
+   помечен как финальный, и никакой дублирующийся контент не появляется в представлении
+   по умолчанию.
 
-10. Handle reconnect and fallback behavior without fighting the live stream.
+10. Обработать переподключение и fallback-поведение без конфликта с живым потоком.
 
-    Verify: with an open WebSocket, assert timer-based refresh is paused or deferred during active
-    streaming; when WebSocket fails or closes, assert the existing refresh fallback still updates
-    the page.
+    Верифицировать: при открытом WebSocket проверить, что таймерное обновление приостановлено
+    или отложено во время активного стриминга; при сбое или закрытии WebSocket проверить,
+    что существующий fallback обновления страницы по-прежнему работает.
 
-11. Keep the static report behavior unchanged.
+11. Оставить поведение статического отчёта без изменений.
 
-    Verify: run a stub scenario, open the generated `visibility/index.html` as a static artifact,
-    and confirm it still renders from embedded snapshot/log data without requiring a server or
-    WebSocket.
+    Верифицировать: запустить stub-сценарий, открыть сгенерированный `visibility/index.html`
+    как статический артефакт и подтвердить, что он по-прежнему рендерится из встроенных
+    данных снимка/лога без сервера или WebSocket.
 
-### Verification
+### Верификация
 
-12. Add focused tests for the live WebSocket DOM behavior.
+12. Добавить сфокусированные тесты для живого WebSocket DOM-поведения.
 
-    Verify: tests prove that content appears after a streamed chunk before any final `model_output`
-    event and before any full-page reload path can be involved.
+    Верифицировать: тесты доказывают, что контент появляется после стримингового чанка до
+    любого финального события `model_output` и до любого пути полной перезагрузки страницы.
 
-13. Run visibility tests:
+13. Запустить тесты видимости:
     `.venv/bin/python -m pytest tests/test_visibility.py -q`.
 
-    Verify: tests pass and include live chunk DOM coverage for content, thinking, and finalization.
+    Верифицировать: тесты проходят и включают живое покрытие DOM-чанков для контента,
+    thinking и финализации.
 
-14. Run model/cycle focused tests if event shapes or streaming callbacks changed:
+14. Запустить сфокусированные тесты модели/цикла, если изменились формы событий или стриминг:
     `.venv/bin/python -m pytest tests/test_model.py tests/test_cycle_stub.py tests/test_visibility.py -q`.
 
-    Verify: tests pass and existing `model_output`, tool-call rendering, and visibility report
-    behavior are unchanged except for the new live DOM path.
+    Верифицировать: тесты проходят, существующее поведение рендеринга `model_output`,
+    вызовов инструментов и отчёта видимости не изменилось (кроме нового живого DOM-пути).
 
-15. Run the full default suite:
+15. Запустить полный набор по умолчанию:
     `.venv/bin/python -m pytest -q`.
 
-    Verify: full suite passes; record the pass/skip count in Implementation Notes.
+    Верифицировать: полный набор проходит; записать count пройденных/пропущенных
+    в Примечаниях к реализации.
 
-16. Perform a live manual or automated smoke run with web visibility enabled.
+16. Выполнить живой ручной или автоматизированный smoke-запуск с включённой web-видимостью.
 
-    Verify: start a stub or Ollama run that emits multiple streamed chunks, open the live Streaming
-    Log page, and confirm text appears incrementally without manually refreshing the page.
+    Верифицировать: запустить stub- или Ollama-прогон, испускающий несколько стриминговых
+    чанков, открыть живую страницу Streaming Log и убедиться, что текст появляется
+    постепенно без ручного обновления страницы.
 
-## Final Verification
+## Финальная верификация
 
-- Confirm WebSocket is no longer decorative: `ws.onmessage` updates the page for streamed model
-  chunks.
-- Confirm content chunks, thinking chunks, final model output, tool results, and reconnect fallback
-  each have observable behavior.
-- Confirm static `visibility/index.html` still works without a server.
-- Run focused visibility tests, relevant model/cycle tests, and the full suite.
-- Inspect the live page and generated static report before moving this quest to `quests/done/`.
+- Подтвердить, что WebSocket больше не декоративный: `ws.onmessage` обновляет страницу
+  для стриминговых чанков модели.
+- Подтвердить наблюдаемое поведение для чанков контента, чанков thinking, финального вывода
+  модели, результатов инструментов и fallback переподключения.
+- Подтвердить, что статический `visibility/index.html` по-прежнему работает без сервера.
+- Запустить сфокусированные тесты видимости, связанные тесты модели/цикла и полный набор.
+- Проверить живую страницу и сгенерированный статический отчёт перед перемещением
+  этого квеста в `quests/done/`.
 
-## Implementation Notes
+## Примечания к реализации
 
-- Created from user request after observing that live Visibility currently opens a WebSocket but
-  `ws.onmessage` ignores messages while page refresh does the visible updating.
-- Current code points to inspect first:
+- Создан по запросу пользователя после наблюдения, что живая Visibility открывает WebSocket,
+  но `ws.onmessage` игнорирует сообщения, а обновление страницы делает видимые обновления.
+- Текущие точки для первоначального изучения:
   - `src/planfoldr/visibility/web.py::_WS_SCRIPT`
   - `src/planfoldr/visibility/web.py::VisibilityServer.sink`
   - `src/planfoldr/visibility/events.py::_live_chunk`

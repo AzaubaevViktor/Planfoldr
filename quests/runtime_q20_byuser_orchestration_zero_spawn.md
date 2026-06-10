@@ -1,164 +1,169 @@
-# Task runtime_q20_byuser_orchestration_zero_spawn: Guard against zero-spawn orchestration
+# Task runtime_q20_byuser_orchestration_zero_spawn: Защита от нулевого спауна оркестрации
 File name: `runtime_q20_byuser_orchestration_zero_spawn.md`
 
-## Status
+## Статус
 
-Current status: active
-Blocked by: none
-Description: An orchestration cycle that spawns zero sub-tickets is always marked `done`
-because the orchestration ticket type skips both verification phases, making `passed=True`
-unconditionally. When a model returns empty content (e.g. HTTP 500 from a model that
-cannot handle `<tool_call>` in the system prompt), the orchestration silently "succeeds"
-with no work queued, the executor loop finds nothing to do, and final verification fails
-on every command because no code was written. The failure is invisible until the very end.
+Текущий статус: active
+Блокирован: нет
+Описание: Цикл оркестрации, породивший ноль под-тикетов, всегда помечается `done`,
+потому что тип тикета orchestration пропускает обе фазы верификации, делая `passed=True`
+безусловно. Когда модель возвращает пустой контент (например, HTTP 500 от модели,
+не умеющей обрабатывать `<tool_call>` в системном промпте), оркестрация молча «успешно
+завершается» без поставленных задач, цикл-исполнитель не находит ничего для выполнения,
+а финальная верификация проваливает каждую команду, потому что код не был написан.
+Сбой невидим до самого конца.
 
-## Goal
+## Цель
 
-Make zero-spawn orchestration a detectable, reported, and recoverable harness failure
-rather than a silent false success.
+Сделать нулевой спаун оркестрации детектируемым, отображаемым и исправимым сбоем харнесса,
+а не молчаливым ложным успехом.
 
-## Concrete failure observed
+## Конкретный наблюдённый сбой
 
-Run `mini_httpd_local_l14.yaml` with `qwen3-coder:30b`:
-- `qwen3-coder:30b` crashes with HTTP 500 on any prompt containing `<tool_call>` XML.
-- `OllamaModel.generate()` catches the HTTPError as OSError and returns
+Запуск `mini_httpd_local_l14.yaml` с `qwen3-coder:30b`:
+- `qwen3-coder:30b` падает с HTTP 500 на любом промпте, содержащем `<tool_call>` XML.
+- `OllamaModel.generate()` перехватывает HTTPError как OSError и возвращает
   `ModelResponse(content="", available=False, tokens=0)`.
-- The action loop receives parse errors for all 4 iterations, burns reformat retries, exits.
-- `_finalize` for an `orchestration` type ticket: `cmd_ok=True, model_ok=True, passed=True`
-  (no verification phases run for orchestration), so ticket → `done`, score +4.
-- `_executor_loop` finds 0 ready tickets, exits immediately.
-- Final verification runs 11 commands, all fail (nothing was built).
-- `analysis.md` calls it "failed" but the root cause — orchestration with zero spawned tickets
-  — is not named.
+- Цикл действий получает ошибки разбора на всех 4 итерациях, сжигает retry-попытки, завершается.
+- `_finalize` для тикета типа `orchestration`: `cmd_ok=True, model_ok=True, passed=True`
+  (фазы верификации не запускаются для orchestration), тикет → `done`, очки +4.
+- `_executor_loop` находит 0 готовых тикетов, немедленно завершается.
+- Финальная верификация запускает 11 команд, все проваливаются (ничего не построено).
+- `analysis.md` называет это «failed», но первопричина — оркестрация с нулевым спауном —
+  не названа.
 
-## Necessary Conditions
+## Необходимые условия
 
-- An orchestration cycle that completes with zero spawned tickets must NOT be marked `done`.
-  It must be retried (up to `max_attempts`) or, on exhaustion, fail with a clear reason.
-- When a model call returns `available=False` or empty content, the error must be surfaced
-  in the terminal stream and in `audit.jsonl` as a named event, not silently swallowed.
-- The terminal output must show a warning line when any model call in a cycle returns empty
-  content (e.g. `⚠️  model returned empty response (available=False): <reason>`).
-- `analysis.md` must list zero-spawn orchestration as a distinct failure signature with the
-  responsible model and the HTTP error reason when known.
+- Цикл оркестрации, завершившийся с нулевым спауном тикетов, НЕ должен помечаться `done`.
+  Он должен повторяться (до `max_attempts`) или, при исчерпании, завершаться с явной причиной.
+- Когда вызов модели возвращает `available=False` или пустой контент, ошибка должна быть
+  видна в терминальном потоке и в `audit.jsonl` как именованное событие, а не молча проглатываться.
+- Вывод в терминале должен показывать строку предупреждения, когда любой вызов модели в цикле
+  возвращает пустой контент (например, `⚠️  model returned empty response (available=False): <reason>`).
+- `analysis.md` должен перечислять нулевой спаун оркестрации как отдельную сигнатуру сбоя
+  с ответственной моделью и причиной HTTP-ошибки, если известна.
 
 ## TODO
 
 ### RnD
 
-1. Re-read `src/planfoldr/cycle.py::_finalize` and `PHASES_BY_TYPE` to confirm why
-   orchestration tickets always pass regardless of model output.
+1. Перечитать `src/planfoldr/cycle.py::_finalize` и `PHASES_BY_TYPE`, чтобы подтвердить,
+   почему тикеты orchestration всегда проходят независимо от вывода модели.
 
-   Verify: record the exact line numbers and variable values (`cmd_ok`, `model_ok`, `passed`)
-   for the orchestration type in this quest's Implementation Notes.
+   Верифицировать: записать точные номера строк и значения переменных (`cmd_ok`, `model_ok`,
+   `passed`) для типа orchestration в Примечаниях к реализации этого квеста.
 
-2. Re-read `src/planfoldr/model.py::OllamaModel.generate()` to confirm what is returned when
-   the model raises `HTTPError` or `URLError`, and what `response.available` and `response.raw`
-   contain.
+2. Перечитать `src/planfoldr/model.py::OllamaModel.generate()`, чтобы подтвердить, что
+   возвращается при `HTTPError` или `URLError`, и что содержат `response.available`
+   и `response.raw`.
 
-   Verify: note the exact return path and which fields carry the error reason.
+   Верифицировать: записать точный путь возврата и какие поля несут причину ошибки.
 
-3. Re-read `src/planfoldr/cycle.py::_action_loop` and `_one_action` to confirm that empty
-   content and `available=False` are treated the same as a parse error (reformat retry),
-   and that there is no early exit or escalation on connection failure.
+3. Перечитать `src/planfoldr/cycle.py::_action_loop` и `_one_action`, чтобы подтвердить,
+   что пустой контент и `available=False` обрабатываются так же, как ошибка разбора
+   (retry reformat), и что нет раннего выхода или эскалации при сбое соединения.
 
-   Verify: record the reformat-retry path and confirm that `available=False` is never checked.
+   Верифицировать: записать путь retry reformat и подтвердить, что `available=False`
+   нигде не проверяется.
 
-4. Re-read `src/planfoldr/orchestrator.py::_run_top_cycle` and `_executor_loop` to confirm
-   that zero spawned tickets causes the executor loop to exit immediately without any diagnostic.
+4. Перечитать `src/planfoldr/orchestrator.py::_run_top_cycle` и `_executor_loop`, чтобы
+   подтвердить, что нулевой спаун тикетов вызывает немедленный выход цикла-исполнителя
+   без диагностики.
 
-   Verify: trace the `spawned_tickets == []` path from `_run_top_cycle` through `_executor_loop`
-   to `_final_verification`.
+   Верифицировать: проследить путь `spawned_tickets == []` от `_run_top_cycle` через
+   `_executor_loop` до `_final_verification`.
 
-5. Check `src/planfoldr/visibility/analysis.py::build_analysis` and the `analysis.md` from the
-   failing run at `runs/2026-06-10_22-53-07__run_2ea4f9c9cb4a/analysis.md` to confirm that
-   zero-spawn orchestration is not named as a failure signature.
+5. Проверить `src/planfoldr/visibility/analysis.py::build_analysis` и `analysis.md`
+   из провального запуска в `runs/2026-06-10_22-53-07__run_2ea4f9c9cb4a/analysis.md`,
+   чтобы подтвердить, что нулевой спаун оркестрации не называется как сигнатура сбоя.
 
-   Verify: record which failure signatures are currently detected and which are not.
+   Верифицировать: записать, какие сигнатуры сбоев сейчас детектируются, а какие — нет.
 
-### Implementation
+### Реализация
 
-6. In `src/planfoldr/cycle.py::_finalize`, add a zero-spawn guard for orchestration type
-   tickets: if `self.ticket.type in ("orchestration", "decompose", "plan")` and
-   `len(self.spawned_tickets) == 0` and the cycle was not budget-exceeded, do not mark the
-   ticket `done` — instead mark it `needs_review` with reason
+6. В `src/planfoldr/cycle.py::_finalize` добавить защиту от нулевого спауна для тикетов
+   типа orchestration: если `self.ticket.type in ("orchestration", "decompose", "plan")`
+   и `len(self.spawned_tickets) == 0` и цикл не был прерван по бюджету, не помечать тикет
+   `done` — вместо этого пометить его `needs_review` с причиной
    `"orchestration produced no tickets; retry"`.
 
-   The score must not receive a success bonus on this path. Preserve the existing `passed=True`
-   logic for the case where the ticket type legitimately needs no spawned tickets (i.e. add a
-   predicate, not a blanket type check).
+   Очки не должны получать бонус успеха на этом пути. Сохранить существующую логику
+   `passed=True` для случая, когда тип тикета законно не требует спауна (т.е. добавить
+   предикат, а не широкую проверку типа).
 
-   Verify: add `tests/test_cycle_stub.py::test_orchestration_zero_spawn_needs_review` — use
-   a StubModel that returns `plan` actions but never `create_ticket`; assert the cycle result
-   is `needs_review`, score receives no success bonus, and reason contains "no tickets".
+   Верифицировать: добавить `tests/test_cycle_stub.py::test_orchestration_zero_spawn_needs_review` —
+   использовать StubModel, который возвращает действия `plan`, но никогда `create_ticket`;
+   убедиться, что результат цикла `needs_review`, очки не получают бонус успеха, а причина
+   содержит "no tickets".
 
-7. In `src/planfoldr/cycle.py::_one_action`, check `response.available` immediately after
-   `self.model.generate()`. When `available=False`, emit a distinct stream event
-   `"model_unavailable"` with `reason=response.raw` (the error string), and return
-   `Action(action="", error=f"model unavailable: {response.raw}")` without burning a reformat
-   retry.
+7. В `src/planfoldr/cycle.py::_one_action` проверять `response.available` сразу после
+   `self.model.generate()`. При `available=False` испускать отдельное stream-событие
+   `"model_unavailable"` с `reason=response.raw` (строка ошибки) и возвращать
+   `Action(action="", error=f"model unavailable: {response.raw}")` без сжигания
+   retry reformat.
 
-   Verify: add `tests/test_cycle_stub.py::test_model_unavailable_returns_error_action` — use
-   a ModelAdapter subclass that returns `ModelResponse(available=False, raw="HTTP 500")`;
-   assert the returned Action has `error` set, no reformat retries are consumed, and the
-   stream_sink receives a `"model_unavailable"` event with the reason.
+   Верифицировать: добавить `tests/test_cycle_stub.py::test_model_unavailable_returns_error_action` —
+   использовать подкласс ModelAdapter, возвращающий `ModelResponse(available=False, raw="HTTP 500")`;
+   убедиться, что возвращённый Action имеет `error`, retry reformat не потребляются, а
+   stream_sink получает событие `"model_unavailable"` с причиной.
 
-8. In `src/planfoldr/visibility/terminal.py` (or wherever terminal stream events are rendered),
-   add a handler for `"model_unavailable"` events that prints a visible warning line, e.g.:
-   `│  ⚠️  model unavailable: HTTP Error 500: Internal Server Error`.
+8. В `src/planfoldr/visibility/terminal.py` (или где рендерятся терминальные stream-события)
+   добавить обработчик событий `"model_unavailable"`, выводящий видимую строку предупреждения,
+   например: `│  ⚠️  model unavailable: HTTP Error 500: Internal Server Error`.
 
-   Verify: add a test or manual check that confirms the warning appears in terminal output when
-   the model returns `available=False`.
+   Верифицировать: добавить тест или ручную проверку, подтверждающую появление предупреждения
+   в выводе терминала при `available=False`.
 
-9. In `src/planfoldr/visibility/analysis.py::build_analysis`, add detection for the
-   zero-spawn-orchestration failure signature: when an orchestration ticket is `needs_review`
-   or `failed`, and its spawned-ticket count is 0, emit a named failure signature
-   `"zero_spawn_orchestration"` with the cycle id, model, and any model_unavailable reason
-   from the audit log.
+9. В `src/planfoldr/visibility/analysis.py::build_analysis` добавить детектирование
+   сигнатуры нулевого спауна оркестрации: когда тикет orchestration имеет статус
+   `needs_review` или `failed` и количество порождённых тикетов равно 0, испустить
+   именованную сигнатуру сбоя `"zero_spawn_orchestration"` с id цикла, моделью и
+   любой причиной model_unavailable из лога аудита.
 
-   Verify: run the stub scenario from TODO 6 and confirm `analysis.md` lists
-   `zero_spawn_orchestration` under "What went wrong".
+   Верифицировать: запустить stub-сценарий из TODO 6 и убедиться, что `analysis.md`
+   перечисляет `zero_spawn_orchestration` в разделе "What went wrong".
 
-### Verification
+### Верификация
 
-10. Run focused cycle tests:
+10. Запустить сфокусированные тесты цикла:
     `.venv/bin/python -m pytest tests/test_cycle_stub.py -q -k "orchestration or unavailable"`.
 
-    Verify: both new tests pass; no existing cycle tests regress.
+    Верифицировать: оба новых теста проходят; существующие тесты цикла не регрессируют.
 
-11. Run the full default suite:
+11. Запустить полный набор по умолчанию:
     `.venv/bin/python -m pytest -q`.
 
-    Verify: all tests pass; record any optional Ollama skip count.
+    Верифицировать: все тесты проходят; записать количество опциональных Ollama-пропусков.
 
-12. Run the stub e2e scenario and inspect the run directory artifacts:
+12. Запустить stub e2e-сценарий и проверить артефакты директории запуска:
     `.venv/bin/python -m pytest tests/test_e2e_stub.py -q`.
 
-    Verify: `result.json` status and reason, `tickets.json` orchestration ticket status,
-    and `analysis.md` zero-spawn signature are all present and consistent.
+    Верифицировать: статус и причина `result.json`, статус тикета оркестрации в
+    `tickets.json` и сигнатура zero-spawn в `analysis.md` — все присутствуют
+    и согласованы.
 
-## Final Verification
+## Финальная верификация
 
-- Re-read this quest and confirm every TODO item has implementation evidence or a concrete
-  defer note.
-- Re-read `AGENTS.md` examples and confirm no pretty examples were removed.
-- Run focused cycle tests and `.venv/bin/python -m pytest -q`.
-- Inspect at least one generated run's `analysis.md` and `result.json` directly.
-- Move this quest to `quests/done/` only in the same commit that implements and verifies fixes.
+- Перечитать этот квест и подтвердить, что каждый пункт TODO имеет доказательство реализации
+  или конкретную заметку об отложении.
+- Перечитать примеры `AGENTS.md` и подтвердить, что ни один красивый пример не был удалён.
+- Запустить сфокусированные тесты цикла и `.venv/bin/python -m pytest -q`.
+- Напрямую проверить `analysis.md` и `result.json` хотя бы одного сгенерированного запуска.
+- Переместить квест в `quests/done/` только в том же коммите, что реализует и верифицирует исправления.
 
-## Implementation Notes
+## Примечания к реализации
 
-Root cause (confirmed by investigation on 2026-06-10):
+Первопричина (подтверждена расследованием 2026-06-10):
 
-- `src/planfoldr/cycle.py::PHASES_BY_TYPE["orchestration"] = [CONTEXT, CHANGES]` — no
-  verification phases, so `_finalize` always computes `cmd_ok=True, model_ok=True, passed=True`.
-- `src/planfoldr/model.py::OllamaModel.generate()` lines 243-246 — HTTPError caught as OSError,
-  returns `ModelResponse(content="", available=False, raw=str(exc))`.
-- `src/planfoldr/cycle.py::_one_action` — never checks `response.available`; parse_action("")
-  returns an error Action, which burns a reformat retry but does not escalate.
-- `src/planfoldr/orchestrator.py::_run_top_cycle` calls `_run_cycle` and discards the result;
-  `_executor_loop` then finds no ready tickets and exits silently.
-- Confirmed trigger: `qwen3-coder:30b` returns HTTP 500 whenever `<tool_call>` appears in
-  the system message — the harness always includes it in `_PROTOCOL`.
-- The fix must not change the passing behavior of orchestration tickets that correctly spawn
-  tickets (the common case); it only catches the zero-spawn edge case.
+- `src/planfoldr/cycle.py::PHASES_BY_TYPE["orchestration"] = [CONTEXT, CHANGES]` — нет фаз
+  верификации, поэтому `_finalize` всегда вычисляет `cmd_ok=True, model_ok=True, passed=True`.
+- `src/planfoldr/model.py::OllamaModel.generate()` строки 243-246 — HTTPError перехватывается
+  как OSError, возвращает `ModelResponse(content="", available=False, raw=str(exc))`.
+- `src/planfoldr/cycle.py::_one_action` — никогда не проверяет `response.available`;
+  `parse_action("")` возвращает ошибочный Action, который сжигает retry reformat, но не эскалирует.
+- `src/planfoldr/orchestrator.py::_run_top_cycle` вызывает `_run_cycle` и отбрасывает результат;
+  `_executor_loop` затем находит нет готовых тикетов и молча завершается.
+- Подтверждённый триггер: `qwen3-coder:30b` возвращает HTTP 500 всегда, когда `<tool_call>`
+  появляется в системном сообщении — харнесс всегда включает его в `_PROTOCOL`.
+- Исправление не должно менять поведение прохождения тикетов оркестрации, которые корректно
+  спаунят тикеты (обычный случай); оно ловит только edge-case нулевого спауна.
