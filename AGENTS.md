@@ -86,6 +86,10 @@ These rules come directly from user feedback across sessions. Follow them withou
 - **TODOs must be super-detailed.** Every item = a concrete, unambiguous action with enough detail to execute without asking back.
 - **After every TODO item, add a `Verify:` block** — specific, observable steps to confirm it was done correctly (e.g. which command to run, what output to look for, what file to inspect, what field to check).
 - **At the end of any TODO list, add a `Final Verification` block** — an end-to-end check that covers the whole set of tasks together, not just individual items.
+- **Each user message appends three groups of items to the end of the active TODO list:**
+  1. **RnD** — reading relevant files, exploring the codebase, generating the implementation approach, formulating the verification method
+  2. **Implementation** — the concrete target result: exactly what to create or change, with enough detail to execute
+  3. **Verification** — the formulated check plan; each verification step is its own separate item (run command X, inspect file Y, check field Z, walk through external checklist)
 
 Example structure:
 ```

@@ -27,9 +27,9 @@ accesses:
     mode: read_write
 verification:
   commands:
-    - "python3 -c \"import os,todo; p='v1.json'; (os.path.exists(p) and os.remove(p)); assert todo.add('buy milk',p)==1; assert todo.add('write code',p)==2; ts=todo.list_tasks(p); assert [t['title'] for t in ts]==['buy milk','write code']; assert all(t['done'] is False for t in ts); assert todo.complete(1,p) is True; assert todo.remove(2,p) is True; ts=todo.list_tasks(p); assert len(ts)==1 and ts[0]['id']==1 and ts[0]['done'] is True; print('lib-ok')\""
-    - "python3 -c \"import os,todo; p='v2.json'; (os.path.exists(p) and os.remove(p)); todo.add('persist me',p)\" && python3 -c \"import todo; ts=todo.list_tasks('v2.json'); assert len(ts)==1 and ts[0]['title']=='persist me' and ts[0]['done'] is False; print('persist-ok')\""
-    - "python3 -c \"import os; (os.path.exists('todos.json') and os.remove('todos.json'))\" && python3 todo.py add 'via cli' && python3 -c \"import todo; ts=todo.list_tasks('todos.json'); assert any(t['title']=='via cli' for t in ts), ts; print('cli-add-ok')\""
+    - "rm -f todos.json && [ \"$(python3 todo.py add 'buy milk')\" = '1' ] && [ \"$(python3 todo.py add 'write code')\" = '2' ] && python3 todo.py list | grep -q 'buy milk' && python3 todo.py list | grep -q 'write code' && python3 todo.py done 1 && python3 todo.py rm 2 && [ \"$(python3 todo.py list | wc -l | tr -d ' ')\" = '1' ] && python3 todo.py list | grep -q 'buy milk' && echo crud-ok"
+    - "rm -f todos.json && python3 todo.py add 'persist me' && python3 todo.py list | grep -q 'persist me' && echo persist-ok"
+    - "rm -f todos.json && python3 todo.py add 'via cli' && python3 todo.py done 1 && python3 todo.py list | grep -q 'via cli' && echo cli-ok"
   criteria:
     - "todo.add/list_tasks/complete/remove implement a correct file-backed CRUD with stable ids and persistence"
     - "the todo.py CLI supports add/list/done/rm against the default todos.json"

@@ -18,5 +18,5 @@ verification:
     - "taskqueue enqueue/dequeue/size implement a correct file-backed FIFO"
 model:
   provider: ollama
-  name: gemma4:26b-mlx
-  parameter_count: 26000000000
+  name: phi4:14b
+  parameter_count: 14000000000

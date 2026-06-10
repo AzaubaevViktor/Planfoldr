@@ -1,22 +1,29 @@
 [
   {
-    "model": "gemma4:26b-mlx",
-    "run_id": "sweep_todo_local_l05_gemma4_26b_mlx",
-    "returncode": 0,
-    "stderr_tail": "",
+    "model": "qwen3-coder:30b",
+    "run_id": "sweep_todo_local_l05_qwen3_coder_30b",
+    "returncode": null,
     "crashed": false,
-    "wall_seconds": 734.2,
-    "run_dir": "/Users/v-korovin/Projects/Planfoldr/runs/2026-06-10_14-58-34__sweep_todo_local_l05_gemma4_26b_mlx",
-    "status": "done",
-    "cycles_run": 1,
-    "tickets": {
-      "orchestration-0": "done",
-      "developer-1": "done",
-      "scenario-verify": "done"
-    },
-    "reason": null,
-    "tokens_used": 42080.0,
-    "artifacts_ok": true,
+    "timed_out": true,
+    "stderr_tail": "timed out after 1200s",
+    "wall_seconds": 1200.0,
+    "run_dir": "/Users/v-korovin/Projects/Planfoldr/runs/2026-06-10_15-20-42__sweep_todo_local_l05_qwen3_coder_30b",
+    "status": "NO_RESULT_JSON",
+    "artifacts_ok": false,
+    "verify_pass": true,
+    "verify_detail": "all verification commands pass"
+  },
+  {
+    "model": "qwen3:30b-a3b",
+    "run_id": "sweep_todo_local_l05_qwen3_30b_a3b",
+    "returncode": null,
+    "crashed": false,
+    "timed_out": true,
+    "stderr_tail": "timed out after 1200s",
+    "wall_seconds": 1200.1,
+    "run_dir": "/Users/v-korovin/Projects/Planfoldr/runs/2026-06-10_15-40-42__sweep_todo_local_l05_qwen3_30b_a3b",
+    "status": "NO_RESULT_JSON",
+    "artifacts_ok": false,
     "verify_pass": true,
     "verify_detail": "all verification commands pass"
   }
