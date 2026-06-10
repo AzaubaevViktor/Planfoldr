@@ -1,0 +1,39 @@
+# Hardening ladder #5: a file-backed to-do list app — CRUD + stable ids + persistence + a CLI.
+# Heavier than the single-function tasks: 4 library functions AND a command-line interface in one
+# file, all verified hermetically with python3 only.
+name: todo_local_l05
+goal: |
+  Create todo.py in the workspace: a file-backed to-do list using ONLY the Python standard library
+  (json). Tasks persist as JSON in a file whose default path is "todos.json". Each task is a dict
+  with an integer "id" (starting at 1 and increasing), a "title" string, and a boolean "done".
+
+  Library API:
+    add(title: str, path: str = "todos.json") -> int
+        append a new task (done=False), persist it, and return its new integer id.
+    list_tasks(path: str = "todos.json") -> list[dict]
+        return all tasks in insertion order; an empty list if the file does not exist yet.
+    complete(task_id: int, path: str = "todos.json") -> bool
+        mark that task's "done" True and persist; return True if the id was found, else False.
+    remove(task_id: int, path: str = "todos.json") -> bool
+        delete that task and persist; return True if it was removed, else False.
+
+  Also a command-line interface (using the default path "todos.json"): running
+  `python3 todo.py add "Buy milk"` prints the new id, `python3 todo.py list` prints one line per
+  task, `python3 todo.py done <id>` marks a task complete, and `python3 todo.py rm <id>` removes it.
+budget:
+  tokens: 250000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import os,todo; p='v1.json'; (os.path.exists(p) and os.remove(p)); assert todo.add('buy milk',p)==1; assert todo.add('write code',p)==2; ts=todo.list_tasks(p); assert [t['title'] for t in ts]==['buy milk','write code']; assert all(t['done'] is False for t in ts); assert todo.complete(1,p) is True; assert todo.remove(2,p) is True; ts=todo.list_tasks(p); assert len(ts)==1 and ts[0]['id']==1 and ts[0]['done'] is True; print('lib-ok')\""
+    - "python3 -c \"import os,todo; p='v2.json'; (os.path.exists(p) and os.remove(p)); todo.add('persist me',p)\" && python3 -c \"import todo; ts=todo.list_tasks('v2.json'); assert len(ts)==1 and ts[0]['title']=='persist me' and ts[0]['done'] is False; print('persist-ok')\""
+    - "python3 -c \"import os; (os.path.exists('todos.json') and os.remove('todos.json'))\" && python3 todo.py add 'via cli' && python3 -c \"import todo; ts=todo.list_tasks('todos.json'); assert any(t['title']=='via cli' for t in ts), ts; print('cli-add-ok')\""
+  criteria:
+    - "todo.add/list_tasks/complete/remove implement a correct file-backed CRUD with stable ids and persistence"
+    - "the todo.py CLI supports add/list/done/rm against the default todos.json"
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

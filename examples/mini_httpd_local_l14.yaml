@@ -1,0 +1,108 @@
+# Hardening ladder #13: HTTP framework — ~20 files, multi-subsystem.
+# Four distinct subsystems (core types, routing, middleware, handlers) each have
+# their own internal dependencies before they connect to the App. This is the first
+# rung where the harness must manage parallel work streams: routing and middleware
+# can be built concurrently once the types are done. Tickets with no blocked_by
+# relationship should run in parallel — this tests the queue's parallel dispatch.
+name: mini_httpd_local_l14
+goal: >
+  Build an HTTP/1.1 framework as package httpfw/ (stdlib only) with the following files.
+  The framework processes raw HTTP request strings and returns raw HTTP response strings
+  — no real sockets needed. All testing is via App.handle(raw_request_str) -> str.
+
+  CORE (build first — everything else depends on these):
+    httpfw/__init__.py          — re-exports App
+    httpfw/types.py             — Method enum (GET POST PUT DELETE PATCH HEAD OPTIONS),
+                                  Status enum with value=int (200 OK, 201 CREATED,
+                                  204 NO_CONTENT, 400 BAD_REQUEST, 401 UNAUTHORIZED,
+                                  403 FORBIDDEN, 404 NOT_FOUND, 405 METHOD_NOT_ALLOWED,
+                                  500 INTERNAL_SERVER_ERROR)
+    httpfw/headers.py           — Headers class: case-insensitive dict wrapper;
+                                  __getitem__, __setitem__, get, __contains__, items()
+    httpfw/request.py           — Request(method: Method, path: str, query: dict,
+                                  http_version: str, headers: Headers, body: bytes)
+    httpfw/response.py          — Response(status: Status, headers: Headers, body: bytes);
+                                  factory: Response.text(status, body_str, extra_headers={})
+                                         Response.json(status, obj, extra_headers={})
+    httpfw/parser.py            — parse_request(raw: str | bytes) -> Request;
+                                  parses request-line, headers, body (by Content-Length);
+                                  query string is parsed into request.query dict
+    httpfw/serializer.py        — serialize(resp: Response) -> str; builds raw HTTP/1.1
+                                  response with status line, headers, blank line, body
+
+  ROUTING (depends on types.py, request.py):
+    httpfw/routing/__init__.py
+    httpfw/routing/pattern.py   — compile_pattern(path_tmpl: str) -> (regex, param_names);
+                                  supports :param segments, e.g. /users/:id/posts/:pid
+    httpfw/routing/router.py    — Router: add(method, pattern, handler);
+                                  match(method, path) -> (handler, params: dict) | None;
+                                  returns 405 match (handler=None, method_mismatch=True) when
+                                  path matches but method doesn't
+
+  MIDDLEWARE (depends on types.py, request.py, response.py):
+    httpfw/middleware/__init__.py
+    httpfw/middleware/chain.py  — compose(middlewares: list, endpoint) -> handler;
+                                  each middleware is callable(ctx, next) -> Response
+    httpfw/middleware/logger.py — RequestLogger(log: list): appends
+                                  {method, path, status} to log after each request
+    httpfw/middleware/auth.py   — BasicAuth(credentials: dict[str,str]):
+                                  returns 401 with WWW-Authenticate header if auth fails
+    httpfw/middleware/json.py   — JsonBody: parses application/json body into
+                                  ctx.state['json']; if handler returns a dict, wraps in
+                                  Response.json(200, ...) automatically
+
+  HANDLERS (depends on types.py, request.py, response.py):
+    httpfw/handlers/__init__.py
+    httpfw/handlers/static.py   — static_dir(root: str) -> handler;
+                                  serves files from root, 404 if missing,
+                                  sets Content-Type from extension (.html .txt .json .css .js)
+    httpfw/handlers/errors.py   — wrap_errors(handler) -> handler;
+                                  catches any Exception from handler, returns 500 with
+                                  the exception message as plain-text body
+
+  UTILITIES (depends on types.py):
+    httpfw/utils/__init__.py
+    httpfw/utils/query.py       — parse_qs(qs: str) -> dict; handles URL-encoded values
+    httpfw/utils/mime.py        — mime_for(filename: str) -> str; maps common extensions
+
+  ENTRY POINT (depends on everything):
+    httpfw/app.py               — App class:
+                                  route(method, pattern) -> decorator that registers handler
+                                  use(middleware_factory) -> registers middleware
+                                  serve_static(prefix, root_dir) -> registers static handler
+                                  handle(raw: str) -> str  (the main test entry point)
+                                  Handlers may return: str (200), (int, str), (int, dict),
+                                  (int, dict, dict) where the last dict is extra headers.
+
+  Handler context object passed to all handlers:
+    ctx.request   — the parsed Request
+    ctx.params    — route params dict (from :param segments)
+    ctx.state     — mutable dict for middleware communication
+budget:
+  tokens: 750000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"from httpfw.app import App; print('import-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); app.route('GET','/ping')(lambda ctx:'pong'); sep=chr(13)+chr(10); raw='GET /ping HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp=app.handle(raw); assert '200' in resp and 'pong' in resp; print('basic-route-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); app.route('GET','/users/:id')(lambda ctx: ctx.params['id']); sep=chr(13)+chr(10); raw='GET /users/42 HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp=app.handle(raw); assert '42' in resp; print('param-route-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); sep=chr(13)+chr(10); raw='GET /nope HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp=app.handle(raw); assert '404' in resp; print('404-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); app.route('GET','/x')(lambda ctx:'ok'); sep=chr(13)+chr(10); raw='POST /x HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp=app.handle(raw); assert '405' in resp; print('405-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); app.route('GET','/j')(lambda ctx:{'a':1}); sep=chr(13)+chr(10); raw='GET /j HTTP/1.1'+sep+'Accept: application/json'+sep+sep; resp=app.handle(raw); assert 'application/json' in resp and chr(123) in resp; print('json-response-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); log=[]; from httpfw.middleware.logger import RequestLogger; app.use(RequestLogger(log)); app.route('GET','/')(lambda ctx:'hi'); sep=chr(13)+chr(10); raw='GET / HTTP/1.1'+sep+'Host: localhost'+sep+sep; app.handle(raw); assert len(log)==1 and log[0]['status']==200; print('logger-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); from httpfw.middleware.auth import BasicAuth; app.use(BasicAuth({'user':'pass'})); app.route('GET','/s')(lambda ctx:'secret'); sep=chr(13)+chr(10); import base64; creds=base64.b64encode(b'user:pass').decode(); raw='GET /s HTTP/1.1'+sep+'Authorization: Basic '+creds+sep+sep; resp=app.handle(raw); assert '200' in resp; raw2='GET /s HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp2=app.handle(raw2); assert '401' in resp2; print('auth-ok')\""
+    - "python3 -c \"import tempfile,os; from httpfw.app import App; tmp=tempfile.mkdtemp(); open(os.path.join(tmp,'hi.txt'),'w').write('hello file'); app=App(); app.serve_static('/f',tmp); sep=chr(13)+chr(10); raw='GET /f/hi.txt HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp=app.handle(raw); assert '200' in resp and 'hello file' in resp; print('static-ok')\""
+    - "python3 -c \"from httpfw.app import App; app=App(); app.route('GET','/boom')(lambda ctx: 1/0); sep=chr(13)+chr(10); raw='GET /boom HTTP/1.1'+sep+'Host: localhost'+sep+sep; resp=app.handle(raw); assert '500' in resp; print('error-wrap-ok')\""
+    - "python3 -c \"from httpfw.utils.query import parse_qs; r=parse_qs('a=1&b=hello+world&c='); assert r['a']=='1' and 'world' in r['b'] and r['c']==''; print('query-parse-ok')\""
+  criteria:
+    - "All ~22 files exist as a proper package. App.handle() does not bypass the router or middleware chain."
+    - "Route parameters (:param) are extracted and available as ctx.params — not parsed inline in handle()."
+    - "Middleware runs in registration order before the handler and in reverse order on the way back (standard onion model)."
+    - "serve_static() returns 404 for missing files and sets the correct Content-Type header based on file extension."
+    - "wrap_errors() (applied by default or opt-in) catches all handler exceptions and returns 500 — the server does not crash."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

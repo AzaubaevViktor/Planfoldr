@@ -1,0 +1,154 @@
+# Hardening ladder #14: Tinyscript compiler — ~80 files, full language pipeline.
+# This is a STRETCH GOAL designed to stress the harness at scale, not to complete
+# in a single run. Expected behaviour: the harness decomposes into 60-100 tickets,
+# works through the core pipeline (lex/parse/codegen), exhausts the budget, and
+# produces a meaningful partial result. The run analysis is the primary artifact:
+# it must clearly show which subsystems were completed, which were skipped, and
+# what the no-progress or budget-exceeded signal looked like.
+#
+# Verification commands are TIERED. Tier 1 (basic pipeline) is expected to pass.
+# Tier 2 (stdlib + analysis) is a stretch. Tier 3 (full integration) is aspirational.
+name: tinyscript_local_l15
+goal: >
+  Build a compiler and interpreter for "Tinyscript", a small procedural language that
+  transpiles to Python. Implement it as the package tinyscript/ (stdlib only).
+
+  LANGUAGE SPEC:
+    Variables:   var x = expr
+    Arithmetic:  + - * / % ** (with standard precedence; unary -)
+    Comparisons: == != < > <= >=
+    Logical:     and or not
+    Strings:     "double-quoted"; concatenation with +
+    Lists:       [a, b, c]; indexing with list[i]; len(list)
+    Booleans:    true false
+    Null:        null
+    If/else:     if expr { stmts } else { stmts }   (else optional)
+    While:       while expr { stmts }
+    For:         for var in expr { stmts }
+    Functions:   fn name(p1, p2) { stmts }
+    Return:      return expr
+    Print:       print(expr)
+    Built-ins:   print len range int float str bool abs min max sorted type input
+
+  REQUIRED FILE STRUCTURE (~80 files — implement subsystems in this order):
+
+  TIER 1 — Core pipeline (implement first; interpreter.run() depends on all of these):
+
+    tinyscript/__init__.py
+    tinyscript/errors.py            TsError base; LexError, ParseError, NameError, TypeError
+    tinyscript/compiler.py          compile(src: str) -> str  (Python source string)
+    tinyscript/interpreter.py       run(src: str) -> None  (compile + exec; prints go to stdout)
+
+    tinyscript/lexer/__init__.py
+    tinyscript/lexer/token_type.py  TokenType enum: INT_LIT FLOAT_LIT STR_LIT BOOL_LIT
+                                    NULL_LIT IDENT PLUS MINUS STAR SLASH PERCENT STARSTAR
+                                    EQ EQEQ NEQ LT GT LEQ GEQ AND OR NOT LPAREN RPAREN
+                                    LBRACE RBRACE LBRACKET RBRACKET COMMA DOT ARROW
+                                    KW_VAR KW_FN KW_IF KW_ELSE KW_WHILE KW_FOR KW_IN
+                                    KW_RETURN KW_PRINT KW_TRUE KW_FALSE KW_NULL EOF
+    tinyscript/lexer/token.py       Token(type: TokenType, value, line: int, col: int)
+    tinyscript/lexer/keywords.py    dict mapping keyword strings -> TokenType
+    tinyscript/lexer/lexer.py       Lexer(src: str); tokenize() -> list[Token]
+    tinyscript/lexer/error.py       LexError with line/col
+
+    tinyscript/ast/__init__.py
+    tinyscript/ast/node.py          ASTNode base class; NodeVisitor with generic_visit
+    tinyscript/ast/literals.py      IntLit, FloatLit, BoolLit, StrLit, NullLit, ListLit
+    tinyscript/ast/exprs.py         Name, BinOp(op, left, right), UnaryOp(op, operand),
+                                    Call(callee, args), Index(obj, idx)
+    tinyscript/ast/stmts.py         Block(stmts), VarDecl(name, value), Assign(target, value),
+                                    IfStmt(cond, then, else_), WhileStmt(cond, body),
+                                    ForStmt(var, iterable, body), ReturnStmt(value),
+                                    ExprStmt(expr), PrintStmt(value)
+    tinyscript/ast/decls.py         FnDecl(name, params: list[str], body: Block)
+    tinyscript/ast/printer.py       ASTPrinter(NodeVisitor): pprint(node) -> str (for debugging)
+
+    tinyscript/parser/__init__.py
+    tinyscript/parser/prec.py       Precedence enum (NONE < ASSIGN < OR < AND < EQ < CMP < TERM < FACTOR < UNARY < CALL)
+    tinyscript/parser/expr_parser.py Pratt parser: parse_expr(min_prec) -> ASTNode
+    tinyscript/parser/stmt_parser.py parse_stmt() -> ASTNode
+    tinyscript/parser/decl_parser.py parse_fn_decl() -> FnDecl
+    tinyscript/parser/parser.py     Parser(tokens): parse() -> list[ASTNode]
+    tinyscript/parser/error.py      ParseError with token context
+
+    tinyscript/codegen/__init__.py
+    tinyscript/codegen/indent.py    IndentWriter: write(s), indent(), dedent(), getvalue() -> str
+    tinyscript/codegen/preamble.py  emit_preamble(w: IndentWriter) -> None  (runtime helpers)
+    tinyscript/codegen/expr_gen.py  ExprGen(NodeVisitor): gen(node) -> str (Python expression)
+    tinyscript/codegen/stmt_gen.py  StmtGen(NodeVisitor): gen(node, w: IndentWriter)
+    tinyscript/codegen/decl_gen.py  DeclGen(NodeVisitor): gen(node, w: IndentWriter)
+    tinyscript/codegen/generator.py CodeGenerator: generate(ast: list[ASTNode]) -> str
+
+  TIER 2 — Name resolution and stdlib (implement after Tier 1 passes):
+
+    tinyscript/analysis/__init__.py
+    tinyscript/analysis/symbol.py   Symbol(name, kind: 'var'|'fn'|'builtin', type)
+    tinyscript/analysis/scope.py    Scope(parent): define(name, sym), lookup(name) -> Symbol | None
+    tinyscript/analysis/resolver.py NameResolver(NodeVisitor): first pass, catches undefined names
+    tinyscript/analysis/types.py    TsType hierarchy: TsInt TsFloat TsBool TsStr TsList TsFn TsAny
+    tinyscript/analysis/checker.py  TypeChecker(NodeVisitor): infer + check; raises TypeError
+    tinyscript/analysis/error.py    AnalysisError
+
+    tinyscript/stdlib/__init__.py
+    tinyscript/stdlib/registry.py   MODULE_REGISTRY: module name -> dict of fn_name -> Python callable
+    tinyscript/stdlib/builtins.py   print len range int float str bool abs min max sorted type input
+    tinyscript/stdlib/math_mod.py   floor ceil sqrt pow log sin cos
+    tinyscript/stdlib/string_mod.py upper lower split join strip replace startswith endswith
+    tinyscript/stdlib/list_mod.py   append pop insert remove index count sort reverse
+    tinyscript/stdlib/io_mod.py     read_file write_file path_exists list_dir
+
+  TIER 3 — CLI, runtime, tests (implement last; aspirational):
+
+    tinyscript/runtime/__init__.py
+    tinyscript/runtime/error.py     TsRuntimeError(message, line)
+
+    tinyscript/cli/__init__.py
+    tinyscript/cli/args.py          argparse: tinyscript <file> [--check] [--emit-python] [--run]
+    tinyscript/cli/main.py          entry point
+    tinyscript/cli/formatter.py     format errors with source context (line highlight)
+
+    tinyscript/tests/__init__.py
+    tinyscript/tests/test_lexer.py
+    tinyscript/tests/test_parser.py
+    tinyscript/tests/test_codegen.py
+    tinyscript/tests/test_resolver.py
+    tinyscript/tests/test_integration.py
+    tinyscript/tests/fixtures/__init__.py
+    tinyscript/tests/fixtures/hello.ts       print("hello world")
+    tinyscript/tests/fixtures/fibonacci.ts   fib function + print(fib(10))
+    tinyscript/tests/fixtures/factorial.ts   iterative factorial
+    tinyscript/tests/fixtures/fizzbuzz.ts    classic fizzbuzz 1..20
+    tinyscript/tests/fixtures/calculator.ts  fn-based calculator with if/else
+
+  PRIORITISATION: implement Tier 1 completely before starting Tier 2. Do not write stub
+  files. Every file that exists must be correct and importable. The interpreter.run()
+  function is the single integration point the verification commands use.
+budget:
+  tokens: 2000000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    # Tier 1 — core pipeline (must pass)
+    - "python3 -c \"from tinyscript.interpreter import run; print('import-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('print(1+2)'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='3'; print('arith-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('var x=10\nvar y=3\nprint(x-y)'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='7'; print('var-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('if 1 > 0 { print(\\\"yes\\\") } else { print(\\\"no\\\") }'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='yes'; print('if-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('var i=0\nvar s=0\nwhile i < 5 { i = i+1\ns = s+i }\nprint(s)'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='15'; print('while-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('fn add(a,b) { return a+b }\nprint(add(3,4))'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='7'; print('fn-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('fn fib(n) { if n <= 1 { return n }\nreturn fib(n-1)+fib(n-2) }\nprint(fib(10))'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='55'; print('recursion-ok')\""
+    # Tier 2 — stdlib and analysis (stretch)
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('var xs=[3,1,2]\nprint(len(xs))'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='3'; print('list-len-ok')\""
+    - "python3 -c \"import io,sys; from tinyscript.interpreter import run; b=io.StringIO(); sys.stdout=b; run('var s=0\nfor i in range(1,6) { s=s+i }\nprint(s)'); sys.stdout=sys.__stdout__; assert b.getvalue().strip()=='15'; print('for-range-ok')\""
+    - "python3 -c \"from tinyscript.compiler import compile; src='print(1)'; py=compile(src); assert 'print' in py; print('compiler-ok')\""
+  criteria:
+    - "Tier 1 commands (arith, var, if, while, fn, recursion) must all pass. These are the minimum viable compiler."
+    - "interpreter.run() compiles to a Python string and exec()s it — it does not walk the AST directly. The compile() function is the integration point."
+    - "fib(10)==55 is the canonical recursive test. Passing it means: correct scoping, correct recursion, correct arithmetic, correct if/return semantics."
+    - "Do not write stub files that import-ok but do nothing. Every file in tinyscript/ must contain real implementation."
+    - "If budget runs out before Tier 3, that is expected. The run analysis must clearly list which tiers were completed and which tickets failed."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

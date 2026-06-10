@@ -1,0 +1,56 @@
+# Hardening ladder #10: event store with projections — four files, file-backed persistence.
+# Harder than the expression evaluator (#9) because the DAG has persistence: the
+# projector MUST rebuild state from events loaded off disk, and the snapshot/recovery
+# path is the deepest false-verification trap on this rung. A model that "verifies"
+# correctness by only testing in-memory state will fail the crash-recovery command.
+name: event_store_local_l11
+goal: >
+  Build an event-sourcing store, split across FOUR files (stdlib only):
+
+    1. event.py — Event data type.
+       make_event(type: str, payload: dict) -> dict
+         Returns {"id": <unique int>, "type": type, "payload": payload, "ts": <unix timestamp>}.
+       IDs must be globally monotonically increasing across multiple make_event() calls.
+
+    2. store.py — append-only JSONL event store.
+       EventStore(path: str): file-backed store.
+         append(event: dict) -> None   write event as a JSON line to the file.
+         load_all() -> list[dict]      read all events from the file, in order.
+       A fresh EventStore on an existing file must load previously persisted events.
+
+    3. projector.py — rebuild state by replaying events.
+       project(events: list[dict], handlers: dict) -> dict
+         handlers maps event type string → callable(state: dict, event: dict) -> dict.
+         Starts with state={} and folds each event through its handler.
+         Events whose type has no handler are skipped (not an error).
+
+    4. snapshot.py — checkpoint and restore state.
+       save(state: dict, path: str) -> None   write state as JSON to path.
+       load(path: str) -> dict | None         read state from path; return None if file missing.
+
+  Wire it: in store.py (or a thin es.py) provide a helper
+    replay_from_snapshot(store_path: str, snapshot_path: str, handlers: dict) -> dict
+  that loads the snapshot (if any), then loads all events from the store, skips events
+  with id <= snapshot["_last_id"] if a snapshot exists, and projects the remainder.
+budget:
+  tokens: 260000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import event, store, projector, snapshot; print('modules-ok')\""
+    - "python3 -c \"import event; e1=event.make_event('x',{}); e2=event.make_event('x',{}); assert e2['id']>e1['id']; print('id-monotone-ok')\""
+    - "python3 -c \"import event,store,os; os.path.exists('ev.jsonl') and os.remove('ev.jsonl'); s=store.EventStore('ev.jsonl'); e=event.make_event('inc',{'n':1}); s.append(e); loaded=s.load_all(); assert len(loaded)==1 and loaded[0]['type']=='inc'; print('persist-ok')\""
+    - "python3 -c \"import event,store,os; os.path.exists('ev2.jsonl') and os.remove('ev2.jsonl'); s=store.EventStore('ev2.jsonl'); [s.append(event.make_event('inc',{'n':i})) for i in range(3)]; s2=store.EventStore('ev2.jsonl'); assert len(s2.load_all())==3; print('reload-ok')\""
+    - "python3 -c \"import event,projector; evts=[event.make_event('inc',{'n':2}),event.make_event('inc',{'n':3}),event.make_event('reset',{})]; h={'inc':lambda s,e:dict(s,total=s.get('total',0)+e['payload']['n']),'reset':lambda s,e:{}}; state=projector.project(evts,h); assert state['total']==5; print('project-ok')\""
+    - "python3 -c \"import snapshot,os; os.path.exists('snap.json') and os.remove('snap.json'); assert snapshot.load('snap.json') is None; snapshot.save({'x':42},'snap.json'); s=snapshot.load('snap.json'); assert s['x']==42; print('snapshot-ok')\""
+    - "python3 -c \"import event,store,snapshot,os; [os.path.exists(p) and os.remove(p) for p in ['es3.jsonl','snap3.json']]; st=store.EventStore('es3.jsonl'); evts=[event.make_event('add',{'v':i}) for i in [1,2,3]]; [st.append(e) for e in evts]; snap_state={'total':6,'_last_id':evts[-1]['id']}; snapshot.save(snap_state,'snap3.json'); new_e=event.make_event('add',{'v':4}); st.append(new_e); import store as stmod; state=stmod.replay_from_snapshot('es3.jsonl','snap3.json',{'add':lambda s,e:dict(s,total=s.get('total',0)+e['payload']['v'])}); assert state['total']==10; print('replay-snapshot-ok')\""
+  criteria:
+    - "EventStore loads previously persisted events when re-opened on an existing file — it does not start fresh."
+    - "replay_from_snapshot correctly skips events already captured in the snapshot (by id) and only folds newer events."
+    - "projector.project skips events with no handler silently — it does not raise KeyError."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

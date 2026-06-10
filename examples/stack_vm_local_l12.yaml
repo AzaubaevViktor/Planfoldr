@@ -1,0 +1,80 @@
+# Hardening ladder #11: stack-based VM — five files, full compiler pipeline.
+# The deepest rung on the current ladder. Five mandatory files form a strict
+# dependency chain: opcodes → asm_lexer → asm_compiler → vm → asm (entry point).
+# The loop/jump program is the primary false-verification trap: a model that only
+# verifies arithmetic but not control flow will claim done and fail.
+name: stack_vm_local_l12
+goal: >
+  Build a stack-based virtual machine with an assembler, split across FIVE files
+  (stdlib only). The split is mandatory and the dependency order is strict:
+
+    1. opcodes.py — instruction set definition.
+       Opcode enum (or module-level constants) with at least:
+         PUSH, ADD, SUB, MUL, DIV, DUP, POP, SWAP,
+         STORE, LOAD, LABEL, JMP, JZ, HALT
+       Instruction = namedtuple or dataclass with fields: op, arg (arg=None for no-arg ops).
+
+    2. asm_lexer.py — tokenize assembly source.
+       tokenize(src: str) -> list[tuple[str, str|None]]
+         Each token is (token_type, value) where token_type is one of:
+           'OPCODE', 'INT', 'NAME'
+         Lines starting with ; are comments and are ignored.
+         Blank lines are ignored.
+
+    3. asm_compiler.py — assemble tokens into instructions.
+       compile(tokens) -> list[Instruction]
+         Resolves LABEL pseudo-instructions: LABEL <name> sets a target; JMP/JZ <name>
+         produce a jump to the resolved instruction index. LABEL itself is NOT emitted
+         as an instruction in the final list.
+
+    4. vm.py — execute instruction list.
+       VM class:
+         __init__(): empty stack, empty memory dict
+         run(instructions: list[Instruction]) -> int|float
+           Execute until HALT; return the top-of-stack value at HALT.
+       Instruction semantics:
+         PUSH n     — push integer or float n
+         ADD        — pop a, pop b, push b+a
+         SUB        — pop a, pop b, push b-a
+         MUL        — pop a, pop b, push b*a
+         DIV        — pop a, pop b, push b/a  (true division, raises ZeroDivisionError)
+         DUP        — push a copy of the top
+         POP        — discard top
+         SWAP       — swap top two elements
+         STORE name — pop top, store in memory[name]
+         LOAD name  — push memory[name]
+         JMP name   — jump to label
+         JZ name    — pop top; jump to label if it equals 0
+         HALT       — stop and return top of stack
+
+    5. asm.py — the entry point that wires the pipeline.
+       run(src: str) -> int|float
+         Calls tokenize → compile → VM().run() in sequence.
+         Must import and call the other four modules, not re-implement them.
+budget:
+  tokens: 320000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import opcodes, asm_lexer, asm_compiler, vm, asm; print('modules-ok')\""
+    - "python3 -c \"import asm; assert asm.run('PUSH 2\\nPUSH 3\\nADD\\nHALT')==5; print('add-ok')\""
+    - "python3 -c \"import asm; assert asm.run('PUSH 10\\nPUSH 3\\nSUB\\nHALT')==7; print('sub-ok')\""
+    - "python3 -c \"import asm; assert asm.run('PUSH 6\\nPUSH 2\\nDIV\\nHALT')==3.0; print('div-ok')\""
+    - "python3 -c \"import asm; assert asm.run('PUSH 3\\nDUP\\nMUL\\nHALT')==9; print('dup-mul-ok')\""
+    - "python3 -c \"import asm; assert asm.run('PUSH 4\\nPUSH 7\\nSWAP\\nSUB\\nHALT')==3; print('swap-ok')\""
+    - "python3 -c \"import asm; assert asm.run('PUSH 42\\nSTORE x\\nPUSH 0\\nLOAD x\\nADD\\nHALT')==42; print('store-load-ok')\""
+    - "python3 -c \"import asm; src='PUSH 1\\nJZ skip\\nPUSH 99\\nLABEL skip\\nPUSH 0\\nADD\\nHALT'; assert asm.run(src)==99; print('jz-nojump-ok')\""
+    - "python3 -c \"import asm; src='PUSH 0\\nJZ skip\\nPUSH 99\\nLABEL skip\\nPUSH 1\\nHALT'; assert asm.run(src)==1; print('jz-jump-ok')\""
+    - "python3 -c \"import asm; src='PUSH 5\\nSTORE n\\nPUSH 0\\nSTORE acc\\nLABEL loop\\nLOAD n\\nJZ done\\nLOAD acc\\nLOAD n\\nADD\\nSTORE acc\\nLOAD n\\nPUSH 1\\nSUB\\nSTORE n\\nJMP loop\\nLABEL done\\nLOAD acc\\nHALT'; assert asm.run(src)==15; print('sum-loop-ok')\""
+    - "python3 -c \"import inspect,asm; s=inspect.getsource(asm); assert all(k in s for k in ('asm_lexer','asm_compiler','vm')); print('wired-ok')\""
+  criteria:
+    - "All five files exist and are genuinely separate. asm.py wires the other four — it does not re-implement lexing, compilation, or execution."
+    - "JZ pops the top value before deciding whether to jump — it does not peek."
+    - "LABEL is a pseudo-instruction resolved at compile time to an index; it is NOT emitted as a VM instruction and does not appear in the instruction list passed to vm.run()."
+    - "sum-loop-ok: the loop program (sum 1..5 == 15) is the canonical control-flow test. If it fails, the jump/label/store/load semantics are wrong."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

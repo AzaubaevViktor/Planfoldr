@@ -1,0 +1,42 @@
+# Hardening ladder #6: RFC 4180 CSV encode/decode — one file, lots of edge cases.
+# Harder than #5 because the spec has many quoting corner-cases that are easy to
+# false-verify: a model that only tests the happy path will pass its own checks but
+# fail the real verification commands here (quote doubling, embedded newlines, empty
+# fields). Classic false-verification trap.
+name: csv_roundtrip_local_l07
+goal: >
+  Create csvlib.py in the workspace (stdlib only) with two functions:
+    encode(rows: list[list[str]]) -> str
+      Serialize rows as RFC 4180 CSV. Rules:
+        - Rows are separated by CRLF (\r\n). The last row has NO trailing \r\n.
+        - A field containing a comma, double-quote, or newline is enclosed in double-quotes.
+        - A double-quote inside a quoted field is escaped by doubling it ("" not \").
+        - Fields with no special characters are written bare (no wrapping quotes).
+    decode(src: str) -> list[list[str]]
+      Parse RFC 4180 CSV back to rows. Must be the exact inverse of encode:
+        decode(encode(rows)) == rows for any input.
+      Accept both \r\n and \n as row separators.
+budget:
+  tokens: 120000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import csvlib; r=[['a','b'],['c','d']]; assert csvlib.decode(csvlib.encode(r))==r; print('basic-ok')\""
+    - "python3 -c \"import csvlib; r=[['one']]; assert csvlib.decode(csvlib.encode(r))==r; print('single-ok')\""
+    - "python3 -c \"import csvlib; r=[['','x','']]; assert csvlib.decode(csvlib.encode(r))==r; print('empty-field-ok')\""
+    - "python3 -c \"import csvlib; r=[['a,b','c']]; assert csvlib.decode(csvlib.encode(r))==r; print('comma-ok')\""
+    - "python3 -c \"import csvlib; q=chr(34); r=[['a'+q+'b']]; assert csvlib.decode(csvlib.encode(r))==r; print('quote-ok')\""
+    - "python3 -c \"import csvlib; r=[['line1'+chr(10)+'line2','ok']]; assert csvlib.decode(csvlib.encode(r))==r; print('newline-in-field-ok')\""
+    - "python3 -c \"import csvlib; q=chr(34); enc=csvlib.encode([[q]]); assert enc==q+q+q+q; print('double-quote-escape-ok')\""
+    - "python3 -c \"import csvlib; r=[['a'],['b']]; enc=csvlib.encode(r); assert enc.endswith('b') and chr(13)+chr(10) in enc; print('crlf-sep-ok')\""
+    - "python3 -c \"import csvlib; r=[['a,b',chr(34),'line1'+chr(10)+'line2','']]; assert csvlib.decode(csvlib.encode(r))==r; print('all-cases-ok')\""
+  criteria:
+    - "Double-quotes in field values are escaped by doubling (\"\") not by backslash."
+    - "Fields with no special characters are written bare — no spurious wrapping quotes."
+    - "The last row has no trailing \\r\\n."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

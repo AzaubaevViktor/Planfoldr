@@ -1,0 +1,247 @@
+# Hardening ladder #15: build THIS HARNESS — ~100 files, the real stress test.
+#
+# The scenario asks a model to implement a dynamic orchestration runtime from scratch.
+# The runtime is conceptually identical to the one running it — Planfoldr itself.
+# This is the ultimate meta-test: the harness decomposes the task of building a harness
+# into tickets, manages their dependencies, and verifies the output with pytest.
+#
+# Expected failure modes (all valuable signal for the run analysis):
+#   - Circular imports between subsystems (ticket <-> queue <-> orchestrator)
+#   - Stub files that import-ok but have no real implementation
+#   - Tests that mock too aggressively and pass without real integration
+#   - Budget exhaustion mid-way through (soft stop must be graceful)
+#   - No-progress loops on the hardest subsystems (cycle, orchestrator)
+#
+# Target: Tier 1 (core data layer + ticket lifecycle) must pass.
+#         Tier 2 (execution engine stub) is a stretch.
+#         Tier 3 (full e2e + visibility) is aspirational.
+name: planfoldr_v2_local_l16
+goal: >
+  Build "pfv2" — a minimal orchestration runtime — as a Python package pfv2/ (stdlib only,
+  no external dependencies). The system takes a plain-text Scenario (goal + budget + accesses
+  + verification), decomposes it into Tickets, executes them against a language model, and
+  produces an audit log and run analysis.
+
+  REQUIRED FILE STRUCTURE — implement in the order shown (each tier depends on the previous):
+
+  ─── TIER 1: Foundation (no external dependencies, must be complete before anything else) ───
+
+  pfv2/__init__.py               re-exports: Scenario, run_scenario
+  pfv2/version.py                VERSION = "2.0.0"
+  pfv2/errors.py                 PfError base; BudgetExceeded, TicketFailed, ConfigError,
+                                 ToolDenied, VerificationFailed — each with a message field
+
+  pfv2/audit/
+    __init__.py                  re-exports Audit, AuditEvent
+    event.py                     AuditEvent(ts: float, type: str, payload: dict);
+                                 make_event(type, **payload) -> AuditEvent
+    audit.py                     Audit(path: str): emit(event: AuditEvent),
+                                 load_all() -> list[AuditEvent],
+                                 replay(since_ts: float) -> list[AuditEvent];
+                                 append-only JSONL file; thread-safe with a lock
+
+  pfv2/budget/
+    __init__.py                  re-exports Budget
+    budget.py                    Budget(tokens: int, audit: Audit):
+                                 consume_tokens(n: int) -> None  (raises BudgetExceeded if over),
+                                 remaining() -> int,
+                                 used() -> int,
+                                 is_exhausted() -> bool,
+                                 summary() -> dict
+    limits.py                    BudgetLimits dataclass (tokens, commands, file_changes: int|None)
+
+  pfv2/ticket/
+    __init__.py                  re-exports Ticket, TicketStatus
+    status.py                    TicketStatus enum: INCOMING BLOCKED READY RUNNING
+                                                     DONE FAILED NEEDS_REVIEW
+    ticket.py                    Ticket dataclass:
+                                 id: str, title: str, goal: str, role: str,
+                                 status: TicketStatus, checks: list[str], criteria: list[str],
+                                 evidence: list[str], dependencies: list[str],
+                                 spawned_by: str | None, budget_tokens: int,
+                                 created_at: float, updated_at: float,
+                                 metadata: dict
+                                 Methods: transition_to(new_status, actor, reason, audit),
+                                          add_evidence(text, audit),
+                                          to_dict() -> dict,
+                                          from_dict(d: dict) -> Ticket
+
+  pfv2/graph/
+    __init__.py                  re-exports TicketGraph
+    graph.py                     TicketGraph:
+                                 add_ticket(ticket: Ticket),
+                                 add_edge(from_id, to_id, rel: str),  # rel: blocked_by | spawned_by | related_to
+                                 is_ready(ticket_id: str, tickets: dict) -> bool,
+                                   # True when all blocked_by edges point to DONE tickets
+                                 get_edges(ticket_id: str) -> list[dict],
+                                 to_dict() -> dict
+
+  pfv2/queue/
+    __init__.py                  re-exports Queue
+    queue.py                     Queue(name: str, role: str, graph: TicketGraph, audit: Audit):
+                                 enqueue(ticket: Ticket, priority: int = 0),
+                                 get_next() -> Ticket | None,  # highest-priority READY ticket
+                                 decline(ticket_id, reason: str),
+                                 all_done() -> bool,
+                                 snapshot() -> dict
+
+  pfv2/knowledge_base/
+    __init__.py                  re-exports KnowledgeBase
+    kb.py                        KnowledgeBase: write(section: str, content: str, author: str),
+                                 read(section: str) -> str | None,
+                                 history(section: str) -> list[dict],
+                                 sections() -> list[str]
+
+  pfv2/toolset/
+    __init__.py                  re-exports Toolset, Tool
+    tool.py                      Tool(name: str, description: str, fn: callable, scope: str)
+    toolset.py                   Toolset: register(tool: Tool), get(name: str) -> Tool | None,
+                                 allowed(names: list[str]) -> Toolset,  # subset view
+                                 to_schema() -> list[dict]  # OpenAI-style tool schema
+
+  ─── TIER 2: Execution Engine ───
+
+  pfv2/model/
+    __init__.py                  re-exports ModelClient, ModelResponse
+    base.py                      ModelClient ABC: chat(messages, tools, budget) -> ModelResponse
+    response.py                  ModelResponse(text: str, tool_calls: list[dict],
+                                 tokens_used: int, finish_reason: str)
+    ollama.py                    OllamaClient(model_name: str, host: str = "http://localhost:11434"):
+                                 implements ModelClient via /api/chat;
+                                 streams response; counts tokens from response metadata
+    selector.py                  select_model(available: list[ModelClient], scores: dict) -> ModelClient
+
+  pfv2/score/
+    __init__.py                  re-exports ScoreSystem
+    score.py                     ScoreSystem: update(model_id, role, delta: float, reason: str),
+                                 get(model_id, role: str | None = None) -> float,
+                                 best_model(available: list[str], role: str) -> str,
+                                 to_dict() -> dict
+
+  pfv2/cycle/
+    __init__.py                  re-exports Cycle
+    phases.py                    CyclePhase enum: CONTEXT_EXPLORATION CHANGES
+                                                   CMD_VERIFICATION MODEL_VERIFICATION
+    cycle.py                     Cycle(ticket, role_prompt, toolset, model, budget, kb, audit):
+                                 run() -> CycleResult; executes four phases in order;
+                                 emits audit events for each phase transition;
+                                 CycleResult(status: TicketStatus, evidence: list[str],
+                                             spawned_ticket_specs: list[dict],
+                                             tokens_used: int)
+
+  pfv2/tools_impl/
+    __init__.py
+    shell.py                     run_command(cmd: str, cwd: str, timeout: int = 30) -> dict
+                                 with {stdout, stderr, exit_code}; never raises on timeout
+    file_tools.py                read_file(path: str) -> str, write_file(path, content),
+                                 list_dir(path) -> list[str], file_exists(path) -> bool
+    ticket_tools.py              create_ticket_tool(queue, graph, audit) -> Tool,
+                                 update_ticket_tool(tickets, audit) -> Tool
+    context_tools.py             read_context_tool(kb) -> Tool,
+                                 write_context_tool(kb, audit) -> Tool
+
+  pfv2/orchestrator/
+    __init__.py                  re-exports Orchestrator
+    orchestrator.py              Orchestrator(scenario, audit, budget, kb, graph, queues, model):
+                                 run() -> OrchestratorResult;
+                                 - creates root ticket from scenario
+                                 - drives queue.get_next() + Cycle.run() loop
+                                 - handles BudgetExceeded with soft stop (finish current cycle)
+                                 - detects no-progress (N cycles with no new tickets/files)
+                                 - runs scenario-level verification commands at end
+                                 OrchestratorResult(success: bool, tickets: dict,
+                                                    budget_summary: dict, audit_path: str)
+    no_progress.py               NoProgressDetector(window: int = 5):
+                                 record(new_tickets: int, new_files: int),
+                                 is_stuck() -> bool
+
+  pfv2/scenario/
+    __init__.py                  re-exports Scenario, load_scenario
+    scenario.py                  Scenario dataclass: name, goal, budget_tokens,
+                                 accesses: list[dict], verification_commands: list[str],
+                                 verification_criteria: list[str], model_config: dict
+    loader.py                    load_scenario(path: str) -> Scenario  (reads YAML)
+
+  pfv2/visibility/
+    __init__.py
+    events.py                    VisibilityEvent(ts, type, data); event types mirror audit
+    terminal.py                  TerminalRenderer: subscribe(audit), render_event(event) -> None;
+                                 prints human-readable one-liners to stdout
+    web.py                       WebRenderer(port: int = 8765): serves static HTML + WebSocket;
+                                 pushes audit events as JSON over WS
+    analysis.py                  generate_analysis(result: OrchestratorResult, audit) -> str;
+                                 returns a Markdown analysis report
+
+  pfv2/cli/
+    __init__.py
+    run_cmd.py                   "pfv2 run <scenario.yaml>" subcommand
+    status_cmd.py                "pfv2 status <run_dir>" subcommand (reads audit.jsonl)
+    analyze_cmd.py               "pfv2 analyze <run_dir>" subcommand (prints analysis.md)
+    main.py                      argparse entry point; registers subcommands
+
+  pfv2/run_scenario.py           run_scenario(path: str, workspace: str, web: bool = False) -> int
+                                 top-level entry point wiring all subsystems together
+
+  ─── TIER 3: Tests ───
+
+  pfv2/tests/__init__.py
+  pfv2/tests/conftest.py         shared fixtures: tmp_audit, tmp_budget, make_ticket
+  pfv2/tests/test_audit.py       emit/load/replay; concurrent writes; file persistence
+  pfv2/tests/test_budget.py      consume, BudgetExceeded, remaining, summary
+  pfv2/tests/test_ticket.py      all status transitions; invalid transitions raise; to/from dict
+  pfv2/tests/test_graph.py       is_ready with dependencies; edge types; blocked by non-done
+  pfv2/tests/test_queue.py       enqueue, get_next by priority, all_done, decline
+  pfv2/tests/test_kb.py          write/read/history/sections; section isolation
+  pfv2/tests/test_toolset.py     register, get, allowed() scoping, to_schema()
+  pfv2/tests/test_cycle.py       cycle runs four phases; emits audit events; returns CycleResult
+                                 (stub model that returns fixed responses)
+  pfv2/tests/test_orchestrator.py no-progress detection; budget soft stop; scenario verification
+  pfv2/tests/test_scenario.py    load YAML; missing fields raise ConfigError
+  pfv2/tests/test_score.py       update/get/best_model
+  pfv2/tests/test_shell.py       run_command: success, timeout, bad command, missing binary
+  pfv2/tests/test_visibility.py  terminal renderer output; analysis.md generation
+  pfv2/tests/test_e2e.py         stub model + real YAML scenario; full Orchestrator.run();
+                                 asserts audit.jsonl written, at least one ticket DONE
+
+  STRICT CONSTRAINTS:
+    - No external pip packages. stdlib only (json, pathlib, threading, subprocess, argparse,
+      dataclasses, enum, typing, time, copy, re, base64, hashlib, http.server, urllib).
+    - No circular imports. Dependency order: errors < audit < budget < ticket < graph <
+      queue < kb < toolset < model < score < cycle < tools_impl < orchestrator < scenario <
+      visibility < cli < run_scenario.
+    - Every non-__init__ file must contain real implementation, not stubs.
+    - Tests must use real objects (not Mock patches of core logic). Stub the MODEL only.
+budget:
+  tokens: 3000000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    # Tier 1 — data layer (must pass)
+    - "python3 -c \"import pfv2; print('import-ok')\""
+    - "python3 -c \"from pfv2.audit.audit import Audit; from pfv2.audit.event import make_event; import tempfile,os; f=tempfile.mktemp(suffix='.jsonl'); a=Audit(f); a.emit(make_event('test',x=1)); evts=a.load_all(); assert len(evts)==1 and evts[0].payload['x']==1; os.unlink(f); print('audit-ok')\""
+    - "python3 -c \"from pfv2.budget.budget import Budget; from pfv2.audit.audit import Audit; from pfv2.audit.event import make_event; from pfv2.errors import BudgetExceeded; import tempfile; a=Audit(tempfile.mktemp()); b=Budget(100,a); b.consume_tokens(60); assert b.remaining()==40; caught=False\ntry: b.consume_tokens(50)\nexcept BudgetExceeded: caught=True\nassert caught; print('budget-ok')\""
+    - "python3 -c \"from pfv2.ticket.ticket import Ticket; from pfv2.ticket.status import TicketStatus; from pfv2.audit.audit import Audit; from pfv2.audit.event import make_event; import tempfile,time; a=Audit(tempfile.mktemp()); t=Ticket(id='t1',title='x',goal='g',role='dev',status=TicketStatus.INCOMING,checks=[],criteria=[],evidence=[],dependencies=[],spawned_by=None,budget_tokens=1000,created_at=time.time(),updated_at=time.time(),metadata={}); t.transition_to(TicketStatus.READY,'test','ok',a); assert t.status==TicketStatus.READY; print('ticket-transition-ok')\""
+    - "python3 -c \"from pfv2.ticket.ticket import Ticket; from pfv2.ticket.status import TicketStatus; from pfv2.errors import PfError; from pfv2.audit.audit import Audit; import tempfile,time; a=Audit(tempfile.mktemp()); t=Ticket(id='t1',title='x',goal='g',role='dev',status=TicketStatus.INCOMING,checks=[],criteria=[],evidence=[],dependencies=[],spawned_by=None,budget_tokens=1000,created_at=time.time(),updated_at=time.time(),metadata={}); caught=False\ntry: t.transition_to(TicketStatus.DONE,'test','bad',a)\nexcept (PfError,ValueError): caught=True\nassert caught; print('invalid-transition-ok')\""
+    - "python3 -c \"from pfv2.graph.graph import TicketGraph; from pfv2.ticket.ticket import Ticket; from pfv2.ticket.status import TicketStatus; import time; def mk(tid,status): return Ticket(id=tid,title=tid,goal='g',role='r',status=status,checks=[],criteria=[],evidence=[],dependencies=[],spawned_by=None,budget_tokens=100,created_at=time.time(),updated_at=time.time(),metadata={})\ng=TicketGraph(); t1=mk('t1',TicketStatus.DONE); t2=mk('t2',TicketStatus.READY); g.add_ticket(t1); g.add_ticket(t2); g.add_edge('t2','t1','blocked_by'); tickets={'t1':t1,'t2':t2}; assert g.is_ready('t2',tickets)==True; t1.status=TicketStatus.RUNNING; assert g.is_ready('t2',tickets)==False; print('graph-ok')\""
+    - "python3 -c \"from pfv2.queue.queue import Queue; from pfv2.graph.graph import TicketGraph; from pfv2.audit.audit import Audit; from pfv2.ticket.ticket import Ticket; from pfv2.ticket.status import TicketStatus; import tempfile,time; a=Audit(tempfile.mktemp()); g=TicketGraph(); q=Queue('dev','developer',g,a); def mk(tid,pri): t=Ticket(id=tid,title=tid,goal='g',role='developer',status=TicketStatus.READY,checks=[],criteria=[],evidence=[],dependencies=[],spawned_by=None,budget_tokens=100,created_at=time.time(),updated_at=time.time(),metadata={}); g.add_ticket(t); q.enqueue(t,pri); return t\nmk('lo',0); mk('hi',10); nxt=q.get_next(); assert nxt.id=='hi'; print('queue-priority-ok')\""
+    - "python3 -c \"from pfv2.knowledge_base.kb import KnowledgeBase; kb=KnowledgeBase(); kb.write('arch','content here','agent1'); assert kb.read('arch')=='content here'; assert len(kb.history('arch'))==1; assert 'arch' in kb.sections(); print('kb-ok')\""
+    - "python3 -c \"from pfv2.tools_impl.shell import run_command; r=run_command('echo hello','.'); assert r['exit_code']==0 and 'hello' in r['stdout']; print('shell-ok')\""
+    - "python3 -c \"from pfv2.tools_impl.shell import run_command; r=run_command('sleep 10','.',timeout=1); assert r['exit_code']!=0 or 'timeout' in r.get('stderr','').lower(); print('timeout-ok')\""
+    # Tier 2 — pytest integration tests (stretch)
+    - "python3 -m pytest pfv2/tests/test_audit.py pfv2/tests/test_budget.py pfv2/tests/test_ticket.py pfv2/tests/test_graph.py pfv2/tests/test_queue.py -q 2>&1 | tail -5"
+    - "python3 -m pytest pfv2/tests/ -q --ignore=pfv2/tests/test_e2e.py 2>&1 | tail -5"
+    - "python3 -m pytest pfv2/tests/test_e2e.py -q 2>&1 | tail -5"
+  criteria:
+    - "No circular imports. 'python3 -c \"import pfv2\"' must succeed without ImportError from any module."
+    - "Budget soft stop: BudgetExceeded is raised by consume_tokens(), not by killing the process. Existing cycles complete; new ones do not start."
+    - "Ticket status transitions enforce the legal FSM: INCOMING -> READY/BLOCKED; READY -> RUNNING; RUNNING -> DONE/FAILED/NEEDS_REVIEW. Any other transition raises."
+    - "TicketGraph.is_ready() returns True only when ALL blocked_by dependencies have status DONE — not just RUNNING, not just any non-INCOMING status."
+    - "Queue.get_next() returns the highest-priority READY ticket, not just the next enqueued one. If no READY ticket exists, returns None."
+    - "run_command() never raises Python exceptions regardless of input: bad command, missing binary, malformed quotes, timeout — always returns a dict with exit_code."
+    - "Tests in pfv2/tests/ stub only the ModelClient (the LLM call) — all other objects are real. Mocking Ticket, Queue, Audit, or Budget in unit tests is a defect."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

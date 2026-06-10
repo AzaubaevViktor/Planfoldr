@@ -1,0 +1,67 @@
+# Hardening ladder #12: mini SQL engine — ~10 files, full pipeline.
+# First rung where a single domain naturally decomposes into a strict 5-stage pipeline
+# (lex → parse → plan → execute → result) plus schema and storage. The harness must
+# build a real 9-node blocked_by DAG. False-verification trap: WHERE with AND/OR and
+# ORDER BY with DESC are easy to claim done but fail the second-tier commands.
+name: sql_lite_local_l13
+goal: >
+  Build a minimal SQL query engine as a Python package sqlt/ (stdlib only) with exactly
+  these files:
+
+    sqlt/__init__.py      — re-exports DB
+    sqlt/tokens.py        — TokenType enum + Token(type, value, pos) namedtuple
+    sqlt/lexer.py         — tokenize(src: str) -> list[Token]; handles: SQL keywords
+                            (CREATE TABLE INSERT INTO SELECT FROM WHERE ORDER BY ASC DESC
+                            LIMIT AND OR NOT VALUES), identifiers, integer literals,
+                            real literals, single-quoted string literals, operators
+                            (= != < > <= >=), parentheses, commas, asterisk
+    sqlt/ast.py           — AST dataclasses: CreateTable(name, columns: list[ColumnDef]),
+                            ColumnDef(name, type_name), Insert(table, values: list),
+                            Select(table, cols, where, order_by, limit),
+                            BinOp(op, left, right), ColumnRef(name), Literal(value)
+    sqlt/parser.py        — parse(tokens) -> ASTNode; recursive-descent
+    sqlt/schema.py        — ColumnType(INT/TEXT/REAL) + coerce(val, col_type) -> typed value;
+                            raises TypeError on bad coercion
+    sqlt/storage.py       — Table(schema): insert(row: dict), scan() -> list[dict]
+    sqlt/executor.py      — execute(ast: ASTNode, catalog: dict) -> ResultSet;
+                            supports CREATE TABLE, INSERT INTO, and SELECT with WHERE
+                            (=, !=, <, >, <=, >=, AND, OR), ORDER BY col [ASC|DESC],
+                            LIMIT n, and SELECT * / SELECT col, col2
+    sqlt/result.py        — ResultSet(columns: list[str], rows: list[list]);
+                            __len__, __iter__ over rows
+    sqlt/db.py            — DB class: execute(sql: str) -> ResultSet; holds the catalog
+
+  SQL dialect rules:
+    - String literals are single-quoted: 'hello'
+    - Column types: INT, TEXT, REAL (case-insensitive)
+    - WHERE supports AND / OR with standard precedence (AND binds tighter than OR)
+    - ORDER BY allows multiple columns: ORDER BY a DESC, b ASC
+    - INSERT values are matched positionally to the column list
+    - SELECT * returns all columns in definition order
+    - ResultSet.rows contains Python-typed values (int for INT, float for REAL, str for TEXT)
+budget:
+  tokens: 450000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"from sqlt.db import DB; d=DB(); print('import-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE t (id INT, val REAL)'); d.execute('INSERT INTO t VALUES (1, 2.5)'); r=d.execute('SELECT * FROM t'); assert len(r)==1 and r.rows[0]==[1,2.5]; print('insert-select-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE p (x INT, y INT)'); [d.execute('INSERT INTO p VALUES ('+str(i)+', '+str(i*2)+')') for i in range(1,6)]; r=d.execute('SELECT * FROM p WHERE x > 3'); assert len(r)==2; print('where-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE s (n INT)'); [d.execute('INSERT INTO s VALUES ('+str(i)+')') for i in [5,1,3,2,4]]; r=d.execute('SELECT * FROM s ORDER BY n ASC'); assert [row[0] for row in r.rows]==[1,2,3,4,5]; print('order-asc-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE s2 (n INT)'); [d.execute('INSERT INTO s2 VALUES ('+str(i)+')') for i in [5,1,3,2,4]]; r=d.execute('SELECT * FROM s2 ORDER BY n DESC'); assert r.rows[0][0]==5 and r.rows[-1][0]==1; print('order-desc-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE lim (n INT)'); [d.execute('INSERT INTO lim VALUES ('+str(i)+')') for i in range(10)]; r=d.execute('SELECT * FROM lim LIMIT 3'); assert len(r)==3; print('limit-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE cols (a INT, b INT, c INT)'); d.execute('INSERT INTO cols VALUES (1, 2, 3)'); r=d.execute('SELECT a, c FROM cols'); assert r.columns==['a','c'] and r.rows[0]==[1,3]; print('col-select-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE cond (x INT, y INT)'); [d.execute('INSERT INTO cond VALUES ('+str(x)+', '+str(y)+')') for x,y in [(1,10),(2,20),(3,5),(4,15)]]; r=d.execute('SELECT * FROM cond WHERE x > 1 AND y < 18'); assert len(r)==2; print('and-ok')\""
+    - "python3 -c \"from sqlt.db import DB; d=DB(); d.execute('CREATE TABLE ortest (n INT)'); [d.execute('INSERT INTO ortest VALUES ('+str(i)+')') for i in range(1,6)]; r=d.execute('SELECT * FROM ortest WHERE n < 2 OR n > 4'); assert len(r)==2; print('or-ok')\""
+    - "python3 -c \"from sqlt.schema import coerce, ColumnType\ntry:\n    coerce('notanint', ColumnType.INT)\n    raise AssertionError('should raise')\nexcept (TypeError, ValueError):\n    print('coerce-error-ok')\""
+  criteria:
+    - "The SQL engine is split across all 10 files in sqlt/; db.py does not re-implement lexing or parsing inline."
+    - "WHERE with AND/OR uses correct precedence: AND binds tighter than OR (e.g. 'a OR b AND c' is 'a OR (b AND c)')."
+    - "coerce() raises a typed error (TypeError or ValueError) on incompatible values — it does not return a default or silently truncate."
+    - "ResultSet rows contain Python-typed values matching the column type (int for INT, float for REAL), not raw strings from the SQL source."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

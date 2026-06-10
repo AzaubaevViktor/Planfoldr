@@ -1,0 +1,36 @@
+# Hardening ladder #5: TTL cache — one file but time-based expiry.
+# Harder than #4 because verification uses time.sleep, which forces the model
+# to implement lazy expiry correctly (no background thread) and tests that the
+# harness verification commands survive a real sleep without timing out.
+name: ttl_cache_local_l06
+goal: >
+  Create cache.py in the workspace with a Cache class (stdlib only). Methods:
+    set(key, val, ttl_s=None)  — store val under key; expire after ttl_s seconds if given.
+    get(key) -> val | None     — return value if present and not expired, else None.
+    delete(key)                — remove key; no-op if missing, must not raise.
+    size() -> int              — count of keys that are not yet expired.
+  Expiry MUST be checked lazily inside get() and size() — no background threads or timers.
+  Overwriting an existing key with a new set() resets its TTL.
+budget:
+  tokens: 100000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import cache; c=cache.Cache(); c.set('x',1); assert c.get('x')==1; print('get-ok')\""
+    - "python3 -c \"import cache; c=cache.Cache(); assert c.get('no') is None; print('miss-ok')\""
+    - "python3 -c \"import cache; c=cache.Cache(); c.set('x',1); c.delete('x'); assert c.get('x') is None; print('delete-ok')\""
+    - "python3 -c \"import cache; c=cache.Cache(); c.delete('never-existed'); print('delete-missing-ok')\""
+    - "python3 -c \"import cache; c=cache.Cache(); c.set('k','a'); c.set('k','b'); assert c.get('k')=='b'; print('overwrite-ok')\""
+    - "python3 -c \"import cache,time; c=cache.Cache(); c.set('t',99,ttl_s=0.05); time.sleep(0.12); assert c.get('t') is None; print('ttl-ok')\""
+    - "python3 -c \"import cache,time; c=cache.Cache(); c.set('a',1); c.set('b',2,ttl_s=0.05); assert c.size()==2; time.sleep(0.12); assert c.size()==1; print('size-ttl-ok')\""
+    - "python3 -c \"import cache,time; c=cache.Cache(); c.set('r',7,ttl_s=0.05); time.sleep(0.03); c.set('r',7,ttl_s=0.1); time.sleep(0.07); assert c.get('r')==7; print('reset-ttl-ok')\""
+  criteria:
+    - "Expiry is checked lazily in get() and size() — no threads, no timers."
+    - "delete() on a missing key does not raise."
+    - "set() with the same key resets the TTL clock, not just the value."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

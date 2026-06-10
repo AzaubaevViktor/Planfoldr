@@ -1,0 +1,54 @@
+# Hardening ladder #8: configurable FSM — three files, config-driven behavior.
+# Three-file split means three interdependent tickets with a blocked_by chain:
+# runner.py blocks on machine.py which blocks on loader.py. The "config-driven"
+# requirement is a false-verification trap: a model that hard-codes the test
+# config into machine.py passes its own self-tests but fails the second config
+# in the verification commands.
+name: state_machine_local_l09
+goal: >
+  Build a configurable finite-state machine, split across THREE files (stdlib only):
+
+    1. fsm.py — the core FSM.
+       Machine class:
+         __init__(initial: str, transitions: list[dict], final: list[str])
+           transitions is a list of {"from": str, "event": str, "to": str}
+         trigger(event: str) -> str   advance state; raise ValueError if no valid transition
+         state: str                   current state (property)
+         is_final() -> bool           True if current state is in the final list
+
+    2. loader.py — config loader.
+       load(config: dict) -> Machine
+         config shape:
+           {"initial": str, "transitions": [...], "final": [...]}
+         Returns a fully constructed Machine ready to use.
+
+    3. runner.py — sequence runner.
+       run(machine, events: list[str]) -> list[dict]
+         Drives machine.trigger(event) for each event in order.
+         Returns a list of records {"event": str, "to": str} for each step.
+         Raises ValueError (from trigger) on an invalid event — does NOT catch it.
+       The entry-point convenience function:
+         execute(config: dict, events: list[str]) -> list[dict]
+           Calls loader.load(config) then runner.run(machine, events).
+budget:
+  tokens: 200000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import fsm, loader, runner; print('modules-ok')\""
+    - "python3 -c \"import runner; cfg={'initial':'idle','transitions':[{'from':'idle','event':'start','to':'running'},{'from':'running','event':'stop','to':'done'}],'final':['done']}; h=runner.execute(cfg,['start','stop']); assert h[-1]['to']=='done'; print('basic-ok')\""
+    - "python3 -c \"import runner; cfg={'initial':'a','transitions':[{'from':'a','event':'go','to':'b'}],'final':['b']}; import loader; m=loader.load(cfg); m.trigger('go'); assert m.is_final(); print('final-ok')\""
+    - "python3 -c \"import runner\ntry:\n    runner.execute({'initial':'x','transitions':[],'final':[]},['bad'])\n    raise AssertionError('should raise')\nexcept ValueError:\n    print('invalid-event-ok')\""
+    - "python3 -c \"import runner; cfg={'initial':'s0','transitions':[{'from':'s0','event':'a','to':'s1'},{'from':'s1','event':'b','to':'s2'},{'from':'s2','event':'c','to':'s3'}],'final':['s3']}; h=runner.execute(cfg,['a','b','c']); assert [r['to'] for r in h]==['s1','s2','s3']; print('chain-ok')\""
+    - "python3 -c \"import loader; cfg={'initial':'on','transitions':[{'from':'on','event':'off','to':'off'},{'from':'off','event':'on','to':'on'}],'final':[]}; m=loader.load(cfg); m.trigger('off'); m.trigger('on'); assert m.state=='on'; print('toggle-ok')\""
+    - "python3 -c \"import inspect,runner; s=inspect.getsource(runner); assert 'loader' in s or 'load' in s; print('wired-ok')\""
+  criteria:
+    - "The FSM behaviour is driven entirely by the transitions list passed at construction — no hard-coded state names anywhere in the code."
+    - "trigger() raises ValueError on an invalid event; it does not silently stay in the current state."
+    - "runner.py imports loader.py and fsm.py — it does not re-implement loading or state logic."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000

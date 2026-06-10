@@ -1,0 +1,59 @@
+# Hardening ladder #7: Markdown-to-HTML converter — first two-file project.
+# The split is mandatory: parser.py produces a block-node list, renderer.py turns it
+# into HTML. This is the first rung that requires the harness to create at least two
+# interdependent tickets and keep a shared data contract (the node format) coherent
+# across separate cycles.
+name: markup_local_l08
+goal: >
+  Build a minimal Markdown-to-HTML converter, split across TWO files (stdlib only):
+
+    1. parser.py — parse(src: str) -> list[dict]
+       Converts a Markdown string into a list of block node dicts. Supported syntax:
+         # H1 text      → {"type": "h1", "text": "H1 text"}
+         ## H2 text     → {"type": "h2", "text": "H2 text"}
+         ### H3 text    → {"type": "h3", "text": "H3 text"}
+         - item         → collected into {"type": "ul", "items": ["item", ...]}
+         blank line     → block separator (not a node itself)
+         anything else  → {"type": "p", "text": "..."}
+       Inline markers within text (handled by the renderer, not the parser):
+         **bold**  *italic*  `code`   — keep in the text string as-is; renderer expands them.
+
+    2. renderer.py — render(nodes: list[dict]) -> str
+       Converts the node list from parser.py into an HTML string.
+         h1/h2/h3 → <h1>...</h1> etc., with inline markers expanded inside
+         ul → <ul><li>...</li>...</ul>, with inline markers expanded in each item
+         p  → <p>...</p>, with inline markers expanded
+       Inline expansion rules:
+         **text** → <strong>text</strong>
+         *text*   → <em>text</em>
+         `text`   → <code>text</code>
+
+    The entry point that wires both: in renderer.py (or a thin markup.py) a function
+    convert(src: str) -> str that calls parse() then render().
+
+  The two files MUST be separate. renderer.py must import parser.py; it must not
+  re-implement parsing inline.
+budget:
+  tokens: 180000
+accesses:
+  - path: ./
+    mode: read_write
+verification:
+  commands:
+    - "python3 -c \"import parser, renderer; print('modules-ok')\""
+    - "python3 -c \"import renderer; assert renderer.convert('# Hello') == '<h1>Hello</h1>'; print('h1-ok')\""
+    - "python3 -c \"import renderer; assert renderer.convert('## Sub') == '<h2>Sub</h2>'; print('h2-ok')\""
+    - "python3 -c \"import renderer; assert renderer.convert('hello world') == '<p>hello world</p>'; print('p-ok')\""
+    - "python3 -c \"import renderer; out=renderer.convert('- a'+chr(10)+'- b'); assert '<ul>' in out and '<li>a</li>' in out and '<li>b</li>' in out; print('ul-ok')\""
+    - "python3 -c \"import renderer; assert '<strong>hi</strong>' in renderer.convert('**hi**'); print('bold-ok')\""
+    - "python3 -c \"import renderer; assert '<em>hi</em>' in renderer.convert('*hi*'); print('italic-ok')\""
+    - "python3 -c \"import renderer; assert '<code>x</code>' in renderer.convert('`x`'); print('code-ok')\""
+    - "python3 -c \"import renderer; out=renderer.convert('# Title'+chr(10)+chr(10)+'para'); assert '<h1>Title</h1>' in out and '<p>para</p>' in out; print('multi-block-ok')\""
+    - "python3 -c \"import inspect,renderer; s=inspect.getsource(renderer); assert 'parser' in s or 'parse' in s; print('wired-ok')\""
+  criteria:
+    - "parser.py and renderer.py are genuinely separate files. renderer.py imports parser.py and calls its parse() function."
+    - "The node dict format is agreed once in parser.py and consumed by renderer.py — not re-parsed in renderer."
+model:
+  provider: ollama
+  name: gemma4:26b-mlx
+  parameter_count: 26000000000
