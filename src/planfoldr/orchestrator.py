@@ -35,37 +35,32 @@ from planfoldr.ticket import TERMINAL, Check, Status, Ticket, new_ticket
 from planfoldr.toolset import ToolRegistry, Toolset
 from planfoldr.tools_impl import register_default_tools
 from planfoldr.util import new_id
+from planfoldr.prompts import (
+    DEVELOPER_PROMPT, ORCHESTRATION_PROMPT, RESEARCH_PROMPT, SECURITY_PROMPT, VERIFICATION_PROMPT,
+)
 
 
 # Base role seed: domain tools + the ticket types each may create.
 BASE_ROLES: Dict[str, Dict[str, Any]] = {
     "orchestration": {
         "domain": [],
-        "prompt": ("You are the orchestrator. Break the goal into the MINIMAL set of tickets via "
-                   "create_ticket. For a single-file goal create EXACTLY ONE code ticket. Add a "
-                   "tests ticket only when the goal explicitly needs separate tests. Each ticket's "
-                   "goal MUST be self-contained: copy the exact interface from the PROJECT CONTRACT "
-                   "into it (file names, function signatures, parameters, return types, CLI) — never "
-                   "write 'as specified' or refer to anything outside the ticket. Attach the "
-                   "project's acceptance commands as that ticket's command checks so the work is "
-                   "verified. NEVER create duplicate or speculative tickets. Immediately after "
-                   "creating the ticket(s), respond with finish."),
+        "prompt": ORCHESTRATION_PROMPT,
         "can_create": ["*"],  # the top planner may create any ticket type; unknown types summon birthgiver
     },
     "developer": {
-        "domain": ["file_edit", "bash"], "prompt": "You are a developer. Write code and tests in the workspace.",
+        "domain": ["file_edit", "bash"], "prompt": DEVELOPER_PROMPT,
         "can_create": ["tests", "fix", "security-review", "research"],
     },
     "research": {
-        "domain": ["bash", "file_edit"], "prompt": "You are a researcher. Investigate and document findings.",
-        "can_create": ["documentation", "fix"],
+        "domain": ["bash", "file_edit"], "prompt": RESEARCH_PROMPT,
+        "can_create": ["documentation", "fix", "code", "tests"],
     },
     "verification": {
-        "domain": ["bash"], "prompt": "You are a verifier. Run checks and confirm evidence.",
+        "domain": ["bash"], "prompt": VERIFICATION_PROMPT,
         "can_create": ["fix"],
     },
     "security": {
-        "domain": ["bash", "file_edit"], "prompt": "You are security. Find and block vulnerabilities.",
+        "domain": ["bash", "file_edit"], "prompt": SECURITY_PROMPT,
         "can_create": ["fix", "block"],
     },
 }
