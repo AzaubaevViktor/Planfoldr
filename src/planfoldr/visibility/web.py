@@ -171,10 +171,24 @@ def _tool_html(payload: Dict[str, Any]) -> str:
             return f'<div class="tool-line err-line">🎫 create_ticket → <span class="rc-err">{esc(err)}</span></div>'
         tid = result.get("ticket_id") or result.get("id") or "?"
         ttype = args.get("type") or "?"
-        goal = (args.get("goal") or "")[:150]
+        title = (args.get("title") or "").strip()
+        goal_lines = (args.get("goal") or "").strip().splitlines()
+        goal_preview = "\n".join(goal_lines[:3])
+        if len(goal_lines) > 3:
+            goal_preview += f"\n… (+{len(goal_lines) - 3} lines)"
+        checks = args.get("checks") or []
+        deps = args.get("dependencies") or []
         tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
-        summary = f'🎫 create_ticket → {tid_link} [{esc(ttype)}]'
-        body = f'<div class="evt">{esc(goal)}</div>' if goal else ""
+        summary = f'🎫 create_ticket → {tid_link} [{esc(ttype)}] <b>{esc(title)}</b>'
+        body = f'<pre class="evt">{esc(goal_preview)}</pre>' if goal_preview else ""
+        if checks:
+            chk_rows = "".join(
+                f'<tr><td>{esc(c.get("kind","?"))}</td><td><code>{esc(c.get("spec","?"))}</code></td></tr>'
+                for c in checks
+            )
+            body += f'<div class="evt small">{len(checks)} check{"s" if len(checks) != 1 else ""}<table>{chk_rows}</table></div>'
+        if deps:
+            body += f'<div class="evt small">depends on: {esc(", ".join(str(d) for d in deps))}</div>'
         return f'<details class="tool"><summary>{summary}</summary>{body}</details>'
 
     if tool in ("write_context", "read_context"):
@@ -225,10 +239,16 @@ def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
     if args:
         rows = ""
         for k, v in args.items():
-            if isinstance(v, (dict, list)):
-                val_html = f'<pre class="model-content">{esc(json.dumps(v, indent=2))}</pre>'
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                val_html = _table(v)
+            elif isinstance(v, list):
+                val_html = (", ".join(esc(str(i)) for i in v)) if v else "<i>—</i>"
+            elif isinstance(v, dict) and v:
+                val_html = _table([{"key": kk, "value": str(vv)} for kk, vv in v.items()])
             elif isinstance(v, str) and len(v) > 120:
                 val_html = f'<pre class="model-content">{esc(v)}</pre>'
+            elif v is None or v == [] or v == {}:
+                val_html = "<i>—</i>"
             else:
                 val_html = esc(str(v))
             rows += f'<tr><th>{esc(k)}</th><td>{val_html}</td></tr>'
@@ -409,8 +429,8 @@ def render_state_view_html(embedded: Any = None, ws_port: Optional[int] = None) 
     snap, _ = _norm(embedded)
     content = {
         "system": _render_system(snap),
-        "queues": _table([{"id": q.get("id"), "tickets": _fmt_value(q.get("tickets_by_status", {})),
-                           "manager": q.get("manager_role"), "executors": _fmt_value(q.get("executor_roles"))}
+        "queues": _table([{"id": q.get("id"), "tickets": q.get("tickets_by_status", {}),
+                           "manager": q.get("manager_role"), "executors": q.get("executor_roles")}
                           for q in snap.get("queues", {}).values()]),
         "tickets": _render_tickets_table(snap.get("tickets", {})),
         "models": _render_models(snap),

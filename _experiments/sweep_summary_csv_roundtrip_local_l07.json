@@ -1,0 +1,30 @@
+[
+  {
+    "model": "devstral-small-2:24b",
+    "run_id": "sweep_csv_roundtrip_local_l07_devstral_small_2_24b",
+    "returncode": null,
+    "crashed": false,
+    "timed_out": true,
+    "stderr_tail": "timed out after 1200s",
+    "wall_seconds": 1200.0,
+    "run_dir": "/Users/v-korovin/Projects/Planfoldr/runs/2026-06-10_15-27-48__sweep_csv_roundtrip_local_l07_devstral_small_2_24b",
+    "status": "NO_RESULT_JSON",
+    "artifacts_ok": false,
+    "verify_pass": false,
+    "verify_detail": "verify FAIL rc=1: Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import csvlib; r=[['','x','']]; assert csvlib.decode(csvlib.encode(r))==r; print('empty-field-ok')\n                       "
+  },
+  {
+    "model": "qwen3-coder:30b",
+    "run_id": "sweep_csv_roundtrip_local_l07_qwen3_coder_30b",
+    "returncode": null,
+    "crashed": false,
+    "timed_out": true,
+    "stderr_tail": "timed out after 1200s",
+    "wall_seconds": 1200.1,
+    "run_dir": "/Users/v-korovin/Projects/Planfoldr/runs/2026-06-10_15-47-48__sweep_csv_roundtrip_local_l07_qwen3_coder_30b",
+    "status": "NO_RESULT_JSON",
+    "artifacts_ok": false,
+    "verify_pass": false,
+    "verify_detail": "verify FAIL rc=1: Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import csvlib; r=[['','x','']]; assert csvlib.decode(csvlib.encode(r))==r; print('empty-field-ok')\n                       "
+  }
+]

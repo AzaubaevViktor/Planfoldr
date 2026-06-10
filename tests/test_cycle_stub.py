@@ -73,6 +73,27 @@ def test_run_command_shell_operators_work(tmp_path):
     assert compound["status"] == "success"
 
 
+def test_checks_block_appears_in_changes_prompt(tmp_path):
+    """Acceptance checks are shown prominently in the changes-phase user prompt."""
+    captured = []
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: changes" in text:
+            captured.append(text)
+        return code_stub()(messages)
+
+    ticket = new_ticket("dev-1", title="solution", type="code", goal="write solution.py",
+                        created_by="orchestrator",
+                        checks=[Check(kind="command", spec="test -f solution.py")])
+    cycle, _, _ = build(tmp_path, stub=stub, ticket=ticket)
+    cycle.run()
+    assert captured, "changes prompt was never captured"
+    assert "ACCEPTANCE CHECKS" in captured[0]
+    assert "test -f solution.py" in captured[0]
+    assert "finish" in captured[0]
+
+
 def test_full_code_cycle_runs_four_phases_and_completes(tmp_path):
     ticket = new_ticket("dev-1", title="solution", type="code", goal="write solution.py with VALUE=42",
                         created_by="orchestrator", checks=[Check(kind="command", spec="test -f solution.py")])

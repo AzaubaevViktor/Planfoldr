@@ -367,6 +367,15 @@ class Cycle:
             lines.append(f"- Project constraints: {list(c['constraints'])}")
         return "\n".join(lines) + "\n"
 
+    def _checks_block(self) -> str:
+        """Format ticket command-checks as a prominent pre-finish checklist for the developer."""
+        cmds = [c.spec for c in self.ticket.checks if c.kind == "command"]
+        if not cmds:
+            return ""
+        lines = ["ACCEPTANCE CHECKS — run ALL of these with bash and confirm they exit 0 before calling finish:"]
+        lines += [f"  $ {cmd}" for cmd in cmds]
+        return "\n".join(lines) + "\n"
+
     def _changes_user(self, phase: str, allowed: set, last_result: Optional[Dict[str, Any]]) -> str:
         ref = "\n".join(f"- {_ACTION_REFERENCE[a]}" for a in sorted(allowed) if a in _ACTION_REFERENCE)
         constraints = self.ticket.metadata.get("constraints") or []
@@ -375,11 +384,12 @@ class Cycle:
             + self._contract_block()
             + f"GOAL: {self.ticket.goal}\n"
             + (f"CONSTRAINTS: {constraints}\n" if constraints else "")
+            + self._checks_block()
             + f"CONTEXT: {self.local_memory.get('context', {})}\n"
             "The workspace is the current directory and may be empty; CREATE the files needed to "
             "achieve the GOAL using file_edit (provide the full file content). NEVER write files "
             "with bash (no echo/printf/cat/tee redirects) — use file_edit. Use bash ONLY to run "
-            "tests or commands. Do not repeat read-only commands. When the GOAL is achieved, "
+            "tests or commands. Do not repeat read-only commands. When ALL acceptance checks pass, "
             "respond with finish.\n"
             f"ACTION REFERENCE (choose exactly ONE):\n{ref}\n"
             f"Last tool result: {last_result}\n"
