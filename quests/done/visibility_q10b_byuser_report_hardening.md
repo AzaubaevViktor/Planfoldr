@@ -3,7 +3,7 @@ File name: `visibility_q10b_byuser_report_hardening.md`
 
 ## Status
 
-Current status: active
+Current status: done
 Blocked by: runtime_q10a_byuser_status_score
 Description: Make observability failures and runtime hardening signals visible in default reports
 without allowing report generation to break execution.
@@ -110,8 +110,17 @@ in the default human-readable view.
 
 - Split from the original aggregate runtime-hardening quest so reporting can be fixed after
   status/scoring semantics are clear.
-- Risk anchors:
-  - `src/planfoldr/orchestrator.py::_sink` currently swallows visibility ingest failures.
-  - `src/planfoldr/orchestrator.py::_write_report` currently swallows report generation failures.
-  - `src/planfoldr/orchestrator.py::_record_model_io` currently swallows write failures.
-  - The report must remain non-blocking, but observability failures must themselves be observable.
+- Risk anchors resolved:
+  - `_sink`: `vis.ingest` exceptions now logged to `visibility_errors.jsonl` instead of silently dropped.
+  - `_write_report`: failures now logged to `visibility_errors.jsonl`.
+  - `_build_analysis` in `_persist`: wrapped in try/except, failures logged to `visibility_errors.jsonl`.
+  - `_record_model_io`: still silently swallows `OSError` (disk-full / permission); this is intentional since model IO logging is already secondary.
+- Snapshot now includes `system` dict from `VisibilityState` (was missing, so `reason` and `false_ver_count` were invisible to web.py and analysis.py).
+- `VisibilityState.commands` now includes `stderr` field; `VisibilityState.system` now tracks `false_ver_count`.
+- `_render_system` (state.html system slice) now shows: status reason, failed ticket ids with links, false verification count, budget exhaustion.
+- `render_stream_log_html` header now shows status reason alongside status.
+- `_render_commands` (state.html commands table) now has a `stderr` column.
+- `analysis.md` Summary section now has `Final verification: PASSED/FAILED` and `Reason:` lines.
+- `analysis.md` failure signatures section now has `Failed spawned tickets: [...]` as the first entry when any ticket failed.
+- Focused tests added in `tests/test_visibility.py`: `test_visibility_errors_logged_to_artifact`, `test_state_view_system_shows_failed_tickets_and_reason`, `test_stream_log_header_shows_status_reason`, `test_stream_log_shows_bash_stderr`, `test_commands_table_shows_stderr_for_failing_command`, `test_analysis_shows_final_verification_and_failed_tickets`.
+- Full suite: 131 passed, 1 skipped.

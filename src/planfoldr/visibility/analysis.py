@@ -31,13 +31,19 @@ def _sections(snap: Dict[str, Any]) -> List[Tuple[str, List[str]]]:
     sc = snap.get("scenario", {})
     project = snap.get("budgets", {}).get("project", {})
     tokens = project.get("usage", {}).get("tokens_used")
+    final_status = snap.get("status", "unknown")
+    final_ver = "PASSED" if final_status == "done" else "FAILED"
+    reason = (snap.get("system", {}).get("reason") or "").strip()
     summary = [
         f"Scenario: {sc.get('name')}",
         f"Goal: {sc.get('goal')}",
-        f"Status: {snap.get('status')}",
+        f"Status: {final_status}",
+        f"Final verification: {final_ver}",
         f"Cycles run: {snap.get('cycles_run')}",
         f"Tokens used (project): {tokens}",
     ]
+    if reason:
+        summary.append(f"Reason: {reason}")
 
     # -- per-ticket outcome --
     ticket_lines = []
@@ -53,6 +59,9 @@ def _sections(snap: Dict[str, Any]) -> List[Tuple[str, List[str]]]:
 
     # -- failure signatures --
     signatures: List[str] = []
+    failed_tids = [tid for tid, t in tickets.items() if t.get("status") == "failed" and tid != "scenario-verify"]
+    if failed_tids:
+        signatures.append(f"Failed spawned tickets: {failed_tids}")
     empty_goals = [tid for tid, t in tickets.items() if not t.get("goal") and t.get("type") != "orchestration"]
     if empty_goals:
         signatures.append(f"Empty goals on tickets {empty_goals} — create_ticket did not capture a goal.")

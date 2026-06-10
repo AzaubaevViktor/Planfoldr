@@ -662,10 +662,13 @@ def render_stream_log_html(embedded: Any = None, ws_port: Optional[int] = None) 
     snap, log = _norm(embedded)
     sc = snap.get("scenario", {})
     status = snap.get("status", "running")
+    system = snap.get("system", {})
+    reason = (system.get("reason") or "").strip()
     header = (
         f'<header><h1>{esc(sc.get("name", "Planfoldr run"))}</h1>'
         f'<div class="goal"><b>Goal:</b> {esc(sc.get("goal"))}</div>'
-        f'<div class="goal"><b>Status:</b> <span class="status-{esc(status)}">{esc(status)}</span></div>'
+        f'<div class="goal"><b>Status:</b> <span class="status-{esc(status)}">{esc(status)}</span>'
+        + (f' — {esc(reason)}' if reason else "") + '</div>'
         + (f'<div class="goal"><b>Constraints:</b> {esc(", ".join(sc.get("constraints", [])))}</div>' if sc.get("constraints") else "")
         + (f'<div class="goal"><b>Verification:</b> {esc(", ".join(sc.get("verification_commands", [])))}</div>' if sc.get("verification_commands") else "")
         + "</header>"
@@ -752,10 +755,33 @@ def _render_cycles_table(cycles: Dict[str, Any]) -> str:
 
 def _render_system(snap: Dict[str, Any]) -> str:
     sc = snap.get("scenario", {})
-    return (f'<b>Scenario:</b> {esc(sc.get("name"))}<br><b>Goal:</b> {esc(sc.get("goal"))}<br>'
-            f'<b>Status:</b> <span class="status-{esc(snap.get("status"))}">{esc(snap.get("status"))}</span><br>'
-            f'<b>Constraints:</b> {esc(", ".join(sc.get("constraints", [])))}<br>'
-            f'<b>Cycles run:</b> {esc(snap.get("cycles_run"))}')
+    system = snap.get("system", {})
+    reason = (system.get("reason") or "").strip()
+    false_ver = system.get("false_ver_count", 0)
+    tickets = snap.get("tickets", {})
+    failed_tids = [tid for tid, t in tickets.items() if t.get("status") == "failed" and tid != "scenario-verify"]
+    project = (snap.get("budgets") or {}).get("project", {})
+    budget_exc = project.get("exceeded")
+
+    parts = [
+        f'<b>Scenario:</b> {esc(sc.get("name"))}<br>',
+        f'<b>Goal:</b> {esc(sc.get("goal"))}<br>',
+        f'<b>Status:</b> <span class="status-{esc(snap.get("status"))}">{esc(snap.get("status"))}</span>',
+    ]
+    if reason:
+        parts.append(f' — {esc(reason)}')
+    parts.append('<br>')
+    if failed_tids:
+        links = ", ".join(f'<a href="tickets.html#t_{esc(t)}">{esc(t)}</a>' for t in failed_tids)
+        parts.append(f'<b>Failed tickets:</b> <span class="rc-err">{links}</span><br>')
+    if false_ver:
+        parts.append(f'<b>False verifications:</b> <span class="rc-err">{esc(false_ver)}</span><br>')
+    if budget_exc:
+        exc_txt = ", ".join(budget_exc) if isinstance(budget_exc, list) else str(budget_exc)
+        parts.append(f'<b>Budget exceeded:</b> <span class="rc-err">{esc(exc_txt)}</span><br>')
+    parts.append(f'<b>Constraints:</b> {esc(", ".join(sc.get("constraints", [])))}<br>')
+    parts.append(f'<b>Cycles run:</b> {esc(snap.get("cycles_run"))}')
+    return "".join(parts)
 
 
 def _render_models(snap: Dict[str, Any]) -> str:
@@ -805,13 +831,16 @@ def _render_commands(snap: Dict[str, Any]) -> str:
         rc_html = _rc_badge(rc) if rc is not None else "<i>—</i>"
         tid = c.get("ticket") or ""
         ticket_html = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>' if tid else "<i>—</i>"
+        stderr = (c.get("stderr") or "").strip()
+        stderr_html = (f'<pre class="pre-err">{esc(stderr[:300])}</pre>' if stderr else "<i>—</i>")
         rows.append(f'<tr><td>{esc(str(c.get("when", ""))[:19])}</td>'
                     f'<td>{esc(c.get("actor"))}</td>'
                     f'<td>{ticket_html}</td>'
                     f'<td><code>{esc(cmd_str[:120])}</code></td>'
                     f'<td>{rc_html}</td>'
-                    f'<td>{esc(c.get("status"))}</td></tr>')
-    head = "".join(f"<th>{esc(h)}</th>" for h in ["when", "actor", "ticket", "cmd", "exit", "status"])
+                    f'<td>{esc(c.get("status"))}</td>'
+                    f'<td>{stderr_html}</td></tr>')
+    head = "".join(f"<th>{esc(h)}</th>" for h in ["when", "actor", "ticket", "cmd", "exit", "status", "stderr"])
     return f'<table><tr>{head}</tr>{"".join(rows)}</table>'
 
 

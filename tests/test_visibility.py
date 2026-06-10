@@ -80,6 +80,19 @@ def test_stream_log_renders_tool_call_envelope_as_action_block():
     assert "&lt;tool_call&gt;" not in html
 
 
+def test_stream_log_renders_tool_call_function_envelope_as_action_block():
+    content = '<tool_call>{"function":{"name":"bash","arguments":"{\\"cmd\\": \\"pytest -q\\"}"},"summary":"run tests"}</tool_call>'
+    snap = {"scenario": {"name": "demo", "goal": "render function tool call"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
+                     "content": content, "thinking": "", "tokens": 12}]}
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "<b>bash</b>" in page
+    assert "<b>summary</b>: run tests" in page
+    assert "<th>cmd</th><td>pytest -q</td>" in page
+    assert "&lt;tool_call&gt;" not in page
+    assert "{&quot;function&quot;" not in page
+
+
 def test_stream_log_labels_internal_thinking_and_action_summary_separately():
     content = '<tool_call>{"name":"bash","arguments":{"cmd":"pytest -q"},"summary":"run focused tests"}</tool_call>'
     snap = {"scenario": {"name": "demo", "goal": "separate thinking"}, "status": "done",
@@ -314,3 +327,140 @@ def test_tool_call_run_writes_readable_model_io_and_index(tmp_path):
     index = (run / "visibility" / "index.html").read_text()
     assert any("<tool_call>" in content and '"name":"file_edit"' in content for content in model_io)
     assert "<b>file_edit</b>" in index and "alpha.txt" in index
+
+
+# -- visibility hardening (q10b) ----------------------------------------------
+
+def test_visibility_errors_logged_to_artifact(tmp_path):
+    """vis.ingest failures must be captured in visibility_errors.jsonl, not silently dropped."""
+    from unittest.mock import patch
+    from planfoldr.visibility.events import VisibilityState
+
+    call_count = {"n": 0}
+    original_ingest = VisibilityState.ingest.__wrapped__ if hasattr(VisibilityState.ingest, "__wrapped__") else VisibilityState.ingest
+
+    def failing_ingest(self, event):
+        call_count["n"] += 1
+        if call_count["n"] <= 3:
+            raise RuntimeError("injected vis failure")
+        return original_ingest(self, event)
+
+    with patch.object(VisibilityState, "ingest", failing_ingest):
+        result = run_scenario(E2E.base_scenario(), runs_dir=tmp_path, run_id="test_run_vis_err",
+                              model_adapter=StubModel(E2E.make_e2e_stub()))
+
+    assert result.status == "done", f"run must still complete: {result.reason}"
+    err_file = Path(result.run_dir) / "visibility_errors.jsonl"
+    assert err_file.exists(), "visibility_errors.jsonl must exist when vis.ingest raises"
+    errors = [json.loads(line) for line in err_file.read_text().splitlines()]
+    assert any(e.get("where") == "vis.ingest" for e in errors)
+    assert any("injected vis failure" in e.get("error", "") for e in errors)
+
+
+def test_state_view_system_shows_failed_tickets_and_reason():
+    """_render_system in state.html must surface failed ticket ids and the status reason."""
+    snap = {
+        "scenario": {"name": "s", "goal": "g", "constraints": [], "verification_commands": []},
+        "status": "failed",
+        "system": {"scenario": "s", "status": "failed",
+                   "reason": "final verification failed; failed tickets: ['developer-1']"},
+        "tickets": {
+            "developer-1": {"id": "developer-1", "type": "code", "status": "failed",
+                            "title": "impl", "goal": "g", "role": "developer-exec",
+                            "attempt_count": 3, "max_attempts": 3, "spawned_by": None, "dependencies": []},
+            "scenario-verify": {"id": "scenario-verify", "type": "verify", "status": "failed",
+                                "title": "final", "goal": "g", "role": "verification-exec",
+                                "attempt_count": 1, "max_attempts": 3, "spawned_by": None, "dependencies": []},
+        },
+        "budgets": {"project": {"exceeded": False, "usage": {}, "limits": {}}, "tickets": []},
+        "queues": {}, "tools": {}, "cycles": {}, "cycle_tree": [], "scores": {},
+    }
+    page = visible_page(render_state_view_html(embedded=snap))
+    # System section must show the status reason and the failed ticket id
+    system_slice = page.split('id="system"', 1)[1].split('</section>', 1)[0]
+    assert "developer-1" in system_slice, "failed ticket id must appear in system section"
+    assert "final verification failed" in system_slice, "status reason must appear in system section"
+    assert "Failed tickets" in system_slice, "'Failed tickets' label must appear in system section"
+
+
+def test_stream_log_header_shows_status_reason():
+    """Stream log header must display the status reason when the scenario has one."""
+    snap = {
+        "scenario": {"name": "s", "goal": "g"},
+        "status": "failed",
+        "system": {"reason": "final verification failed"},
+        "log": [],
+    }
+    page = visible_page(render_stream_log_html(embedded=snap))
+    header = page.split("<h2>Streaming Log", 1)[0]
+    assert "final verification failed" in header, "status reason must appear in the page header before the log"
+
+
+def test_stream_log_shows_bash_stderr():
+    """Bash tool calls with non-empty stderr must render a visible 'stderr' label and the content."""
+    snap = {
+        "scenario": {"name": "s", "goal": "g"},
+        "status": "done",
+        "log": [{"type": "audit", "event_type": "tool.invoked", "ticket_id": "dev-1", "cycle_id": "c1",
+                 "payload": {"tool": "bash", "args": {"cmd": "exit 1"},
+                             "result": {"exit_code": 1, "stdout": "", "stderr": "bash: exit code 1 detail"}}}],
+    }
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "stderr" in page, "streaming log must show 'stderr' label for bash with stderr output"
+    assert "bash: exit code 1 detail" in page, "stderr content must be visible in streaming log"
+
+
+def test_commands_table_shows_stderr_for_failing_command():
+    """state.html commands table must show stderr text for commands that produced it."""
+    snap = {
+        "scenario": {"name": "s", "goal": "g"},
+        "status": "failed",
+        "system": {},
+        "commands": [{"when": "t", "actor": "developer-exec", "ticket": "dev-1",
+                      "cmd": "test -f missing.txt", "exit_code": 1, "status": "failure",
+                      "stderr": "test: missing.txt: no such file"}],
+        "tickets": {"dev-1": {"id": "dev-1", "type": "code", "status": "failed",
+                               "title": "impl", "role": "developer-exec", "attempt_count": 1, "max_attempts": 3}},
+        "budgets": {"project": {"exceeded": False, "usage": {}, "limits": {}}, "tickets": []},
+        "queues": {}, "tools": {}, "cycles": {}, "cycle_tree": [], "scores": {},
+    }
+    page = visible_page(render_state_view_html(embedded=snap))
+    assert "stderr" in page, "commands table must have a 'stderr' column header"
+    assert "test: missing.txt: no such file" in page, "stderr content must be visible in commands table"
+
+
+def test_analysis_shows_final_verification_and_failed_tickets(tmp_path):
+    """analysis.md must explicitly call out final verification result and failed ticket ids."""
+    def failing_stub():
+        state = {"top_step": 0}
+
+        def stub(messages):
+            text = messages[-1]["content"]
+            if "PHASE: context_exploration" in text:
+                return {"action": "finish", "args": {}}
+            if "PHASE: model_verification" in text:
+                return {"action": "verify", "args": {"passed": True, "reason": "ok"}}
+            if "PHASE: changes" in text:
+                if "(orchestration)" in text:
+                    steps = [
+                        {"action": "create_ticket", "args": {"id": "developer-1", "type": "code", "title": "impl",
+                            "goal": "create file alpha.txt",
+                            "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}},
+                        {"action": "finish", "args": {}},
+                    ]
+                    i = state["top_step"]
+                    state["top_step"] = i + 1
+                    return steps[min(i, len(steps) - 1)]
+                return {"action": "finish", "args": {}}  # never writes the file → command check fails
+            return {"action": "finish", "args": {}}
+        return stub
+
+    result = run_scenario(E2E.base_scenario(commands=["test -f alpha.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_analysis_harden", model_adapter=StubModel(failing_stub()))
+    assert result.status == "failed"
+    analysis = (Path(result.run_dir) / "analysis.md").read_text()
+    # Summary section: Final verification
+    assert "Final verification: FAILED" in analysis, "analysis.md must show Final verification: FAILED"
+    # Signatures section: explicitly names the failed ticket id
+    assert "developer-1" in analysis, "analysis.md must name the failing ticket id"
+    assert "Failed spawned tickets" in analysis, "analysis.md must have a 'Failed spawned tickets' signature"

@@ -130,14 +130,15 @@ class Orchestrator:
         self.vis = VisibilityState()
 
         self._model_io_path = self.run_dir / "model_io.jsonl"
+        self._vis_errors_path = self.run_dir / "visibility_errors.jsonl"
 
         def _sink(event: Dict[str, Any]) -> None:
             # Every run feeds an internal Visibility state (for the static report) plus any
             # user-supplied sink (terminal / live web server). Observation never breaks the run.
             try:
                 self.vis.ingest(event)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                self._log_vis_error("vis.ingest", _exc)
             if event.get("event") == "model_output":
                 self._record_model_io(event)
             if stream_sink is not None:
@@ -457,7 +458,17 @@ class Orchestrator:
         (self.run_dir / "result.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
         # Final static, server-free Visibility report + the structured Run Analysis.
         self._write_report()
-        self._build_analysis()
+        try:
+            self._build_analysis()
+        except Exception as exc:  # noqa: BLE001
+            self._log_vis_error("_build_analysis", exc)
+
+    def _log_vis_error(self, where: str, exc: Exception) -> None:
+        try:
+            with self._vis_errors_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"where": where, "error": str(exc)}, default=str) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
 
     def _record_model_io(self, event: Dict[str, Any]) -> None:
         try:
@@ -485,6 +496,7 @@ class Orchestrator:
                          "verification_commands": list(self.scenario.verification_commands),
                          "verification_criteria": list(self.scenario.verification_criteria)},
             "status": self._status,
+            "system": vis.get("system", {}),
             "cycles_run": self.cycles_run,
             "tickets": {tid: t.to_dict() for tid, t in self.tickets.items()},
             "graph": self.graph.to_dict(),
@@ -503,8 +515,8 @@ class Orchestrator:
         try:
             from planfoldr.visibility.web import write_report
             write_report(self.run_dir, self._snapshot())
-        except Exception:  # noqa: BLE001 -- reporting must never break the run
-            pass
+        except Exception as exc:  # noqa: BLE001 -- reporting must never break the run
+            self._log_vis_error("_write_report", exc)
 
     def _build_analysis(self) -> None:
         from planfoldr.visibility.analysis import build_analysis

@@ -55,6 +55,15 @@ def test_parse_action_tool_call_arguments_string():
     assert a.error is None
 
 
+def test_parse_action_tool_call_function_envelope_arguments_string():
+    text = '<tool_call>{"function": {"name": "bash", "arguments": "{\\"cmd\\": \\"pytest -q\\"}"}, "summary": "run tests"}</tool_call>'
+    a = parse_action(text)
+    assert a.action == "bash"
+    assert a.args == {"cmd": "pytest -q"}
+    assert a.summary == "run tests"
+    assert a.error is None
+
+
 def test_parse_action_malformed_tool_call_requests_tool_call_reformat():
     a = parse_action('<tool_call>{"name": "bash", "arguments": {"cmd": "pytest"</tool_call>')
     assert a.action == ""

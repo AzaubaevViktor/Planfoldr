@@ -94,6 +94,8 @@ class VisibilityState:
         elif et == "model.score_updated":
             m = self.models.setdefault(p.get("model"), {"id": p.get("model"), "selected": 0, "tokens": 0})
             m.update({"global_score": p.get("global_score"), "last_delta": p.get("delta")})
+            if "false_verification" in p.get("reasons", []):
+                self.system["false_ver_count"] = self.system.get("false_ver_count", 0) + 1
         elif et == "model.stream":
             m = self.models.setdefault(p.get("model"), {"id": p.get("model"), "selected": 0, "tokens": 0})
             m["tokens"] = m.get("tokens", 0) + (p.get("tokens") or 0)
@@ -110,6 +112,7 @@ class VisibilityState:
                     "cmd": args.get("cmd") or args.get("command") or args,
                     "exit_code": result.get("exit_code"),
                     "status": result.get("status"),
+                    "stderr": (result.get("stderr") or "").strip(),
                 })
         elif et == "budget.exceeded":
             self.budgets["exceeded"] = {"resource": p.get("resource"), "limit": p.get("limit"), "used": p.get("used")}
