@@ -25,6 +25,15 @@ The Visibility interface is a first-class part of the system, not a debug aftert
   checks, dependencies, spawned children, owning cycle, model used. Nothing hidden.
 - **Navigable.** It is a real navigable site. Many pages is fine. Cross-links everywhere
   (ticket ⇄ cycle ⇄ model ⇄ queue ⇄ commands ⇄ KB). The streaming log never loses its beginning.
+- **Navigable on disk, too.** Navigation also means *among the files*, not just inside the site.
+  Every run is one self-contained directory under `runs/`, and that directory's name is prefixed
+  with a sortable timestamp — `YYYY-MM-DD_HH-MM-SS__<run_id>` — so the `runs/` folder is itself
+  chronologically navigable in a plain file tree: you find a run by *when* it happened (newest sorts
+  last) without opening anything. A bare `run_id` with no date is not acceptable — you cannot
+  navigate a flat list of opaque names. Inside, the folder holds the model's `workspace/`, plus
+  `audit.jsonl`, `result.json`, `graph.json`, `scores.json`, `tickets.json`, `model_io.jsonl`, and
+  the `visibility/` site (the HTML pages + `analysis.md`). `result.run_dir` carries the full path;
+  the logical `run_id` lives unchanged in the audit and result fields.
 - **Live.** The pages exist and update **during** execution, not only at the end.
 
 ## Pages
