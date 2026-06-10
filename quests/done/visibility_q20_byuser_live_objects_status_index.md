@@ -3,7 +3,7 @@ File name: `visibility_q20_byuser_live_objects_status_index.md`
 
 ## Status
 
-Current status: active
+Current status: done
 Blocked by: none
 Related: `visibility_q19_byuser_live_model_stream_dom.md`
 Description: Make `visibility/index.html` reflect live runtime activity while work is still
@@ -197,10 +197,10 @@ use concrete action text such as `модель генерирует`, `идёт 
   events and throttled `model_stream_chunk` refreshes to at most once per second.
 - Focused verification run:
   `.venv/bin/python -m pytest tests/test_visibility.py tests/test_cycle_stub.py -q`
-  returned `46 passed in 2.47s`.
+  returned `46 passed in 2.83s` after the final quest move.
 - Full verification run:
   `.venv/bin/python -m pytest -q`
-  returned `136 passed, 1 skipped in 7.22s`.
+  returned `136 passed, 1 skipped in 7.43s` after the final quest move.
 - Manual pre-smoke process check on 2026-06-10 found an already active Planfoldr execution:
   PID 58377 was running
   `python -m planfoldr run examples/taskmanager_local_l10b.yaml --visibility terminal`
@@ -210,3 +210,22 @@ use concrete action text such as `модель генерирует`, `идёт 
   `run_scenario()`, inspected `visibility/index.html` from the external stream sink while the run
   was active, and confirmed live model text, `ticket.created`, `model_output`, and `tool.invoked`
   were visible before the final result.
+- Follow-up manual pre-smoke process check on 2026-06-10 returned no active
+  `planfoldr run|python -m planfoldr` process, so the live smoke was started.
+- Manual live smoke command used a deterministic slow-streaming stub scenario with web visibility
+  through `VisibilityServer`, run id `test_run_q20_live_smoke`, model/provider
+  `slow-smoke-stub` / `stub`, and run directory
+  `runs/2026-06-10_23-34-00__test_run_q20_live_smoke`.
+- Manual live smoke result: status `done`, HTTP port `49171`.
+- Manual live smoke inspected `visibility/index.html` three times roughly one second apart while
+  the run was active:
+  - Observation 1: `mtime=1781116440.4278047`, `модель генерирует` visible,
+    tool/check status visible, `scenario.completed` not yet in `audit.jsonl`.
+  - Observation 2: `mtime=1781116441.491924`, `модель генерирует` and `SMOKE_CHUNK`
+    model text visible, tool/check status visible, `scenario.completed` not yet in `audit.jsonl`.
+  - Observation 3: `mtime=1781116442.5719273`, `модель генерирует` and `SMOKE_CHUNK`
+    model text visible, `developer-1` visible in `index.html`, and `scenario.completed` not yet
+    in `audit.jsonl`.
+- The three smoke observations prove that `index.html` updated across one-second intervals,
+  displayed text from the currently generating model, displayed action-specific status, and showed
+  a newly created ticket before scenario completion.
