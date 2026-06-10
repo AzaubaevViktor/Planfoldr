@@ -1,5 +1,5 @@
 # Hardening ladder #3: a simple file-based client-server (request/response over files).
-name: fileserver_local
+name: fileserver_local_l03
 goal: >
   Create fileserver.py in the workspace with two functions. handle(request: dict) -> dict returns
   {"ok": True, "echo": request.get("msg")}. serve(inbox_path: str, outbox_path: str) -> None reads a

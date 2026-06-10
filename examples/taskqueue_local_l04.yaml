@@ -1,5 +1,5 @@
 # Hardening ladder #4: a file-based FIFO task queue (persistence across calls).
-name: taskqueue_local
+name: taskqueue_local_l04
 goal: >
   Create taskqueue.py in the workspace backing a FIFO queue with a file. enqueue(task: str,
   path: str = "queue.txt") -> None appends a task. dequeue(path: str = "queue.txt") -> str | None

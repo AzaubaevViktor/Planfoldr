@@ -1,5 +1,5 @@
 # Hermetic local example (offline-safe): only python3 is required for verification.
-name: calc_local
+name: calc_local_l01
 goal: "Create calc.py in the workspace with add(a, b) and subtract(a, b) functions."
 budget:
   tokens: 80000

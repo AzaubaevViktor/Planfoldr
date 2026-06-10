@@ -1,5 +1,5 @@
 # Hardening ladder #2: a Brainfuck interpreter (loops, pointer, memory, I/O).
-name: brainfuck_local
+name: brainfuck_local_l02
 goal: >
   Create bf.py in the workspace with a function run(program: str, input_str: str = "") -> str
   that interprets Brainfuck (commands + - < > [ ] . ,) over a byte tape and returns the program's
