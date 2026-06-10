@@ -318,7 +318,7 @@ class Cycle:
             elif action.action == "file_edit":
                 fp = action.args.get("path", "")
                 path_edits[fp] = path_edits.get(fp, 0) + 1
-                productive = path_edits[fp] <= 2
+                productive = path_edits[fp] <= 1
             no_progress = 0 if productive else no_progress + 1
             if no_progress >= 2:
                 self.local_memory.setdefault("notes", []).append("stopped: no further progress")
