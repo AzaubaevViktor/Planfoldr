@@ -12,6 +12,7 @@ PHASE_3 "Флоу работы" (Steps 1-9) + PHASE_4 Quest 5.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -349,9 +350,10 @@ class Orchestrator:
         # Local models phrase the goal in different fields -- accept the common aliases.
         goal = (spec.get("goal") or spec.get("description") or spec.get("summary")
                 or spec.get("task") or spec.get("title") or "")
-        # Deduplicate: a near-identical (type, goal) that is still open returns the existing ticket
-        # instead of spawning a duplicate (local models tend to re-create the same ticket).
-        dedup_key = (ttype, " ".join(goal.lower().split())[:80])
+        # Deduplicate: same (type, target file) or near-identical (type, goal) returns the existing
+        # open ticket instead of spawning a duplicate (local models over-split single-file work).
+        target_file = _first_filename(goal)
+        dedup_key = (ttype, target_file) if target_file else (ttype, " ".join(goal.lower().split())[:80])
         existing = self._ticket_index.get(dedup_key)
         if existing and self.tickets.get(existing) and self.tickets[existing].status not in TERMINAL:
             return existing
@@ -404,8 +406,11 @@ class Orchestrator:
         self.graph.add_ticket(verify)
         verify.transition(Status.READY, actor="orchestrator", audit=self.audit)
         result = self._run_executor_cycle_wrap(verify, "verification")
-        if result == Status.DONE and not failed:
-            return "done", None
+        if result == Status.DONE:
+            # The human-defined verification gate is the source of truth for scenario success.
+            # Spawned tickets that failed (e.g. model over-decomposition with buggy self-checks) are
+            # already penalized via score; they do not override a passing scenario verification.
+            return "done", (f"verified; note: {len(failed)} spawned ticket(s) failed: {failed}" if failed else None)
         return "failed", (f"final verification {result}; failed tickets: {failed}" if failed else f"final verification {result}")
 
     def _run_executor_cycle_wrap(self, ticket: Ticket, queue_id: str) -> str:
@@ -478,6 +483,12 @@ class Orchestrator:
         md, html = build_analysis(snapshot)
         (self.run_dir / "analysis.md").write_text(md, encoding="utf-8")
         (self.run_dir / "visibility" / "analysis.html").write_text(html, encoding="utf-8")
+
+
+def _first_filename(text: str) -> Optional[str]:
+    """Extract the first file-like token (e.g. ``calc.py``) from a goal, for ticket dedup."""
+    match = re.search(r"\b([\w./-]+\.[A-Za-z0-9]{1,6})\b", text or "")
+    return match.group(1) if match else None
 
 
 def _ollama_ps() -> str:

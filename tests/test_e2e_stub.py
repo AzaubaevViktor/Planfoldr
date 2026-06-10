@@ -145,6 +145,45 @@ def test_orchestrator_dedupes_duplicate_tickets(tmp_path):
     assert result.status == "done"
 
 
+def test_scenario_done_when_gate_passes_despite_failed_spawned_ticket(tmp_path):
+    """Scenario success is the human verification gate, not whether every spawned ticket succeeded."""
+    def stub_factory():
+        state = {"top": 0, "wrote": set()}
+
+        def stub(messages):
+            text = messages[-1]["content"]
+            if "PHASE: context_exploration" in text:
+                return {"action": "finish", "args": {}}
+            if "PHASE: model_verification" in text:
+                return {"action": "verify", "args": {"passed": True, "reason": "ok"}}
+            if "PHASE: changes" in text:
+                if "(orchestration)" in text:
+                    steps = [
+                        {"action": "create_ticket", "args": {"type": "code", "title": "impl",
+                            "goal": "create file alpha.txt", "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}},
+                        # A tests ticket with a check that always fails (model's buggy self-check).
+                        {"action": "create_ticket", "args": {"type": "tests", "title": "buggy tests",
+                            "goal": "add a test suite", "checks": [{"kind": "command", "spec": "false"}]}},
+                        {"action": "finish", "args": {}},
+                    ]
+                    i = state["top"]
+                    state["top"] = i + 1
+                    return steps[min(i, len(steps) - 1)]
+                m = re.search(r"create file (\S+)", text)
+                if m and m.group(1) not in state["wrote"]:
+                    state["wrote"].add(m.group(1))
+                    return {"action": "file_edit", "args": {"path": m.group(1), "content": "ok\n"}}
+                return {"action": "finish", "args": {}}
+            return {"action": "finish", "args": {}}
+        return stub
+
+    result = run_scenario(base_scenario(commands=["test -f alpha.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_gate", model_adapter=StubModel(stub_factory()))
+    assert result.tickets["developer-2"] == "failed"   # the buggy-check ticket failed
+    assert result.status == "done"                     # but the scenario verification gate passed
+    assert "spawned ticket" in (result.reason or "")
+
+
 def test_birthgiver_creates_role_live_for_unknown_type(tmp_path):
     """An unknown ticket type is summoned to birthgiver, which creates the role+queue during the run."""
     def stub_factory():
