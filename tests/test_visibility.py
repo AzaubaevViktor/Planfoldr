@@ -116,6 +116,130 @@ def test_visibility_state_preserves_live_thinking_preview():
     assert snap["cycles"]["c1"]["live"] == "<tool_call>"
 
 
+def test_visibility_state_tracks_current_activity_fields_and_labels():
+    s = VisibilityState()
+    feed(s, "cycle.started", ticket_id="dev-1", cycle_id="c1", model="stub", role="developer")
+    feed(s, "cycle.phase_started", ticket_id="dev-1", cycle_id="c1", phase="changes")
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "content", "text": "writing"})
+    activity = s.snapshot()["activity"]
+    assert activity["current_action"] == "model_generating"
+    assert activity["current_action_label"] == "модель генерирует"
+    assert activity["current_model"] == "stub"
+    assert activity["current_tool"] is None
+    assert activity["current_phase"] == "changes"
+    assert activity["ticket_id"] == "dev-1"
+    assert activity["cycle_id"] == "c1"
+
+    feed(s, "tool.invoked", ticket_id="dev-1", cycle_id="c1", tool="file_edit",
+         args={"path": "a.py"}, result={"action": "created"})
+    activity = s.snapshot()["activity"]
+    assert activity["current_action"] == "tool_running"
+    assert activity["current_action_label"] == "выполняется tool: file_edit"
+    assert activity["current_tool"] == "file_edit"
+
+    feed(s, "cycle.phase_started", ticket_id="dev-1", cycle_id="c1", phase="command_verification")
+    assert s.snapshot()["activity"]["current_action_label"] == "идёт проверка"
+    feed(s, "cycle.phase_completed", ticket_id="dev-1", cycle_id="c1", phase="command_verification")
+    assert s.snapshot()["activity"]["current_action_label"] == "ожидание следующей фазы"
+    feed(s, "scenario.completed", status="done", reason="ok")
+    assert s.snapshot()["activity"]["current_action_label"] == "сценарий завершён: done"
+
+
+def test_stream_log_renders_live_preview_and_current_status():
+    s = VisibilityState()
+    feed(s, "scenario.started", scenario="demo", goal="live")
+    feed(s, "cycle.started", ticket_id="dev-1", cycle_id="c1", model="stub", role="developer")
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "content", "text": "live model text"})
+    snap = s.snapshot()
+    snap.update({"scenario": {"name": "demo", "goal": "live"}, "status": "running", "log": s.recent_log()})
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "модель генерирует" in page
+    assert "live model text" in page
+    assert 'id="live-preview"' in page
+
+
+def test_stream_log_shows_new_ticket_before_cycle_completion():
+    s = VisibilityState()
+    feed(s, "scenario.started", scenario="demo", goal="spawn")
+    feed(s, "cycle.started", ticket_id="orchestration-0", cycle_id="c1", model="stub", role="orchestrator")
+    feed(s, "ticket.created", ticket_id="developer-1", cycle_id="c1", type="code",
+         title="impl", goal="write the implementation", spawned_by="orchestration-0")
+    snap = s.snapshot()
+    snap.update({"scenario": {"name": "demo", "goal": "spawn"}, "status": "running", "log": s.recent_log()})
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "developer-1" in page
+    assert "write the implementation" in page
+    assert "cycle.completed" not in page
+
+
+def test_stream_log_websocket_script_handles_live_events():
+    from planfoldr.visibility.web import _WS_SCRIPT
+
+    assert "__PLANFOLDR_HANDLE_EVENT__" in _WS_SCRIPT
+    assert "model_stream_chunk" in _WS_SCRIPT
+    assert "ticket.created" in _WS_SCRIPT
+    assert "tool.invoked" in _WS_SCRIPT
+    assert "cycle.phase_started" in _WS_SCRIPT
+    assert "appendPreview(ev)" in _WS_SCRIPT
+    assert "appendLog" in _WS_SCRIPT
+    assert "модель генерирует" in _WS_SCRIPT
+    assert "выполняется tool: " in _WS_SCRIPT
+
+
+def test_static_index_report_updates_on_live_events(tmp_path):
+    seen = {}
+
+    def stub(messages):
+        text = messages[-1]["content"]
+        if "PHASE: context_exploration" in text:
+            return {"action": "finish", "args": {}}
+        if "PHASE: changes" in text and "(orchestration)" in text:
+            if not seen.get("created"):
+                seen["created"] = True
+                return {"action": "create_ticket", "args": {"id": "developer-1", "type": "code",
+                    "title": "impl", "goal": "create file alpha.txt",
+                    "checks": [{"kind": "command", "spec": "test -f alpha.txt"}]}}
+            return {"action": "finish", "args": {}}
+        if "PHASE: changes" in text:
+            if not seen.get("wrote"):
+                seen["wrote"] = True
+                return {"action": "file_edit", "args": {"path": "alpha.txt", "content": "ok\n"}}
+            return {"action": "finish", "args": {}}
+        if "PHASE: model_verification" in text:
+            return {"action": "verify", "args": {"passed": True, "reason": "evidence passed"}}
+        return {"action": "finish", "args": {}}
+
+    observations = {}
+
+    def sink(event):
+        run_dirs = list(tmp_path.glob("*test_run_live_report*"))
+        if not run_dirs:
+            return
+        index = run_dirs[0] / "visibility" / "index.html"
+        if not index.exists():
+            return
+        text = index.read_text()
+        if event.get("event") == "model_stream_chunk" and "model_stream_chunk" not in observations:
+            observations["model_stream_chunk"] = "модель генерирует" in text and "action" in text
+        if event.get("event") == "model_output" and "model_output" not in observations:
+            observations["model_output"] = "<tool_call>" in text or "file_edit" in text
+        if event.get("event") == "audit" and event.get("event_type") == "ticket.created":
+            observations["ticket.created"] = "developer-1" in text
+        if event.get("event") == "audit" and event.get("event_type") == "tool.invoked":
+            observations.setdefault("tool.invoked", "file_edit" in text or "create_ticket" in text)
+
+    result = run_scenario(E2E.base_scenario(commands=["test -f alpha.txt"]), runs_dir=tmp_path,
+                          run_id="test_run_live_report", model_adapter=StubModel(stub),
+                          stream_sink=sink)
+    assert result.status == "done", result.reason
+    assert observations.get("model_stream_chunk") is True
+    assert observations.get("model_output") is True
+    assert observations.get("ticket.created") is True
+    assert observations.get("tool.invoked") is True
+
+
 def test_terminal_stream_renders_thinking_chunks_live():
     out = StringIO()
     terminal = TerminalStream(out=out)

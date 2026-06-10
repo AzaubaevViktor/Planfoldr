@@ -27,6 +27,15 @@ class VisibilityState:
         self.cycles: Dict[str, Dict[str, Any]] = {}
         self.budgets: Dict[str, Any] = {}
         self.system: Dict[str, Any] = {"scenario": None, "status": "running", "cycles": 0}
+        self.activity: Dict[str, Any] = {
+            "current_action": "initialising",
+            "current_action_label": "инициализация",
+            "current_model": None,
+            "current_tool": None,
+            "current_phase": None,
+            "ticket_id": None,
+            "cycle_id": None,
+        }
         self.log: List[Dict[str, Any]] = []
 
     # -- ingest ---------------------------------------------------------------
@@ -40,6 +49,12 @@ class VisibilityState:
             elif kind == "model_stream_chunk":
                 self._live_chunk(event)  # live preview only -- not stored in the persisted log
             elif kind == "tool_result":
+                call = event.get("call") or {}
+                self._set_activity(
+                    "tool_result", "ожидание следующей фазы",
+                    tool=call.get("action"), phase=event.get("phase"),
+                    ticket_id=event.get("ticket_id"), cycle_id=event.get("cycle_id"),
+                )
                 self._append_log({"type": kind, **event})
 
     def _model_output(self, e: Dict[str, Any]) -> None:
@@ -50,6 +65,11 @@ class VisibilityState:
         cyc = self.cycles.get(cid)
         if cyc is not None:
             cyc.setdefault("outputs", []).append(entry)
+            self._set_activity(
+                "waiting_next_phase", "ожидание следующей фазы",
+                model=cyc.get("model"), phase=e.get("phase"),
+                ticket_id=e.get("ticket_id"), cycle_id=cid,
+            )
         # Full output goes to the persisted log (one entry per model call -- start is never dropped).
         self._append_log({"type": "model_output", "cycle_id": cid, "ticket_id": e.get("ticket_id"), **entry})
 
@@ -60,11 +80,15 @@ class VisibilityState:
         cid = e.get("cycle_id")
         if et == "scenario.started":
             self.system.update({"scenario": p.get("scenario"), "goal": p.get("goal"), "status": "running"})
+            self._set_activity("initialising", "инициализация")
         elif et == "scenario.completed":
             self.system.update({"status": p.get("status"), "reason": p.get("reason")})
+            self._set_activity("scenario_completed", f"сценарий завершён: {p.get('status')}",
+                               ticket_id=tid, cycle_id=cid)
         elif et == "ticket.created":
             self.tickets[tid] = {"id": tid, "type": p.get("type"), "title": p.get("title"),
                                  "status": "incoming", "spawned_by": p.get("spawned_by"), "evidence": 0}
+            self._set_activity("object_created", f"создан ticket: {tid}", ticket_id=tid, cycle_id=cid)
         elif et == "ticket.status_changed" and tid in self.tickets:
             self.tickets[tid]["status"] = p.get("to")
             self._reindex_queue(tid)
@@ -76,11 +100,21 @@ class VisibilityState:
             self.cycles[cid] = {"id": cid, "ticket": tid, "model": p.get("model"), "role": p.get("role"),
                                 "parent": p.get("parent_cycle_id"), "phase": None, "status": "running",
                                 "stream": ""}
+            self._set_activity("cycle_started", "ожидание следующей фазы", model=p.get("model"),
+                               ticket_id=tid, cycle_id=cid)
         elif et == "cycle.phase_started" and cid in self.cycles:
             self.cycles[cid]["current_phase"] = p.get("phase")
+            phase = p.get("phase")
+            label = "идёт проверка" if phase in ("command_verification", "model_verification") else "модель генерирует"
+            action = "verification" if label == "идёт проверка" else "model_generating"
+            self._set_activity(action, label, model=self.cycles[cid].get("model"), phase=phase,
+                               ticket_id=tid, cycle_id=cid)
         elif et == "cycle.phase_completed" and cid in self.cycles:
             self.cycles[cid]["phase"] = p.get("phase")
             self.cycles[cid]["current_phase"] = None
+            self._set_activity("waiting_next_phase", "ожидание следующей фазы",
+                               model=self.cycles[cid].get("model"), phase=p.get("phase"),
+                               ticket_id=tid, cycle_id=cid)
             if isinstance(p.get("budget"), dict):
                 self.budgets[cid] = p["budget"]
         elif et == "cycle.completed" and cid in self.cycles:
@@ -102,6 +136,10 @@ class VisibilityState:
         elif et == "tool.invoked":
             name = p.get("tool")
             self.tools[name] = self.tools.get(name, 0) + 1
+            is_verification = name == "command_verification" or p.get("scope") == "command_verification"
+            label = "идёт проверка" if is_verification else f"выполняется tool: {name}"
+            self._set_activity("verification" if is_verification else "tool_running", label,
+                               tool=name, phase=p.get("scope"), ticket_id=tid, cycle_id=cid)
             if name in ("bash", "command_verification") or p.get("scope") == "command_verification":
                 args = p.get("args") or {}
                 result = p.get("result") or {}
@@ -138,6 +176,33 @@ class VisibilityState:
         if cyc is not None:
             field = "live_thinking" if event.get("kind") == "thinking" else "live"
             cyc[field] = (cyc.get(field, "") + event.get("text", ""))[-4000:]
+            self._set_activity(
+                "model_generating", "модель генерирует",
+                model=cyc.get("model"), phase=event.get("phase"),
+                ticket_id=event.get("ticket_id"), cycle_id=cid,
+            )
+
+    def _set_activity(
+        self,
+        action: str,
+        label: str,
+        *,
+        model: Any = None,
+        tool: Any = None,
+        phase: Any = None,
+        ticket_id: Any = None,
+        cycle_id: Any = None,
+    ) -> None:
+        self.activity = {
+            "current_action": action,
+            "current_action_label": label,
+            "current_model": model,
+            "current_tool": tool,
+            "current_phase": phase,
+            "ticket_id": ticket_id,
+            "cycle_id": cycle_id,
+        }
+        self.system["activity"] = dict(self.activity)
 
     # -- snapshot -------------------------------------------------------------
     def snapshot(self) -> Dict[str, Any]:
@@ -157,6 +222,7 @@ class VisibilityState:
                 "cycles": self.cycles,
                 "cycle_tree": cycle_tree,
                 "system": self.system,
+                "activity": self.activity,
                 "budgets": self.budgets,
             }
 

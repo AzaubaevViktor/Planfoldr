@@ -617,21 +617,18 @@ def _log_entry_html(e: Dict[str, Any], cycle_starts: Optional[Dict[str, str]] = 
 # Live status panel
 # --------------------------------------------------------------------------- #
 def _render_live_status(snap: Dict[str, Any]) -> str:
-    """Sticky banner showing currently running cycles; empty string when the run is terminal."""
+    """Sticky banner showing the current action in plain, inspectable language."""
+    activity = snap.get("activity") or (snap.get("system") or {}).get("activity") or {}
+    label = (activity.get("current_action_label") or "").strip()
     overall = snap.get("status", "running")
     if overall in TERMINAL_STATUSES:
-        return ""
+        label = label or f"сценарий завершён: {overall}"
+        return f'<div id="live-status" class="live-status">■ <b>{esc(label)}</b></div>'
     cycles = snap.get("cycles") or {}
     running = [c for c in cycles.values() if c.get("status") == "running"]
     if not running:
-        # Nothing explicitly running — show generic "initialising" hint
-        return '<div class="live-status">⟳ <b>Initialising…</b></div>'
-    _PHASE_VERBS = {
-        "context_exploration": "exploring context",
-        "changes": "making changes",
-        "command_verification": "running verification commands",
-        "model_verification": "model verifying",
-    }
+        label = label or "инициализация"
+        return f'<div id="live-status" class="live-status">⟳ <b>{esc(label)}</b></div>'
     parts = []
     for c in running:
         tid = c.get("ticket", "?")
@@ -639,12 +636,16 @@ def _render_live_status(snap: Dict[str, Any]) -> str:
         role = c.get("role", "?")
         current_phase = c.get("current_phase")
         last_phase = c.get("phase")
-        if current_phase:
-            phase_txt = f'⟳ <b>{esc(_PHASE_VERBS.get(current_phase, current_phase))}</b>'
+        is_current = c.get("id") == activity.get("cycle_id")
+        activity_label = label if is_current else ""
+        if activity_label:
+            phase_txt = f'⟳ <b>{esc(activity_label)}</b>'
+        elif current_phase:
+            phase_txt = f'⟳ <b>{esc(current_phase)}</b>'
         elif last_phase:
-            phase_txt = f'✓ {esc(last_phase)} → waiting for next phase'
+            phase_txt = f'✓ {esc(last_phase)} → ожидание следующей фазы'
         else:
-            phase_txt = "⟳ starting…"
+            phase_txt = "⟳ ожидание следующей фазы"
         tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
         parts.append(
             f'ticket {tid_link} · '
@@ -652,7 +653,32 @@ def _render_live_status(snap: Dict[str, Any]) -> str:
             f'<span class="role-badge">{esc(role)}</span> · '
             f'{phase_txt}'
         )
-    return '<div class="live-status">' + " &nbsp;|&nbsp; ".join(parts) + "</div>"
+    return '<div id="live-status" class="live-status">' + " &nbsp;|&nbsp; ".join(parts) + "</div>"
+
+
+def _render_live_previews(snap: Dict[str, Any]) -> str:
+    """Render bounded in-progress model text from the live snapshot into static index.html."""
+    cycles = snap.get("cycles") or {}
+    parts = []
+    for c in cycles.values():
+        live_text = (c.get("live") or "").strip()
+        thinking = (c.get("live_thinking") or "").strip()
+        if not live_text and not thinking:
+            continue
+        cid = c.get("id", "")
+        tid = c.get("ticket", "?")
+        model = c.get("model", "?")
+        body = ""
+        if thinking:
+            body += _internal_thinking_html(thinking)
+        if live_text:
+            body += f'<div class="model-prose live-model-text">{esc(live_text)}</div>'
+        parts.append(
+            f'<details class="model-call live-preview" data-cycle-id="{esc(cid)}" open>'
+            f'<summary>⟳ live · ticket <a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a> · '
+            f'<span class="model-badge">{esc(model)}</span></summary>{body}</details>'
+        )
+    return '<div id="live-preview">' + "".join(parts) + "</div>" if parts else '<div id="live-preview"></div>'
 
 
 # --------------------------------------------------------------------------- #
@@ -680,7 +706,8 @@ def render_stream_log_html(embedded: Any = None, ws_port: Optional[int] = None) 
     }
     entries = "".join(_log_entry_html(e, cycle_starts) for e in log)
     live = _render_live_status(snap)
-    body = f'{header}{live}<h2>Streaming Log <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h2><div id="log">{entries}</div>'
+    previews = _render_live_previews(snap)
+    body = f'{header}{live}{previews}<h2>Streaming Log <button id="rf-btn" class="rf-btn" onclick="toggleRefresh()">⏸ pause refresh</button></h2><div id="log">{entries}</div>'
     return _PAGE.format(title="Planfoldr — Streaming Log", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
                         snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script=_WS_SCRIPT,
                         refresh_ms=REFRESH_SECONDS * 1000)
@@ -1308,6 +1335,8 @@ _PAGE = """<!doctype html>
  .rf-btn:hover{{background:#2a3a4a}}
  /* live status banner */
  .live-status{{border:1px solid #45475a;border-radius:6px;padding:6px 10px;margin:8px 0;background:#11151f;color:#f9e2af;font-size:12px}}
+ .live-preview{{border:1px solid #313244;border-radius:6px;margin:6px 0;padding:4px;background:#0d1117}}
+ .live-model-text{{border-left-color:#89b4fa}}
 </style></head><body>
 {nav}
 {body}
@@ -1367,6 +1396,105 @@ _PRESERVE_SCRIPT = r"""
 """
 
 _WS_SCRIPT = r"""
-if(window.__WS_PORT__){try{const ws=new WebSocket('ws://'+location.hostname+':'+window.__WS_PORT__);
- ws.onmessage=()=>{};}catch(e){}}
+(function(){
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function phaseLabel(phase){
+    return (phase==='command_verification'||phase==='model_verification')?'идёт проверка':'модель генерирует';
+  }
+  function setStatus(label, ev){
+    var box=document.getElementById('live-status');
+    if(!box){
+      box=document.createElement('div');
+      box.id='live-status';
+      box.className='live-status';
+      var header=document.querySelector('header');
+      if(header&&header.parentNode) header.parentNode.insertBefore(box, header.nextSibling);
+      else document.body.insertBefore(box, document.body.firstChild);
+    }
+    var bits=['⟳ <b>'+esc(label)+'</b>'];
+    if(ev&&ev.ticket_id) bits.push('ticket <a href="tickets.html#t_'+esc(ev.ticket_id)+'">'+esc(ev.ticket_id)+'</a>');
+    if(ev&&ev.cycle_id) bits.push('<span class="cyc-id">'+esc(String(ev.cycle_id).slice(0,14))+'</span>');
+    box.innerHTML=bits.join(' · ');
+  }
+  function appendLog(html){
+    var log=document.getElementById('log');
+    if(!log) return;
+    var wrap=document.createElement('div');
+    wrap.innerHTML=html;
+    while(wrap.firstChild) log.appendChild(wrap.firstChild);
+  }
+  function ensurePreview(ev){
+    var holder=document.getElementById('live-preview');
+    if(!holder){
+      holder=document.createElement('div');
+      holder.id='live-preview';
+      var h2=document.querySelector('h2');
+      if(h2&&h2.parentNode) h2.parentNode.insertBefore(holder,h2);
+      else document.body.appendChild(holder);
+    }
+    var cid=ev.cycle_id||'unknown';
+    var node=null;
+    var nodes=holder.querySelectorAll('[data-cycle-id]');
+    for(var i=0;i<nodes.length;i++){
+      if(nodes[i].getAttribute('data-cycle-id')===String(cid)){node=nodes[i];break;}
+    }
+    if(!node){
+      node=document.createElement('details');
+      node.open=true;
+      node.className='model-call live-preview';
+      node.setAttribute('data-cycle-id',cid);
+      node.innerHTML='<summary>⟳ live · ticket <a href="tickets.html#t_'+esc(ev.ticket_id||'?')+'">'+esc(ev.ticket_id||'?')+'</a></summary><div class="thinking internal-thinking" data-kind="thinking"></div><div class="model-prose live-model-text" data-kind="content"></div>';
+      holder.appendChild(node);
+    }
+    return node;
+  }
+  function appendPreview(ev){
+    var node=ensurePreview(ev);
+    var sel=ev.kind==='thinking'?'[data-kind="thinking"]':'[data-kind="content"]';
+    var target=node.querySelector(sel);
+    if(!target) return;
+    target.textContent += ev.text || '';
+  }
+  function handleEvent(ev){
+    if(!ev||!ev.event) return;
+    if(ev.event==='model_stream_chunk'){
+      setStatus('модель генерирует', ev);
+      appendPreview(ev);
+      if(window._stopRefresh) window._stopRefresh();
+      return;
+    }
+    if(ev.event==='model_output'){
+      setStatus('ожидание следующей фазы', ev);
+      appendLog('<details class="model-call" open><summary>● <span class="phase-name">'+esc(ev.phase||'')+'</span> · <span class="model-badge">'+esc(ev.model||'')+'</span></summary><div class="model-prose">'+esc(ev.content||'')+'</div></details>');
+      return;
+    }
+    if(ev.event==='tool_result'){
+      setStatus('ожидание следующей фазы', ev);
+      return;
+    }
+    if(ev.event==='audit'){
+      var p=ev.payload||{};
+      if(ev.event_type==='cycle.phase_started'){
+        setStatus(phaseLabel(p.phase), ev);
+      }else if(ev.event_type==='cycle.phase_completed'){
+        setStatus('ожидание следующей фазы', ev);
+      }else if(ev.event_type==='ticket.created'){
+        setStatus('создан ticket: '+(ev.ticket_id||'?'), ev);
+        appendLog('<div class="evt small">+ ticket <a href="tickets.html#t_'+esc(ev.ticket_id||'?')+'">'+esc(ev.ticket_id||'?')+'</a> ['+esc(p.type||'?')+'] '+esc((p.goal||p.title||'').slice(0,100))+'</div>');
+      }else if(ev.event_type==='tool.invoked'){
+        var tool=p.tool||'?';
+        var label=(tool==='command_verification'||p.scope==='command_verification')?'идёт проверка':'выполняется tool: '+tool;
+        setStatus(label, ev);
+        appendLog('<div class="tool-line">🔧 '+esc(tool)+'</div>');
+      }else if(ev.event_type==='scenario.completed'){
+        setStatus('сценарий завершён: '+(p.status||'?'), ev);
+      }
+    }
+  }
+  window.__PLANFOLDR_HANDLE_EVENT__=handleEvent;
+  if(window.__WS_PORT__){try{
+    var ws=new WebSocket('ws://'+location.hostname+':'+window.__WS_PORT__);
+    ws.onmessage=function(msg){try{handleEvent(JSON.parse(msg.data));}catch(e){}};
+  }catch(e){}}
+})();
 """

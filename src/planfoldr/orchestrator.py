@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -131,6 +132,7 @@ class Orchestrator:
 
         self._model_io_path = self.run_dir / "model_io.jsonl"
         self._vis_errors_path = self.run_dir / "visibility_errors.jsonl"
+        self._last_stream_report_at = 0.0
 
         def _sink(event: Dict[str, Any]) -> None:
             # Every run feeds an internal Visibility state (for the static report) plus any
@@ -141,6 +143,7 @@ class Orchestrator:
                 self._log_vis_error("vis.ingest", _exc)
             if event.get("event") == "model_output":
                 self._record_model_io(event)
+            self._maybe_write_live_report(event)
             if stream_sink is not None:
                 stream_sink(event)
 
@@ -508,6 +511,7 @@ class Orchestrator:
             "commands": vis.get("commands", []),
             "cycles": vis.get("cycles", {}),
             "cycle_tree": vis.get("cycle_tree", []),
+            "activity": vis.get("activity", {}),
             "log": self.vis.recent_log(4000),
         }
 
@@ -517,6 +521,35 @@ class Orchestrator:
             write_report(self.run_dir, self._snapshot())
         except Exception as exc:  # noqa: BLE001 -- reporting must never break the run
             self._log_vis_error("_write_report", exc)
+
+    def _maybe_write_live_report(self, event: Dict[str, Any]) -> None:
+        kind = event.get("event")
+        force = False
+        if kind == "audit":
+            force = event.get("event_type") in {
+                EventType.SCENARIO_STARTED,
+                EventType.SCENARIO_COMPLETED,
+                EventType.TICKET_CREATED,
+                EventType.TICKET_STATUS_CHANGED,
+                EventType.TICKET_ASSIGNED,
+                EventType.CYCLE_STARTED,
+                EventType.CYCLE_PHASE_STARTED,
+                EventType.CYCLE_PHASE_COMPLETED,
+                EventType.CYCLE_COMPLETED,
+                EventType.TOOL_INVOKED,
+                EventType.MODEL_SELECTED,
+                EventType.MODEL_SCORE_UPDATED,
+                EventType.BUDGET_EXCEEDED,
+            }
+        elif kind in {"model_output", "tool_result"}:
+            force = True
+        elif kind == "model_stream_chunk":
+            now = time.monotonic()
+            if now - self._last_stream_report_at >= 1.0:
+                self._last_stream_report_at = now
+                force = True
+        if force:
+            self._write_report()
 
     def _build_analysis(self) -> None:
         from planfoldr.visibility.analysis import build_analysis
