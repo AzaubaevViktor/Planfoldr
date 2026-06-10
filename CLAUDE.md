@@ -1,0 +1,4 @@
+Изучи:
+- AGENTS.md
+- INTERFACE.md
+- ARCHITECTURE.md
