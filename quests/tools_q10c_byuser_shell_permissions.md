@@ -1,10 +1,10 @@
-# Task phase4_q10c: Tool permissions and shell execution hardening
-File name: `phase4_q10c_tools_shell_permissions.md`
+# Task tools_q10c_byuser_shell_permissions: Tool permissions and shell execution hardening
+File name: `tools_q10c_byuser_shell_permissions.md`
 
 ## Status
 
 Current status: active
-Blocked by: phase4_q10a
+Blocked by: runtime_q10a_byuser_status_score
 Description: Make the least-privilege toolset claim true and harden shell execution without
 breaking compound acceptance commands.
 
@@ -116,8 +116,8 @@ permission drift should be explicit and tested.
 
 ## Implementation Notes
 
-- Split from the original aggregate `phase4_q10_runtime_hardening_fixes.md` so permissions and
-  shell behavior can be changed without mixing them into status/scoring work.
+- Split from the original aggregate runtime-hardening quest so permissions and shell behavior can
+  be changed without mixing them into status/scoring work.
 - Risk anchors:
   - `src/planfoldr/toolset.py::BASE_TOOLS` currently gives every role broad base capabilities.
   - `src/planfoldr/tools_impl.py::run_command` intentionally uses `shell=True` so compound checks

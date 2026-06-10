@@ -1,5 +1,5 @@
-# Task phase4_q10a: Runtime status and score correctness
-File name: `phase4_q10a_runtime_status_score.md`
+# Task runtime_q10a_byuser_status_score: Runtime status and score correctness
+File name: `runtime_q10a_byuser_status_score.md`
 
 ## Status
 
@@ -118,8 +118,8 @@ evidence contradicted the model's verification verdict.
 
 ## Implementation Notes
 
-- Split from the original aggregate `phase4_q10_runtime_hardening_fixes.md` so status/scoring can
-  be fixed independently.
+- Split from the original aggregate runtime-hardening quest so status/scoring can be fixed
+  independently.
 - Risk anchors:
   - `src/planfoldr/orchestrator.py::_final_verification` currently can return scenario `done`
     even when spawned tickets failed.

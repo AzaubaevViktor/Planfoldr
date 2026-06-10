@@ -1,10 +1,10 @@
-# Task phase4_q10b: Visibility and report hardening
-File name: `phase4_q10b_visibility_report_hardening.md`
+# Task visibility_q10b_byuser_report_hardening: Visibility and report hardening
+File name: `visibility_q10b_byuser_report_hardening.md`
 
 ## Status
 
 Current status: active
-Blocked by: phase4_q10a
+Blocked by: runtime_q10a_byuser_status_score
 Description: Make observability failures and runtime hardening signals visible in default reports
 without allowing report generation to break execution.
 
@@ -108,8 +108,8 @@ in the default human-readable view.
 
 ## Implementation Notes
 
-- Split from the original aggregate `phase4_q10_runtime_hardening_fixes.md` so reporting can be
-  fixed after status/scoring semantics are clear.
+- Split from the original aggregate runtime-hardening quest so reporting can be fixed after
+  status/scoring semantics are clear.
 - Risk anchors:
   - `src/planfoldr/orchestrator.py::_sink` currently swallows visibility ingest failures.
   - `src/planfoldr/orchestrator.py::_write_report` currently swallows report generation failures.
