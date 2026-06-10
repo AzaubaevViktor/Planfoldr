@@ -109,8 +109,9 @@ class VisibilityState:
                 })
         elif et == "budget.exceeded":
             self.budgets["exceeded"] = {"resource": p.get("resource"), "limit": p.get("limit"), "used": p.get("used")}
-        # Everything also lands in the streaming log.
-        self._append_log({"type": "audit", "event_type": et, "ticket_id": tid, "cycle_id": cid, "payload": p,
+        # Everything also lands in the streaming log (actor preserved for status-change rendering).
+        self._append_log({"type": "audit", "event_type": et, "ticket_id": tid, "cycle_id": cid,
+                          "actor": e.get("actor"), "payload": p,
                           "seq": e.get("seq"), "timestamp": e.get("timestamp")})
 
     def _reindex_queue(self, tid: str) -> None:

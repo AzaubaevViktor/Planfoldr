@@ -172,7 +172,8 @@ def _tool_html(payload: Dict[str, Any]) -> str:
         tid = result.get("ticket_id") or result.get("id") or "?"
         ttype = args.get("type") or "?"
         goal = (args.get("goal") or "")[:150]
-        summary = f'🎫 create_ticket → <b>{esc(tid)}</b> [{esc(ttype)}]'
+        tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
+        summary = f'🎫 create_ticket → {tid_link} [{esc(ttype)}]'
         body = f'<div class="evt">{esc(goal)}</div>' if goal else ""
         return f'<details class="tool"><summary>{summary}</summary>{body}</details>'
 
@@ -205,6 +206,36 @@ def _tool_html(payload: Dict[str, Any]) -> str:
     return f'<details class="tool"><summary>{summary}</summary><div class="evt">{body}</div></details>'
 
 
+def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
+    """Parse an action-protocol JSON response and return (json_thinking, action_html).
+
+    Returns None if content is not a valid action-protocol response.
+    """
+    try:
+        obj = json.loads(content)
+    except Exception:
+        return None
+    action = obj.get("action")
+    if not action:
+        return None
+
+    json_thinking = (obj.get("thinking") or "").strip()
+    action_html = f'<div class="tool-line">⚡ <b>{esc(action)}</b></div>'
+    args = obj.get("args") or {}
+    if args:
+        rows = ""
+        for k, v in args.items():
+            if isinstance(v, (dict, list)):
+                val_html = f'<pre class="model-content">{esc(json.dumps(v, indent=2))}</pre>'
+            elif isinstance(v, str) and len(v) > 120:
+                val_html = f'<pre class="model-content">{esc(v)}</pre>'
+            else:
+                val_html = esc(str(v))
+            rows += f'<tr><th>{esc(k)}</th><td>{val_html}</td></tr>'
+        action_html += f'<table>{rows}</table>'
+    return json_thinking, action_html
+
+
 def _model_output_html(e: Dict[str, Any]) -> str:
     """Render a model_output log entry: phase header + thinking + content + verdict."""
     model = e.get("model", "?")
@@ -222,7 +253,14 @@ def _model_output_html(e: Dict[str, Any]) -> str:
     if thinking:
         body += f'<div class="thinking">💭 {esc(thinking)}</div>'
     if content:
-        body += f'<pre class="model-content">{esc(content)}</pre>'
+        parsed = _render_action_content(content)
+        if parsed is not None:
+            json_thinking, action_html = parsed
+            if json_thinking and not thinking:
+                body += f'<div class="thinking">💭 {esc(json_thinking)}</div>'
+            body += action_html
+        else:
+            body += f'<pre class="model-content">{esc(content)}</pre>'
 
     # For model_verification: parse and display the verdict prominently
     if phase == "model_verification" and content:
@@ -259,11 +297,13 @@ def _log_entry_html(e: Dict[str, Any]) -> str:
             role = p.get("role", "?")
             ttype = p.get("type", "?")
             tid = e.get("ticket_id", "?")
-            summary = (f'▶ <span class="cyc-id">{esc(e.get("cycle_id", "")[:14])}</span> · '
-                       f'ticket <b>{esc(tid)}</b> [{esc(ttype)}] · '
+            cyc_id = e.get("cycle_id", "")
+            tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
+            summary = (f'▶ <span class="cyc-id">{esc(cyc_id[:14])}</span> · '
+                       f'ticket {tid_link} [{esc(ttype)}] · '
                        f'<span class="model-badge">{esc(model)}</span> · '
                        f'<span class="role-badge">{esc(role)}</span>')
-            return f'<details open class="cyc"><summary>{summary}</summary>'
+            return f'<details id="exec_{esc(cyc_id)}" open class="cyc"><summary>{summary}</summary>'
 
         if et == "cycle.completed":
             status = p.get("status", "?")
@@ -286,14 +326,24 @@ def _log_entry_html(e: Dict[str, Any]) -> str:
 
         if et == "ticket.status_changed":
             status = p.get("to", "")
-            return (f'<div class="evt small">~ {esc(e.get("ticket_id"))} '
-                    f'{esc(p.get("from"))} → <span class="status-{esc(status)}">{esc(status)}</span></div>')
+            actor = e.get("actor") or p.get("actor", "?")
+            ts = (e.get("timestamp") or "")[:19]
+            proof = (p.get("proof") or "").strip()
+            cause = (p.get("cause") or "").strip()
+            why = proof or cause or ""
+            why_html = f' — {esc(why[:120])}' if why else ""
+            tid_str = e.get("ticket_id", "")
+            tid_link = f'<a href="tickets.html#t_{esc(tid_str)}">{esc(tid_str)}</a>'
+            return (f'<div class="evt small">~ {tid_link} '
+                    f'{esc(p.get("from"))} → <span class="status-{esc(status)}">{esc(status)}</span>'
+                    f' · by <b>{esc(actor)}</b> at {esc(ts)}{why_html}</div>')
 
         if et == "ticket.created":
             tid = e.get("ticket_id", "?")
             ttype = p.get("type", "?")
             goal = (p.get("goal") or "")[:100]
-            return f'<div class="evt small">+ ticket <b>{esc(tid)}</b> [{esc(ttype)}] {esc(goal)}</div>'
+            tid_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>'
+            return f'<div class="evt small">+ ticket {tid_link} [{esc(ttype)}] {esc(goal)}</div>'
 
         if et == "model.score_updated":
             model = p.get("model", "?")
@@ -362,15 +412,11 @@ def render_state_view_html(embedded: Any = None, ws_port: Optional[int] = None) 
         "queues": _table([{"id": q.get("id"), "tickets": _fmt_value(q.get("tickets_by_status", {})),
                            "manager": q.get("manager_role"), "executors": _fmt_value(q.get("executor_roles"))}
                           for q in snap.get("queues", {}).values()]),
-        "tickets": _table([{"id": t.get("id"), "type": t.get("type"), "status": t.get("status"),
-                            "role": t.get("role"), "attempts": t.get("attempt_count"),
-                            "goal": (t.get("goal") or "")[:60]} for t in snap.get("tickets", {}).values()]),
+        "tickets": _render_tickets_table(snap.get("tickets", {})),
         "models": _render_models(snap),
         "commands": _render_commands(snap),
         "tools": _table([{"tool": k, "count": v} for k, v in (snap.get("tools", {}) or {}).items()]),
-        "cycles": _table([{"id": c.get("id"), "ticket": c.get("ticket"), "model": c.get("model"),
-                          "role": c.get("role"), "phase": c.get("phase"), "status": c.get("status")}
-                         for c in snap.get("cycles", {}).values()]),
+        "cycles": _render_cycles_table(snap.get("cycles", {})),
         "cycle_tree": _render_tree(snap.get("cycle_tree", [])),
         "budgets": _render_budgets(snap),
     }
@@ -383,6 +429,46 @@ def render_state_view_html(embedded: Any = None, ws_port: Optional[int] = None) 
             f'<nav class="anchors">{" · ".join(f"<a href=#{s}>{s}</a>" for s in SLICES)}</nav>{sections}')
     return _PAGE.format(title="Planfoldr — State View", refresh_meta=_refresh_meta(snap), nav=_NAV, body=body,
                         snapshot=json.dumps(snap, default=str), ws_port=ws_port or 0, preserve=_PRESERVE_SCRIPT, script="")
+
+
+def _render_tickets_table(tickets: Dict[str, Any]) -> str:
+    if not tickets:
+        return "<i>none</i>"
+    head = ("<tr><th>id</th><th>type</th><th>status</th><th>role</th>"
+            "<th>attempts</th><th>goal</th></tr>")
+    rows = ""
+    for t in tickets.values():
+        tid = t.get("id", "")
+        status = t.get("status", "")
+        rows += (f'<tr>'
+                 f'<td><a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a></td>'
+                 f'<td>{esc(t.get("type"))}</td>'
+                 f'<td class="status-{esc(status)}">{esc(status)}</td>'
+                 f'<td>{esc(t.get("role"))}</td>'
+                 f'<td>{esc(t.get("attempt_count"))}</td>'
+                 f'<td>{esc((t.get("goal") or "")[:60])}</td>'
+                 f'</tr>')
+    return f"<table>{head}{rows}</table>"
+
+
+def _render_cycles_table(cycles: Dict[str, Any]) -> str:
+    if not cycles:
+        return "<i>none</i>"
+    head = ("<tr><th>id</th><th>ticket</th><th>model</th>"
+            "<th>role</th><th>phase</th><th>status</th></tr>")
+    rows = ""
+    for c in cycles.values():
+        cid = c.get("id", "")
+        tid = c.get("ticket", "")
+        rows += (f'<tr>'
+                 f'<td><a href="index.html#exec_{esc(cid)}">{esc(cid[:16])}</a></td>'
+                 f'<td><a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a></td>'
+                 f'<td>{esc(c.get("model"))}</td>'
+                 f'<td>{esc(c.get("role"))}</td>'
+                 f'<td>{esc(c.get("phase"))}</td>'
+                 f'<td>{esc(c.get("status"))}</td>'
+                 f'</tr>')
+    return f"<table>{head}{rows}</table>"
 
 
 def _render_system(snap: Dict[str, Any]) -> str:
@@ -438,9 +524,11 @@ def _render_commands(snap: Dict[str, Any]) -> str:
         cmd_str = json.dumps(cmd_raw) if isinstance(cmd_raw, dict) else str(cmd_raw or "")
         rc = c.get("exit_code")
         rc_html = _rc_badge(rc) if rc is not None else "<i>—</i>"
+        tid = c.get("ticket") or ""
+        ticket_html = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>' if tid else "<i>—</i>"
         rows.append(f'<tr><td>{esc(str(c.get("when", ""))[:19])}</td>'
                     f'<td>{esc(c.get("actor"))}</td>'
-                    f'<td>{esc(c.get("ticket"))}</td>'
+                    f'<td>{ticket_html}</td>'
                     f'<td><code>{esc(cmd_str[:120])}</code></td>'
                     f'<td>{rc_html}</td>'
                     f'<td>{esc(c.get("status"))}</td></tr>')
@@ -462,35 +550,43 @@ def _render_budgets(snap: Dict[str, Any]) -> str:
                  f' · requests: {esc(usage.get("api_requests"))} · files: {esc(usage.get("file_changes"))}'
                  f' · commands: {esc(usage.get("command_runs"))} · gpu·ram·h: {round(usage.get("gpu_ram_hours", 0), 4)}'
                  f'{exc_html}</div>')
-    rows = []
+    if not budgets.get("tickets"):
+        return proj_html
+    cols = ["ticket", "title", "goal", "tokens", "requests", "files", "cmds", "gpu·ram·h", "exceeded"]
+    head = "".join(f"<th>{esc(c)}</th>" for c in cols)
+    body_rows = ""
     for b in budgets.get("tickets", []):
         u = b.get("usage", {})
         lim = b.get("limits") or {}
         tok_u = _fmt_tokens(u.get("tokens_used"))
         tok_l = _fmt_tokens(lim.get("tokens_used")) if lim else "—"
-        rows.append({
-            "ticket": b.get("ticket"),
-            "title": (b.get("title") or "")[:30],
-            "goal": (b.get("goal") or "")[:50],
-            "tokens": f"{tok_u} / {tok_l}",
-            "requests": u.get("api_requests"),
-            "files": u.get("file_changes"),
-            "cmds": u.get("command_runs"),
-            "gpu·ram·h": round(u.get("gpu_ram_hours", 0), 4),
-            "exceeded": "yes" if b.get("exceeded") else "—",
-        })
-    return proj_html + _table(rows, ["ticket", "title", "goal", "tokens", "requests", "files", "cmds", "gpu·ram·h", "exceeded"])
+        tid = b.get("ticket") or ""
+        ticket_html = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>' if tid else "<i>—</i>"
+        body_rows += (f'<tr><td>{ticket_html}</td>'
+                      f'<td>{esc((b.get("title") or "")[:30])}</td>'
+                      f'<td>{esc((b.get("goal") or "")[:50])}</td>'
+                      f'<td>{esc(f"{tok_u} / {tok_l}")}</td>'
+                      f'<td>{esc(u.get("api_requests"))}</td>'
+                      f'<td>{esc(u.get("file_changes"))}</td>'
+                      f'<td>{esc(u.get("command_runs"))}</td>'
+                      f'<td>{esc(round(u.get("gpu_ram_hours", 0), 4))}</td>'
+                      f'<td>{"yes" if b.get("exceeded") else "—"}</td></tr>')
+    return proj_html + f"<table><tr>{head}</tr>{body_rows}</table>"
 
 
 def _render_tree(nodes: List[Dict[str, Any]]) -> str:
     if not nodes:
         return "<i>none</i>"
-    items = "".join(
-        f'<li>cycle {esc(n.get("id", "")[:14])} '
-        f'[<span class="status-{esc(n.get("status"))}">{esc(n.get("status"))}</span>] '
-        f'ticket={esc(n.get("ticket"))}'
-        f'{_render_tree(n.get("children", []))}</li>' for n in nodes
-    )
+    items = ""
+    for n in nodes:
+        cid = n.get("id", "")
+        tid = n.get("ticket", "")
+        cyc_link = f'<a href="index.html#exec_{esc(cid)}">{esc(cid[:14])}</a>'
+        ticket_link = f'<a href="tickets.html#t_{esc(tid)}">{esc(tid)}</a>' if tid else "<i>—</i>"
+        items += (f'<li>cycle {cyc_link} '
+                  f'[<span class="status-{esc(n.get("status"))}">{esc(n.get("status"))}</span>] '
+                  f'ticket={ticket_link}'
+                  f'{_render_tree(n.get("children", []))}</li>')
     return f"<ul>{items}</ul>"
 
 
@@ -527,7 +623,7 @@ def _ticket_tree(tickets: Dict[str, Any], graph: Dict[str, Any]) -> str:
 
 def _ticket_detail_html(t: Dict[str, Any]) -> str:
     history = t.get("metadata", {}).get("change_history", [])
-    hist_rows = _table(history, ["from", "to", "actor", "at", "proof", "cause"])
+    hist_rows = _render_status_history(history)
     comments = t.get("comments", [])
     comm_rows = _table([{"author": c.get("author"), "when": c.get("timestamp"),
                          "summons": c.get("summoned_role"), "text": c.get("text")} for c in comments],
@@ -546,16 +642,42 @@ def _ticket_detail_html(t: Dict[str, Any]) -> str:
                 if evidence_rows else "<i>none</i>")
     checks = _table([{"kind": c.get("kind"), "spec": c.get("spec"), "required": c.get("required")}
                      for c in t.get("checks", [])], ["kind", "spec", "required"])
+    spawned_by = t.get("spawned_by")
+    spawned_html = (f'<a href="#t_{esc(spawned_by)}">{esc(spawned_by)}</a>'
+                    if spawned_by else "<i>—</i>")
+    deps = t.get("dependencies") or []
+    deps_html = (", ".join(f'<a href="#t_{esc(d)}">{esc(d)}</a>' for d in deps)
+                 if deps else "<i>—</i>")
     return (
         f'<details id="t_{esc(t.get("id"))}" class="ticket"><summary>{esc(t.get("id"))} '
         f'[{esc(t.get("type"))}] <span class="status-{esc(t.get("status"))}">{esc(t.get("status"))}</span> — {esc(t.get("title"))}</summary>'
         f'<div class="evt"><b>Goal:</b> {esc(t.get("goal"))}</div>'
         f'<div class="evt"><b>Role:</b> {esc(t.get("role"))} · <b>Queue:</b> {esc(t.get("queue"))} · '
         f'<b>Attempts:</b> {esc(t.get("attempt_count"))}/{esc(t.get("max_attempts"))} · '
-        f'<b>spawned_by:</b> {esc(t.get("spawned_by"))} · <b>deps:</b> {esc(t.get("dependencies"))}</div>'
+        f'<b>spawned_by:</b> {spawned_html} · <b>deps:</b> {deps_html}</div>'
         f'<h4>Checks</h4>{checks}<h4>Evidence</h4>{evidence}'
         f'<h4>Comments</h4>{comm_rows}<h4>Status history</h4>{hist_rows}</details>'
     )
+
+
+def _render_status_history(history: List[Dict[str, Any]]) -> str:
+    if not history:
+        return "<i>none</i>"
+    head = ("<tr><th>when</th><th>who</th><th>from</th><th>to</th><th>why (proof / cause)</th></tr>")
+    rows = ""
+    for h in history:
+        to = h.get("to", "")
+        proof = (h.get("proof") or "").strip()
+        cause = (h.get("cause") or "").strip()
+        why = proof or cause or ""
+        rows += (f'<tr>'
+                 f'<td>{esc(str(h.get("at", ""))[:19])}</td>'
+                 f'<td><b>{esc(h.get("actor"))}</b></td>'
+                 f'<td>{esc(h.get("from"))}</td>'
+                 f'<td class="status-{esc(to)}">{esc(to)}</td>'
+                 f'<td>{esc(why)}</td>'
+                 f'</tr>')
+    return f"<table>{head}{rows}</table>"
 
 
 def render_kb_html(embedded: Any = None, ws_port: Optional[int] = None) -> str:
@@ -613,7 +735,11 @@ class VisibilityServer:
     def start(self) -> "VisibilityServer":
         self.ws_port = self.ws.start()
         server = self
-        route = {"/": "index.html", "/state": "state.html", "/tickets": "tickets.html", "/kb": "kb.html"}
+        route = {
+            "/": "index.html", "/state": "state.html", "/tickets": "tickets.html", "/kb": "kb.html",
+            "/index.html": "index.html", "/state.html": "state.html",
+            "/tickets.html": "tickets.html", "/kb.html": "kb.html",
+        }
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -664,10 +790,8 @@ class VisibilityServer:
             self._httpd.shutdown()
 
 
-_NAV = ('<nav class="top"><a href="/">Streaming Log</a> · <a href="/state">State</a> · '
-        '<a href="/tickets">Tickets</a> · <a href="/kb">Knowledge Base</a> · '
-        '<a href="index.html">log</a> · <a href="state.html">state</a> · '
-        '<a href="tickets.html">tickets</a> · <a href="kb.html">kb</a></nav>')
+_NAV = ('<nav class="top"><a href="index.html">Streaming Log</a> · <a href="state.html">State</a> · '
+        '<a href="tickets.html">Tickets</a> · <a href="kb.html">Knowledge Base</a></nav>')
 
 _PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>{title}</title>
@@ -729,9 +853,25 @@ function toggleRefresh(){{
   var m=document.getElementById('refresh-meta');
   var b=document.getElementById('rf-btn');
   if(!m){{b.textContent='⏸ pause refresh';return;}}
-  if(m.parentNode){{m.parentNode.removeChild(m);b.textContent='▶ resume refresh';}}
-  else{{var nm=document.createElement('meta');nm.httpEquiv='refresh';nm.content=m.content;nm.id='refresh-meta';document.head.appendChild(nm);b.textContent='⏸ pause refresh';}}
+  if(m.parentNode){{
+    m.parentNode.removeChild(m);b.textContent='▶ resume refresh';
+    try{{sessionStorage.setItem('pf_rf_paused','1');}}catch(e){{}}
+  }}else{{
+    var nm=document.createElement('meta');nm.httpEquiv='refresh';nm.content=m.content;nm.id='refresh-meta';document.head.appendChild(nm);
+    b.textContent='⏸ pause refresh';
+    try{{sessionStorage.removeItem('pf_rf_paused');}}catch(e){{}}
+  }}
 }}
+(function(){{
+  try{{
+    if(sessionStorage.getItem('pf_rf_paused')==='1'){{
+      var m=document.getElementById('refresh-meta');
+      if(m&&m.parentNode){{m.parentNode.removeChild(m);}}
+      var b=document.getElementById('rf-btn');
+      if(b){{b.textContent='▶ resume refresh';}}
+    }}
+  }}catch(e){{}}
+}})();
 </script>
 </body></html>
 """
