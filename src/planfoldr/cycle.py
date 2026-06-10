@@ -47,8 +47,9 @@ DEFAULT_PHASES = [CONTEXT, CHANGES, COMMAND_VERIFY, MODEL_VERIFY]
 
 _PROTOCOL = (
     "Respond with exactly ONE tool call envelope and nothing else:\n"
-    '<tool_call>{"name":"<action>", "arguments": {...}, "thinking":"<one short sentence>"}</tool_call>\n'
-    "Keep 'thinking' to a single brief sentence. Never wrap the tool call in markdown. "
+    '<tool_call>{"name":"<action>", "arguments": {...}, "summary":"<one short sentence>"}</tool_call>\n'
+    "Use 'summary' for the short visible explanation of the action. Never put internal reasoning "
+    "inside the final JSON. Never wrap the tool call in markdown. "
     "Legacy bare JSON actions are accepted only for migration; prefer <tool_call>."
 )
 

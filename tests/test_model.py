@@ -17,7 +17,23 @@ from planfoldr.score import ScoreSystem
 def test_parse_action_whole_json():
     a = parse_action('{"thinking": "writing the file", "action": "file_edit", "args": {"path": "x.py", "content": "print(1)"}}')
     assert a.action == "file_edit" and a.args["path"] == "x.py" and a.error is None
+    assert "writing" in a.summary
     assert "writing" in a.thinking
+
+
+def test_parse_action_summary_is_preferred_over_legacy_thinking():
+    a = parse_action('{"summary": "short visible explanation", "thinking": "legacy wording", "action": "bash", "args": {"cmd": "pytest"}}')
+    assert a.action == "bash"
+    assert a.summary == "short visible explanation"
+    assert a.thinking == "short visible explanation"  # backward-compatible alias during migration
+
+
+def test_parse_action_tool_call_summary():
+    text = '<tool_call>{"name": "finish", "arguments": {}, "summary": "work is complete"}</tool_call>'
+    a = parse_action(text)
+    assert a.action == "finish"
+    assert a.summary == "work is complete"
+    assert a.thinking == "work is complete"
 
 
 def test_parse_action_embedded_in_prose():

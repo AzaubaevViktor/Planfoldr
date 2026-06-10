@@ -125,6 +125,9 @@ def test_tool_call_protocol_appears_in_system_and_changes_prompts(tmp_path):
     verify_prompt = "\n".join(u for u in captured["user"] if "PHASE: model_verification" in u)
 
     assert "<tool_call>" in system_prompt
+    assert '"summary":"<one short sentence>"' in system_prompt
+    assert "Use 'summary' for the short visible explanation" in system_prompt
+    assert '"thinking":"<one short sentence>"' not in system_prompt
     assert "Legacy bare JSON actions are accepted only for migration" in system_prompt
     assert "Respond with ONE JSON object" not in system_prompt
     assert '<tool_call>{"name":"file_edit"' in changes_prompt
@@ -139,16 +142,16 @@ def test_tool_call_cycle_executes_file_edit_bash_and_finish(tmp_path):
     def stub(messages):
         text = messages[-1]["content"]
         if "PHASE: context_exploration" in text:
-            return '<tool_call>{"name":"finish","arguments":{},"thinking":"context ready"}</tool_call>'
+            return '<tool_call>{"name":"finish","arguments":{},"summary":"context ready"}</tool_call>'
         if "PHASE: changes" in text:
             steps["changes"] += 1
             if steps["changes"] == 1:
-                return '<tool_call>{"name":"file_edit","arguments":{"path":"solution.py","content":"VALUE = 42\\n"},"thinking":"write file"}</tool_call>'
+                return '<tool_call>{"name":"file_edit","arguments":{"path":"solution.py","content":"VALUE = 42\\n"},"summary":"write file"}</tool_call>'
             if steps["changes"] == 2:
-                return '<tool_call>{"name":"bash","arguments":{"cmd":"test -f solution.py && grep -q VALUE solution.py"},"thinking":"check file"}</tool_call>'
-            return '<tool_call>{"name":"finish","arguments":{},"thinking":"done"}</tool_call>'
+                return '<tool_call>{"name":"bash","arguments":{"cmd":"test -f solution.py && grep -q VALUE solution.py"},"summary":"check file"}</tool_call>'
+            return '<tool_call>{"name":"finish","arguments":{},"summary":"done"}</tool_call>'
         if "PHASE: model_verification" in text:
-            return '<tool_call>{"name":"verify","arguments":{"passed":true,"reason":"tool_call file edit and bash evidence passed"},"thinking":"verified"}</tool_call>'
+            return '<tool_call>{"name":"verify","arguments":{"passed":true,"reason":"tool_call file edit and bash evidence passed"},"summary":"verified"}</tool_call>'
         return '<tool_call>{"name":"finish","arguments":{}}</tool_call>'
 
     ticket = new_ticket("dev-1", title="solution", type="code", goal="write solution.py with VALUE=42",

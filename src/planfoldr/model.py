@@ -65,6 +65,7 @@ class ModelResponse:
 class Action:
     action: str
     args: Dict[str, Any] = field(default_factory=dict)
+    summary: str = ""
     thinking: str = ""
     raw: str = ""
     error: Optional[str] = None
@@ -95,14 +96,14 @@ def parse_action(text: str) -> Action:
         args = obj.get("arguments", obj.get("parameters", function.get("arguments", {})))
     if isinstance(args, str):
         args = _try_json(args) or {"value": args}
-    thinking = obj.get("thinking", "") or ""
+    summary = obj.get("summary", obj.get("thinking", "")) or ""
     if not action:
-        return Action(action="", args=obj if isinstance(obj, dict) else {}, thinking=thinking,
+        return Action(action="", args=obj if isinstance(obj, dict) else {}, summary=summary, thinking=summary,
                       raw=text, error="missing action/name; reply with exactly one <tool_call> JSON envelope")
     return Action(
         action=str(action).strip(),
         args=args if isinstance(args, dict) else {"value": args},
-        thinking=thinking, raw=text,
+        summary=summary, thinking=summary, raw=text,
     )
 
 

@@ -130,12 +130,11 @@ class VisibilityState:
     def _live_chunk(self, event: Dict[str, Any]) -> None:
         # Live token preview for the currently running cycle (drill-down); the canonical full output
         # is captured per call via model_output, so nothing is lost even if this preview is bounded.
-        if event.get("kind") != "content":
-            return
         cid = event.get("cycle_id")
         cyc = self.cycles.get(cid)
         if cyc is not None:
-            cyc["live"] = (cyc.get("live", "") + event.get("text", ""))[-4000:]
+            field = "live_thinking" if event.get("kind") == "thinking" else "live"
+            cyc[field] = (cyc.get(field, "") + event.get("text", ""))[-4000:]
 
     # -- snapshot -------------------------------------------------------------
     def snapshot(self) -> Dict[str, Any]:

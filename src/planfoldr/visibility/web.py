@@ -264,15 +264,17 @@ def _action_from_broken_tool_call(s: str) -> Optional[Tuple[str, str]]:
         return None
     name_m = _re.search(r'"(?:name|action|tool)"\s*:\s*"([^"]+)"', body)
     if not name_m:
-        return "", '<div class="tool-line err-line">⚡ malformed <b>tool_call</b> <span class="thinking" style="font-size:10px">[missing action name]</span></div>'
-    thinking_m = _re.search(r'"thinking"\s*:\s*"((?:[^"\\]|\\.)*)"', body)
-    thinking = thinking_m.group(1) if thinking_m else ""
-    note = '<span class="thinking" style="font-size:10px"> [arguments truncated — malformed tool_call]</span>'
-    return thinking, f'<div class="tool-line">⚡ <b>{esc(name_m.group(1))}</b>{note}</div>'
+        return "", '<div class="tool-line err-line">⚡ malformed <b>tool_call</b> <span class="summary-inline">[missing action name]</span></div>'
+    summary_m = _re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', body)
+    if summary_m is None:
+        summary_m = _re.search(r'"thinking"\s*:\s*"((?:[^"\\]|\\.)*)"', body)
+    action_summary = summary_m.group(1) if summary_m else ""
+    note = '<span class="summary-inline"> [arguments truncated — malformed tool_call]</span>'
+    return action_summary, f'<div class="tool-line">⚡ <b>{esc(name_m.group(1))}</b>{note}</div>'
 
 
 def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
-    """Parse an action-protocol response and return (json_thinking, action_html).
+    """Parse an action-protocol response and return (action_summary, action_html).
 
     Returns None if content is not a valid action-protocol response.
     """
@@ -284,7 +286,7 @@ def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
     if not action:
         return None
 
-    json_thinking = (obj.get("thinking") or "").strip()
+    action_summary = (obj.get("summary", obj.get("thinking", "")) or "").strip()
     action_html = f'<div class="tool-line">⚡ <b>{esc(action)}</b></div>'
     args = obj.get("args")
     if args is None:
@@ -310,7 +312,7 @@ def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
                 val_html = esc(str(v))
             rows += f'<tr><th>{esc(k)}</th><td>{val_html}</td></tr>'
         action_html += f'<table>{rows}</table>'
-    return json_thinking, action_html
+    return action_summary, action_html
 
 
 _DIAGNOSTIC_FIELD_KEYS = (
@@ -388,6 +390,14 @@ def _model_content_fallback_html(content: str) -> str:
     return "".join(html_parts)
 
 
+def _internal_thinking_html(text: str) -> str:
+    return f'<div class="thinking internal-thinking"><b>internal thinking</b>: {esc(text)}</div>'
+
+
+def _action_summary_html(text: str) -> str:
+    return f'<div class="action-summary"><b>summary</b>: {esc(text)}</div>'
+
+
 def _model_output_html(e: Dict[str, Any]) -> str:
     """Render a model_output log entry: phase header + thinking + content + verdict."""
     model = e.get("model", "?")
@@ -435,29 +445,29 @@ def _model_output_html(e: Dict[str, Any]) -> str:
             inp_body += f'<div class="out-label">user</div><pre class="pre-input">{esc(inp_user)}</pre>'
         body += f'<details class="model-input"><summary>📄 raw prompt</summary>{inp_body}</details>'
     if thinking:
-        body += f'<div class="thinking">💭 {esc(thinking)}</div>'
+        body += _internal_thinking_html(thinking)
     if content:
         parsed = _render_action_content(content)
         if parsed is not None:
-            json_thinking, action_html = parsed
-            if json_thinking and not thinking:
-                body += f'<div class="thinking">💭 {esc(json_thinking)}</div>'
+            action_summary, action_html = parsed
+            if action_summary:
+                body += _action_summary_html(action_summary)
             body += action_html
         else:
             # Model emitted multiple JSON actions on separate lines
             blocks = [_render_action_content(ln.strip()) for ln in content.splitlines() if ln.strip()]
             blocks = [b for b in blocks if b is not None]
             if blocks:
-                for i, (jt, ah) in enumerate(blocks):
-                    if jt and (i > 0 or not thinking):
-                        body += f'<div class="thinking">💭 {esc(jt)}</div>'
+                for action_summary, ah in blocks:
+                    if action_summary:
+                        body += _action_summary_html(action_summary)
                     body += ah
             else:
                 fallback = _action_from_broken_tool_call(content)
                 if fallback is not None:
-                    jt, ah = fallback
-                    if jt and not thinking:
-                        body += f'<div class="thinking">💭 {esc(jt)}</div>'
+                    action_summary, ah = fallback
+                    if action_summary:
+                        body += _action_summary_html(action_summary)
                     body += ah
                 else:
                     body += _model_content_fallback_html(content)
@@ -597,7 +607,8 @@ def _log_entry_html(e: Dict[str, Any], cycle_starts: Optional[Dict[str, str]] = 
     # Live streaming chunks — only present during WS live view, not in static HTML
     if e.get("type") == "model_stream_chunk":
         cls = "thinking" if e.get("kind") == "thinking" else "content"
-        return f'<span class="evt {cls}">{esc(e.get("text"))}</span>'
+        label = "internal thinking: " if e.get("kind") == "thinking" else ""
+        return f'<span class="evt {cls}">{esc(label)}{esc(e.get("text"))}</span>'
 
     return ""
 
@@ -1252,6 +1263,9 @@ _PAGE = """<!doctype html>
  .score-pos{{color:#a6e3a1}} .score-neg{{color:#f38ba8}}
  /* thinking */
  .thinking{{color:#9399b2;border-left:2px solid #313244;padding:2px 8px;margin:2px 0;white-space:pre-wrap}}
+ .internal-thinking b{{color:#cba6f7}}
+ .action-summary{{color:#f9e2af;border-left:2px solid #fab387;padding:2px 8px;margin:2px 0;white-space:pre-wrap}}
+ .summary-inline{{color:#f9e2af;font-size:10px}}
  /* prompt input & context */
  .model-input summary{{color:#6c7086;font-size:11px}} .model-input{{margin:2px 0 4px}}
  .pre-input{{background:#0d1117;border-radius:4px;padding:6px 8px;margin:2px 0 4px;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#6c7086}}

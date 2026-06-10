@@ -1,11 +1,13 @@
 import json
 import socket
 import time
+from io import StringIO
 from pathlib import Path
 
 from planfoldr.model import StubModel
 from planfoldr.orchestrator import run_scenario
 from planfoldr.visibility.events import SLICES, VisibilityState
+from planfoldr.visibility.terminal import TerminalStream
 from planfoldr.visibility.web import render_state_view_html, render_stream_log_html
 from planfoldr.visibility.ws import accept_key, encode_text_frame, read_frame, WebSocketServer
 
@@ -66,15 +68,49 @@ def test_stream_log_renders_entries_and_goal_header():
 
 
 def test_stream_log_renders_tool_call_envelope_as_action_block():
-    content = '<tool_call>{"name":"file_edit","arguments":{"path":"demo.txt","content":"ok\\n"},"thinking":"write demo"}</tool_call>'
+    content = '<tool_call>{"name":"file_edit","arguments":{"path":"demo.txt","content":"ok\\n"},"summary":"write demo"}</tool_call>'
     snap = {"scenario": {"name": "demo", "goal": "render tool calls"}, "status": "done",
             "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
                      "content": content, "thinking": "", "tokens": 12}]}
     html = render_stream_log_html(embedded=snap)
     assert "<b>file_edit</b>" in html
     assert "demo.txt" in html
+    assert "<b>summary</b>: write demo" in html
     assert "write demo" in html
     assert "&lt;tool_call&gt;" not in html
+
+
+def test_stream_log_labels_internal_thinking_and_action_summary_separately():
+    content = '<tool_call>{"name":"bash","arguments":{"cmd":"pytest -q"},"summary":"run focused tests"}</tool_call>'
+    snap = {"scenario": {"name": "demo", "goal": "separate thinking"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
+                     "content": content, "thinking": "provider chain of thought preview", "tokens": 12}]}
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "<b>internal thinking</b>: provider chain of thought preview" in page
+    assert "<b>summary</b>: run focused tests" in page
+    assert page.index("<b>internal thinking</b>") < page.index("<b>summary</b>")
+
+
+def test_visibility_state_preserves_live_thinking_preview():
+    s = VisibilityState()
+    feed(s, "cycle.started", ticket_id="dev-1", cycle_id="c1", model="m", role="developer")
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "thinking", "text": "considering plan"})
+    s.ingest({"event": "model_stream_chunk", "cycle_id": "c1", "ticket_id": "dev-1",
+              "phase": "changes", "kind": "content", "text": "<tool_call>"})
+    snap = s.snapshot()
+    assert snap["cycles"]["c1"]["live_thinking"] == "considering plan"
+    assert snap["cycles"]["c1"]["live"] == "<tool_call>"
+
+
+def test_terminal_stream_renders_thinking_chunks_live():
+    out = StringIO()
+    terminal = TerminalStream(out=out)
+    terminal.sink({"event": "model_stream_chunk", "kind": "thinking", "text": "live thought"})
+    terminal.sink({"event": "model_stream_chunk", "kind": "content", "text": "final content"})
+    rendered = out.getvalue()
+    assert "💭 live thought" in rendered
+    assert "📤 final content" in rendered
 
 
 def test_stream_log_renders_malformed_tool_call_without_raw_dump():
