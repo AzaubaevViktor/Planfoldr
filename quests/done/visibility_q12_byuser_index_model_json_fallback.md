@@ -3,7 +3,7 @@ File name: `visibility_q12_byuser_index_model_json_fallback.md`
 
 ## Status
 
-Current status: active
+Current status: completed
 Blocked by: visibility_q10b_byuser_report_hardening
 Description: `index.html` can still show raw model output when `_model_output_html` cannot parse
 the content into an action block.
@@ -73,3 +73,22 @@ tool name, or text without dumping raw JSON at the user.
 
 - Found in `src/planfoldr/visibility/web.py::_model_output_html`, fallback branch that currently
   appends `<pre class="model-content">{esc(content)}</pre>`.
+- Implemented `_model_content_fallback_html` in `src/planfoldr/visibility/web.py` so the final
+  model-output fallback now renders action-like JSON as a labelled `unparsed model action`
+  diagnostic block and plain non-action model text as prose.
+- Diagnostic extraction now handles parsed unknown envelopes and malformed/partial JSON by pulling
+  visible fields such as `action`, `tool_name`, `summary`, `text`, and `arguments` without dumping
+  the raw JSON object in the default Streaming Log view.
+- Added focused coverage in `tests/test_visibility.py`:
+  `test_stream_log_renders_malformed_model_json_as_diagnostic_not_raw_dump`,
+  `test_stream_log_renders_unknown_model_json_envelope_as_diagnostic`, and
+  `test_stream_log_renders_plain_model_text_as_prose`.
+- Verification evidence:
+  `.venv/bin/python -m pytest tests/test_visibility.py -q` -> 17 passed.
+- Generated and inspected
+  `runs/2026-06-10_test_run_visibility_q12/visibility/index.html`; the visible page contains
+  `unparsed model action`, extracted `action/summary/text` and `tool_name/arguments` rows, and a
+  `model-prose` block for plain text. The raw source content remains only in the embedded
+  `__SNAPSHOT__` script data, not in the default visible log.
+- Full suite verification:
+  `.venv/bin/python -m pytest -q` -> 117 passed, 1 skipped.

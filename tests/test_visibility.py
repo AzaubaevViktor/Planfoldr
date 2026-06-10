@@ -18,6 +18,10 @@ def feed(state, et, *, ticket_id=None, cycle_id=None, **payload):
                   "payload": payload, "seq": 1, "timestamp": "t"})
 
 
+def visible_page(html: str) -> str:
+    return html.split("<script>window.__SNAPSHOT__", 1)[0]
+
+
 def test_state_slices_populated_from_events():
     s = VisibilityState()
     feed(s, "scenario.started", scenario="demo", goal="do it")
@@ -82,6 +86,47 @@ def test_stream_log_renders_malformed_tool_call_without_raw_dump():
     assert "<b>bash</b>" in html
     assert "malformed tool_call" in html
     assert "&lt;tool_call&gt;" not in html
+
+
+def test_stream_log_renders_malformed_model_json_as_diagnostic_not_raw_dump():
+    content = '{"action":"bash","summary":"run tests","text":"pytest says "bad""'
+    snap = {"scenario": {"name": "demo", "goal": "render malformed json"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
+                     "content": content, "thinking": "", "tokens": 12}]}
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "unparsed model action" in page
+    assert "<th>action</th><td>bash</td>" in page
+    assert "<th>summary</th><td>run tests</td>" in page
+    assert "<th>text</th><td>pytest says </td>" in page
+    assert '<pre class="model-content">' not in page
+    assert "{&quot;action&quot;" not in page
+
+
+def test_stream_log_renders_unknown_model_json_envelope_as_diagnostic():
+    content = '{"summary":"cannot continue","tool_name":"bash","text":"Need pytest output","arguments":{"cmd":"pytest -q"}}'
+    snap = {"scenario": {"name": "demo", "goal": "render unknown json"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "changes", "model": "stub",
+                     "content": content, "thinking": "", "tokens": 12}]}
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert "unparsed model action" in page
+    assert "<th>summary</th><td>cannot continue</td>" in page
+    assert "<th>tool_name</th><td>bash</td>" in page
+    assert "<th>text</th><td>Need pytest output</td>" in page
+    assert "cmd" in page and "pytest -q" in page
+    assert '<pre class="model-content">' not in page
+    assert "{&quot;summary&quot;" not in page
+
+
+def test_stream_log_renders_plain_model_text_as_prose():
+    content = "I inspected the workspace and need one more command."
+    snap = {"scenario": {"name": "demo", "goal": "render prose"}, "status": "done",
+            "log": [{"type": "model_output", "cycle_id": "c1", "phase": "context_exploration",
+                     "model": "stub", "content": content, "thinking": "", "tokens": 8}]}
+    page = visible_page(render_stream_log_html(embedded=snap))
+    assert 'class="model-prose"' in page
+    assert content in page
+    assert "unparsed model action" not in page
+    assert '<pre class="model-content">' not in page
 
 
 def test_tickets_page_shows_comments_history_and_evidence():

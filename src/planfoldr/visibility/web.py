@@ -258,22 +258,6 @@ def _try_parse_action_obj(content: str) -> Optional[dict]:
     return _try_parse_json(content)
 
 
-def _action_from_broken_json(s: str) -> Optional[Tuple[str, str]]:
-    """Regex fallback when JSON is malformed (e.g. unescaped quotes in args).
-
-    Extracts at least the action name and thinking so the block is not a raw dump.
-    """
-    s = _strip_think_tags(s)
-    action_m = _re.search(r'"action"\s*:\s*"([^"]+)"', s)
-    if not action_m:
-        return None
-    action = action_m.group(1)
-    thinking_m = _re.search(r'"thinking"\s*:\s*"((?:[^"\\]|\\.)*)"', s)
-    thinking = thinking_m.group(1) if thinking_m else ""
-    note = '<span class="thinking" style="font-size:10px"> [args truncated — malformed JSON]</span>'
-    return thinking, f'<div class="tool-line">⚡ <b>{esc(action)}</b>{note}</div>'
-
-
 def _action_from_broken_tool_call(s: str) -> Optional[Tuple[str, str]]:
     body = _tool_call_body(s)
     if body is None:
@@ -327,6 +311,81 @@ def _render_action_content(content: str) -> Optional[Tuple[str, str]]:
             rows += f'<tr><th>{esc(k)}</th><td>{val_html}</td></tr>'
         action_html += f'<table>{rows}</table>'
     return json_thinking, action_html
+
+
+_DIAGNOSTIC_FIELD_KEYS = (
+    "action", "tool", "tool_name", "name", "summary", "text", "content", "message", "reason"
+)
+
+
+def _extract_model_diagnostic_fields(content: str) -> Dict[str, Any]:
+    """Best-effort field extraction for unparsed model-action output, without raw dumps."""
+    fields: Dict[str, Any] = {}
+    body = _tool_call_body(content)
+    source = body if body is not None else _strip_think_tags(content)
+    obj = _try_parse_json(source)
+    if isinstance(obj, dict):
+        function = obj.get("function") if isinstance(obj.get("function"), dict) else {}
+        for key in _DIAGNOSTIC_FIELD_KEYS:
+            value = obj.get(key)
+            if value not in (None, "", [], {}):
+                fields[key] = value
+        function_name = function.get("name")
+        if function_name and "function.name" not in fields:
+            fields["function.name"] = function_name
+        args = obj.get("args")
+        if args is None:
+            args = obj.get("arguments", obj.get("parameters", function.get("arguments")))
+        if args not in (None, "", [], {}):
+            fields["arguments"] = args
+        return fields
+
+    for key in _DIAGNOSTIC_FIELD_KEYS:
+        match = _re.search(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"', source)
+        if match:
+            try:
+                value = json.loads(f'"{match.group(1)}"')
+            except Exception:
+                value = match.group(1)
+            if value:
+                fields[key] = value
+
+    function_name = _re.search(r'"function"\s*:\s*\{[^{}]*"name"\s*:\s*"([^"]+)"', source)
+    if function_name:
+        fields["function.name"] = function_name.group(1)
+    return fields
+
+
+def _looks_like_model_action(content: str) -> bool:
+    stripped = _strip_think_tags(content)
+    if not stripped:
+        return False
+    if _tool_call_body(stripped) is not None or "<tool_call" in stripped:
+        return True
+    if stripped[0] in "{[":
+        return True
+    return any(f'"{key}"' in stripped for key in _DIAGNOSTIC_FIELD_KEYS)
+
+
+def _model_content_fallback_html(content: str) -> str:
+    """Render non-action model output without exposing raw JSON as the primary response."""
+    if not _looks_like_model_action(content):
+        return f'<div class="model-prose">{esc(content)}</div>'
+
+    fields = _extract_model_diagnostic_fields(content)
+    note = "could not parse this as a valid action-protocol response"
+    html_parts = [
+        '<div class="tool-line err-line">⚠ unparsed model action '
+        f'<span class="thinking" style="font-size:10px">[{esc(note)}]</span></div>'
+    ]
+    if fields:
+        rows = ""
+        for key, value in fields.items():
+            rows += f'<tr><th>{esc(key)}</th><td>{_fmt_value(value)}</td></tr>'
+        html_parts.append(f'<table class="model-diagnostic">{rows}</table>')
+    else:
+        html_parts.append('<div class="evt small">No action, summary, tool name, or text fields could be extracted.</div>')
+    return "".join(html_parts)
 
 
 def _model_output_html(e: Dict[str, Any]) -> str:
@@ -394,16 +453,14 @@ def _model_output_html(e: Dict[str, Any]) -> str:
                         body += f'<div class="thinking">💭 {esc(jt)}</div>'
                     body += ah
             else:
-                fallback = _action_from_broken_json(content)
-                if fallback is None:
-                    fallback = _action_from_broken_tool_call(content)
+                fallback = _action_from_broken_tool_call(content)
                 if fallback is not None:
                     jt, ah = fallback
                     if jt and not thinking:
                         body += f'<div class="thinking">💭 {esc(jt)}</div>'
                     body += ah
                 else:
-                    body += f'<pre class="model-content">{esc(content)}</pre>'
+                    body += _model_content_fallback_html(content)
 
     # For model_verification: parse and display the verdict prominently
     if phase == "model_verification" and content:
@@ -1185,6 +1242,8 @@ _PAGE = """<!doctype html>
  .pre-out,.pre-err,.pre-file,.cmd-full,.model-content{{background:#0d1117;border-radius:4px;padding:6px 8px;margin:2px 0 4px;white-space:pre-wrap;word-break:break-all;font-size:12px}}
  .pre-err{{color:#f38ba8}} .cmd-full{{color:#94e2d5}}
  .cmd-inline{{color:#94e2d5;font-size:12px}} .model-content{{color:#cdd6f4}}
+ .model-prose{{border-left:2px solid #45475a;padding:2px 8px;margin:2px 0;white-space:pre-wrap;color:#cdd6f4}}
+ .model-diagnostic th{{width:1%;white-space:nowrap}}
  .out-label{{font-size:11px;color:#9399b2;margin-top:4px}}
  .err-label{{color:#f38ba8}}
  /* diff stats */
