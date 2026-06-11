@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,17 +21,28 @@ def _build_sink(mode: str):
 
 def cmd_run(args: argparse.Namespace) -> int:
     scenario = load_scenario(args.scenario)
-    if args.model or args.provider:
+    if args.model or args.provider or args.extra_model:
+        primary_name = args.model or scenario.model.name
+        primary_provider = args.provider or scenario.model.provider
+        extra_models = list(scenario.extra_models)
+        for name in args.extra_model or []:
+            extra_models.append(ModelSettings(
+                provider=primary_provider,
+                name=name,
+                parameter_count=_infer_parameter_count(name, scenario.model.parameter_count),
+            ))
         scenario = Scenario(
             name=scenario.name, goal_text=scenario.goal_text, budget=scenario.budget,
             accesses=scenario.accesses, verification_commands=scenario.verification_commands,
             verification_criteria=scenario.verification_criteria, constraints=scenario.constraints,
             model=ModelSettings(
-                provider=args.provider or scenario.model.provider,
-            name=args.model or scenario.model.name,
-            parameter_count=scenario.model.parameter_count,
-            cost_per_token=scenario.model.cost_per_token, options=scenario.model.options),
-            extra_models=scenario.extra_models,
+                provider=primary_provider,
+                name=primary_name,
+                parameter_count=_infer_parameter_count(primary_name, scenario.model.parameter_count),
+                cost_per_token=scenario.model.cost_per_token,
+                options=scenario.model.options,
+            ),
+            extra_models=extra_models,
         )
     from planfoldr.orchestrator import Orchestrator
     web = None
@@ -53,6 +65,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.status == "done" else 1
 
 
+def _infer_parameter_count(model_name: str, fallback: float) -> float:
+    match = re.search(r"(?i)(\d+(?:\.\d+)?)\s*b\b", model_name)
+    if not match:
+        return fallback
+    return float(match.group(1)) * 1e9
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="planfoldr", description="Phase 3/4 dynamic orchestration runtime")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -60,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("scenario", help="path to scenario.yaml")
     run.add_argument("--model", default=None, help="override the model name")
     run.add_argument("--provider", default=None, choices=["ollama", "stub"], help="override the provider")
+    run.add_argument("--extra-model", action="append", default=[],
+                     help="add an extra candidate model; repeat for multiple worker models")
     run.add_argument("--runs-dir", default="runs")
     run.add_argument("--run-id", default=None)
     run.add_argument("--max-cycles", type=int, default=40)
