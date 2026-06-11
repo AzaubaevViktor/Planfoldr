@@ -48,6 +48,10 @@ class ToolContext:
     def roots(self) -> List[Path]:
         return self.allowed_paths or [self.workspace]
 
+    @property
+    def role_id(self) -> str:
+        return self.role.id if self.role is not None else "*"
+
 
 def safe_path(ctx: ToolContext, path: str) -> Path:
     """Resolve `path` against the workspace and ensure it stays within an allowed root."""
@@ -227,37 +231,22 @@ def handle_write_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, An
         raise ToolError("no knowledge base in this context")
     section = args["section"]
     if section not in ctx.knowledge_base.sections:
-        ctx.knowledge_base.create_section(section, write_roles={ctx.role.id if ctx.role else "*"})
+        ctx.knowledge_base.create_section(section, write_roles={ctx.role_id})
     if args.get("patch"):
-        existing = ctx.knowledge_base.read(section, role=ctx.role.id if ctx.role else "*") or ""
+        existing = ctx.knowledge_base.read(section, role=ctx.role_id) or ""
         content = apply_unified_patch(existing, args["patch"])
     else:
         content = str(args.get("content", ""))
-    version = ctx.knowledge_base.write(section, content, role=ctx.role.id if ctx.role else "*")
+    version = ctx.knowledge_base.write(section, content, role=ctx.role_id)
     return {"section": section, "version": version}
 
 
 def handle_read_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
     if ctx.knowledge_base is None:
         raise ToolError("no knowledge base in this context")
-    content = ctx.knowledge_base.read(args["section"], role=ctx.role.id if ctx.role else "*")
+    content = ctx.knowledge_base.read(args["section"], role=ctx.role_id)
     return {"section": args["section"], "content": content}
 
-
-def handle_update_context(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
-    """Apply a unified-diff patch to an existing KB section; never replaces the full content."""
-    if ctx.knowledge_base is None:
-        raise ToolError("no knowledge base in this context")
-    patch_text = args.get("patch")
-    if not patch_text:
-        raise ToolError("update_context requires 'patch'")
-    section = args["section"]
-    if section not in ctx.knowledge_base.sections:
-        ctx.knowledge_base.create_section(section, write_roles={ctx.role.id if ctx.role else "*"})
-    existing = ctx.knowledge_base.read(section, role=ctx.role.id if ctx.role else "*") or ""
-    content = apply_unified_patch(existing, patch_text)
-    version = ctx.knowledge_base.write(section, content, role=ctx.role.id if ctx.role else "*")
-    return {"section": section, "version": version}
 
 
 def handle_comment(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
@@ -287,7 +276,7 @@ DEFAULT_HANDLERS = {
     "update_ticket": ("base", handle_update_ticket),
     "comment": ("base", handle_comment),
     "write_context": ("base", handle_write_context),
-    "update_context": ("base", handle_update_context),
+    "update_context": ("base", handle_write_context),  # alias: write_context with patch= is the canonical path
     "read_context": ("base", handle_read_context),
     "request_decision": ("base", handle_request_decision),
     "request_context": ("base", handle_request_decision),

@@ -157,11 +157,15 @@ class Cycle:
             on_request_decision=on_request_decision, on_summon=on_summon,
         )
 
+    @property
+    def _role_id(self) -> str:
+        return getattr(self.role, "id", "executor")
+
     # -- public ---------------------------------------------------------------
     def run(self) -> CycleResult:
         self.audit.emit(
             EventType.CYCLE_STARTED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
-            role=getattr(self.role, "id", None), model=self.model_config.id,
+            role=self._role_id or None, model=self.model_config.id,
             parent_cycle_id=self.parent_cycle_id, type=self.ticket.type,
         )
         self.ticket.record_attempt()
@@ -235,7 +239,7 @@ class Cycle:
             # Record the command as a traceable event (who/when/cmd/exit) for Visibility.
             self.audit.emit(
                 EventType.TOOL_INVOKED, ticket_id=self.ticket.id, cycle_id=self.execution_id,
-                actor=getattr(self.role, "id", "verifier"), tool="command_verification",
+                actor=self._role_id, tool="command_verification",
                 scope="command_verification", args={"cmd": check.spec},
                 result={"exit_code": result["exit_code"], "status": result["status"],
                         "stdout": (result.get("stdout") or "")[:2000],
@@ -317,7 +321,7 @@ class Cycle:
                 continue
             try:
                 result = self.toolset.invoke(
-                    action.action, audit=self.audit, actor=getattr(self.role, "id", "model"),
+                    action.action, audit=self.audit, actor=self._role_id,
                     ticket_id=self.ticket.id, cycle_id=self.execution_id, args=action.args, ctx=self._tool_ctx,
                 )
             except (ToolDenied, Exception) as exc:  # noqa: BLE001 -- surface tool errors back to the model
@@ -493,15 +497,15 @@ class Cycle:
             reason = "budget exceeded; soft stop"
         elif passed:
             proof = verdict.get("reason") or "all mandatory checks passed"
-            self.ticket.transition(Status.DONE, actor=getattr(self.role, "id", "executor"), audit=self.audit, proof=proof, model=self.model_config.id)
+            self.ticket.transition(Status.DONE, actor=self._role_id, audit=self.audit, proof=proof, model=self.model_config.id)
             status = Status.DONE
             reason = None
         elif self.ticket.exhausted_attempts():
-            self.ticket.transition(Status.FAILED, actor=getattr(self.role, "id", "executor"), audit=self.audit, model=self.model_config.id)
+            self.ticket.transition(Status.FAILED, actor=self._role_id, audit=self.audit, model=self.model_config.id)
             status = Status.FAILED
             reason = "verification failed; attempts exhausted"
         else:
-            self.ticket.transition(Status.NEEDS_REVIEW, actor=getattr(self.role, "id", "executor"), audit=self.audit, model=self.model_config.id)
+            self.ticket.transition(Status.NEEDS_REVIEW, actor=self._role_id, audit=self.audit, model=self.model_config.id)
             status = Status.NEEDS_REVIEW
             reason = "verification not passed"
 
@@ -510,7 +514,7 @@ class Cycle:
             # the quality signal; cmd failures may be environmental.
             score_passed = model_ok and not self._budget_exceeded
             self.score_system.record(
-                self.model_config.id, role=getattr(self.role, "id", "executor"), task_type=self.ticket.type,
+                self.model_config.id, role=self._role_id, task_type=self.ticket.type,
                 passed=score_passed, verified=(score_passed and ran_model),
                 difficulty=self.ticket.difficulty,
                 tokens_used=self.budget.usage.get(Metric.TOKENS, 0),
