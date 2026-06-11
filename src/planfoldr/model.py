@@ -215,6 +215,7 @@ class OllamaModel(ModelAdapter):
         )
         content_parts: List[str] = []
         thinking_parts: List[str] = []
+        content_buf = ""
         prompt_tokens = 0
         generated_tokens = 0
         provider_seconds = 0.0
@@ -234,7 +235,12 @@ class OllamaModel(ModelAdapter):
                         _emit(progress, "model_stream_chunk", kind="thinking", text=thinking)
                     if content:
                         content_parts.append(content)
+                        content_buf += content
                         _emit(progress, "model_stream_chunk", kind="content", text=content)
+                        if "</tool_call>" in content_buf:
+                            cut = content_buf.index("</tool_call>") + len("</tool_call>")
+                            content_parts = [content_buf[:cut]]
+                            break
                     if chunk.get("done"):
                         prompt_tokens = int(chunk.get("prompt_eval_count") or 0)
                         generated_tokens = int(chunk.get("eval_count") or 0)

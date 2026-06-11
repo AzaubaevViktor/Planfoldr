@@ -71,6 +71,7 @@ _ACTION_REFERENCE = {
     "request_context": '<tool_call>{"name":"request_context","arguments":{"question":"<ask parent>"}}</tool_call>',
     "verify": '<tool_call>{"name":"verify","arguments":{"passed":true,"reason":"<why the evidence proves the goal>"}}</tool_call>',
     "plan": '<tool_call>{"name":"plan","arguments":{"notes":"<short plan>"}}</tool_call>',
+    "get_progress": '<tool_call>{"name":"get_progress","arguments":{}}</tool_call> — show what actions have been taken so far this cycle (files created/modified, commands run)',
     "finish": '<tool_call>{"name":"finish","arguments":{}}</tool_call> — use when the GOAL is achieved',
 }
 
@@ -216,7 +217,7 @@ class Cycle:
         self._action_loop(
             CHANGES,
             allowed={"file_edit", "bash", "create_ticket", "write_context",
-                     "read_context", "request_decision", "finish"},
+                     "read_context", "request_decision", "get_progress", "finish"},
             max_iterations=self.max_iterations,
         )
 
@@ -263,7 +264,7 @@ class Cycle:
 
     # -- action loop ----------------------------------------------------------
     # Actions handled by the cycle itself rather than by a tool in the role's toolset.
-    _NON_TOOL_ACTIONS = {"finish", "plan", "verify", "note"}
+    _NON_TOOL_ACTIONS = {"finish", "plan", "verify", "note", "get_progress"}
 
     def _effective_allowed(self, allowed: set) -> set:
         """Only offer actions the role can actually perform: phase actions ∩ role toolset (plus the
@@ -308,6 +309,9 @@ class Cycle:
                 self.local_memory.setdefault("plan", []).append(action.args.get("notes", action.thinking))
                 last_result = {"ok": True}
                 continue
+            if action.action == "get_progress":
+                last_result = {"progress": self._progress_block() or "No actions taken yet this cycle."}
+                continue
             if action.action not in allowed:
                 last_result = {"error": f"action '{action.action}' not allowed in {phase}; allowed: {sorted(allowed)}"}
                 continue
@@ -318,7 +322,12 @@ class Cycle:
                 )
             except (ToolDenied, Exception) as exc:  # noqa: BLE001 -- surface tool errors back to the model
                 result = {"error": str(exc)}
-            self.local_memory["changes_log"].append({"action": action.action, "result": result})
+            log_entry: Dict[str, Any] = {"action": action.action, "result": result}
+            if action.action == "file_edit":
+                log_entry["path"] = action.args.get("path", "")
+            elif action.action == "bash":
+                log_entry["cmd"] = (action.args.get("cmd") or "")[:100]
+            self.local_memory["changes_log"].append(log_entry)
             self._record_tool_evidence(action.action, result)
             self._emit_tool(phase, {"action": action.action, "args": action.args}, result)
             last_result = result
@@ -412,6 +421,26 @@ class Cycle:
         lines += [f"  $ {cmd}" for cmd in cmds]
         return "\n".join(lines) + "\n"
 
+    def _progress_block(self) -> str:
+        log = self.local_memory.get("changes_log", [])
+        if not log:
+            return ""
+        lines = ["Progress so far this cycle:"]
+        for i, entry in enumerate(log, 1):
+            action = entry.get("action", "?")
+            result = entry.get("result") or {}
+            if action == "file_edit":
+                path = entry.get("path") or result.get("path", "?")
+                act = result.get("action", "?")
+                lines.append(f"  {i}. file_edit {path} [{act}]")
+            elif action == "bash":
+                cmd = entry.get("cmd", "?")
+                exit_c = result.get("exit_code", "?")
+                lines.append(f"  {i}. bash `{cmd}` [exit={exit_c}]")
+            else:
+                lines.append(f"  {i}. {action}")
+        return "\n".join(lines) + "\n"
+
     def _changes_user(self, phase: str, allowed: set, last_result: Optional[Dict[str, Any]]) -> str:
         ref = "\n".join(f"- {_ACTION_REFERENCE[a]}" for a in sorted(allowed) if a in _ACTION_REFERENCE)
         constraints = self.ticket.metadata.get("constraints") or []
@@ -439,6 +468,7 @@ class Cycle:
             "Use bash ONLY to run tests or commands. Do not repeat read-only commands. "
             "When ALL acceptance checks pass, respond with finish.\n"
             f"ACTION REFERENCE (choose exactly ONE):\n{ref}\n"
+            f"{self._progress_block()}"
             f"Last tool result: {last_result}\n"
             f"{_PROTOCOL}"
         )
