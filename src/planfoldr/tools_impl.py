@@ -198,7 +198,10 @@ def handle_create_ticket(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, An
         raise ToolError("create_ticket is not wired in this context")
     ticket_id = ctx.on_create_ticket(args)
     ctx.budget.consume(Metric.TICKETS_CREATED, 1)
-    return {"ticket_id": ticket_id, "type": args.get("type"), "title": args.get("title")}
+    return {
+        "ticket_id": ticket_id, "type": args.get("type"), "title": args.get("title"),
+        "goal": args.get("goal", ""), "checks": args.get("checks", []),
+    }
 
 
 def handle_update_ticket(args: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:

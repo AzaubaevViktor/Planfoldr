@@ -483,7 +483,10 @@ class Cycle:
             for i, c in enumerate(self.ticket.checks) if c.kind == "command" and c.required
         )
         model_ok = (not ran_model) or bool(verdict.get("passed"))
-        passed = cmd_ok and model_ok and not self._budget_exceeded
+        research_gate_fail = self._research_impl_gate()
+        if research_gate_fail:
+            self.ticket.add_evidence(check_index=None, status="failure", proof=f"[gate] {research_gate_fail}")
+        passed = cmd_ok and model_ok and not research_gate_fail and not self._budget_exceeded
 
         if self._budget_exceeded:
             status = "budget_exceeded"
@@ -537,6 +540,12 @@ class Cycle:
             ticket_type = result.get("type") or "ticket"
             title = result.get("title") or ticket_id
             self.local_memory.setdefault("spawned_ticket_types", {})[ticket_id] = ticket_type
+            self.local_memory.setdefault("spawned_tickets_meta", {})[ticket_id] = {
+                "type": ticket_type,
+                "title": title,
+                "has_goal": bool((result.get("goal") or "").strip()),
+                "has_checks": bool(result.get("checks")),
+            }
             self.ticket.add_evidence(
                 check_index=None,
                 status="success",
@@ -548,6 +557,21 @@ class Cycle:
                 status="success",
                 proof=f"wrote context section {result['section']} version {result.get('version')}",
             )
+
+    _IMPL_TYPES = {"code", "tests", "fix", "documentation"}
+
+    def _research_impl_gate(self) -> Optional[str]:
+        """Deterministic check for research tickets: an implementation ticket with a non-empty
+        goal must have been spawned. Returns None if OK, or a failure reason string."""
+        if self.ticket.type != "research":
+            return None
+        meta = self.local_memory.get("spawned_tickets_meta") or {}
+        impl = [m for m in meta.values() if m.get("type") in self._IMPL_TYPES]
+        if not impl:
+            return "no implementation ticket spawned (need type: code/tests/fix/documentation)"
+        if not any(m.get("has_goal") for m in impl):
+            return "spawned implementation ticket has an empty goal; embed result image, spec and test plan in the goal"
+        return None
 
     def _research_needs_implementation_ticket(self, phase: str) -> bool:
         if self.ticket.type != "research" or phase != CHANGES:
