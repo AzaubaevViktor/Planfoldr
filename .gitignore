@@ -72,6 +72,15 @@ venv.bak/
 
 # Planfoldr generated artifacts
 runs/
+ollama_speedtest/state.json
+ollama_speedtest/state.jsonl
+ollama_speedtest/results.jsonl
+ollama_speedtest/report.md
+ollama_speedtest/smoke_state.json
+ollama_speedtest/smoke_state.jsonl
+ollama_speedtest/smoke_results.jsonl
+ollama_speedtest/smoke_report.md
+ollama_speedtest/run/
 
 # macOS
 .DS_Store

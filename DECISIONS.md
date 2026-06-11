@@ -379,3 +379,18 @@ Handshake + text frames + ping/close реализованы только на st
 Если человек (или командное доказательство) помечает проверку как пройденную, но собственная модельная верификация не согласна, тикет закрывается как `done` и применяется штраф за ложную верификацию.
 **Почему**: `gemma4` пишет правильный код, но её self-checks багованы — шлюз верификации блокировал правильную работу. Доказательства из команд надёжнее, чем самооценка модели.
 **Где**: `cycle.py::_phase_model_verification`.
+
+### Ollama speedtest живёт отдельным автономным инструментом
+Скрипт `ollama_speedtest/ollama_speedtest.py` не импортирует runtime Planfoldr: он ходит напрямую в Ollama HTTP API, строит осмысленные промпты из root `.md` файлов и затем `src/**/*.py`, пишет инкрементальный `state.jsonl`, `results.jsonl`, `report.md` и per-run лог `ollama_speedtest/run/<date>-<time>-<uid>.jsonl`, а при перезапуске пропускает уже терминальные проверки. В отчёте и stdout показываются фактические prompt tokens из Ollama, `prompt_eval_seconds`, token/sec, chars/sec генерации, warmup seconds и peak/avg RSS процесса Ollama/`llama-server` в GB.
+**Почему**: бенчмарк должен продолжать работу после падения/остановки, не зависеть от текущей разработки runtime, не ронять весь прогон из-за одной модели, показывать скорость как в токенах, так и в символах, отделять загрузочный warmup от первого измерения и сохранять полный prompt/stream для диагностики.
+**Где**: `ollama_speedtest/ollama_speedtest.py`, `tests/test_ollama_speedtest.py`.
+
+### Prompt speedtest cache-bust меняет порядок файлов и срезы контента
+Каждая проверка speedtest получает `prompt_variant`: digest этого variant стоит в самом начале промпта, внутри группы root `.md` и группы `src/**/*.py` порядок файлов ротируется/реверсится, а частичные блоки берутся с variant-зависимых offsets. Root `.md` всё равно идут раньше `src/**/*.py`.
+**Почему**: одинаковые префиксы и одинаковый порядок файлов могут попадать в KV cache Ollama и искажать time-to-first-token и prompt eval speed; разные первые токены и разные, но проектно осмысленные сэмплы уменьшают этот эффект.
+**Где**: `ollama_speedtest/ollama_speedtest.py::build_prompt`.
+
+### Недостаточный context window в speedtest — терминальный skip, а не ошибка прогона
+Если advertised context window модели меньше оценённой потребности проверки, конкретный размер промпта помечается `skipped`. Если окно неизвестно, проверка пробуется; context-related ошибка Ollama тоже превращается в `skipped`.
+**Почему**: задача сравнивает модели на разных размерах контекста, и малое окно — ожидаемая характеристика модели, а не поломка инструмента.
+**Где**: `ollama_speedtest/ollama_speedtest.py::run_probe`.
